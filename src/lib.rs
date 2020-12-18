@@ -13,7 +13,7 @@ const TAU: f32 = std::f32::consts::TAU;
 
 struct Revisit {
     // Whether or not the VST should play sound
-    note: Option<Note>,
+    notes: Vec<Note>,
     sample_rate: f32,
     // What time the VST is at, in samples
     angle: f32,
@@ -64,16 +64,15 @@ impl Plugin for Revisit {
             angle = self.angle;
             for sample in channel {
                 let volume = 0.25;
-                let signal = match self.note {
-                    Some(note) => {
-                        let angular_frequency = Note::to_freq_f32(note) / self.sample_rate;
-                        // Constrain the angle between 0 and 1, reduces roundoff error
-                        angle = (angle + angular_frequency) % 1.0;
+                let mut signal = 0.0;
 
-                        (angle * TAU).sin()
-                    },
-                    None => 0.0,
-                };
+                // Constrain the angle between 0 and 1, reduces roundoff error
+                let angular_frequency = 1.0 / self.sample_rate;
+                angle = (angle + angular_frequency) % 1.0;
+
+                for note in &self.notes {
+                    signal += (Note::to_freq_f32(*note) * angle * TAU).sin()
+                }
                 *sample = signal * volume;
             }
         }
@@ -88,10 +87,12 @@ impl Plugin for Revisit {
                     if let Ok(message) = message {
                         match message {
                             MidiMessage::NoteOn(_, note, vel) => {
-                                self.note = Some(note);
+                                self.notes.push(note);
                             }
                             MidiMessage::NoteOff(_, note, vel) => {
-                                self.note = None;
+                                if let Some(i) = self.notes.iter().position(|x| x == &note) {
+                                    self.notes.remove(i);
+                                }
                             }
                             _ => {
                                 println!("Unrecognized MidiMessage! {:?}", message)
@@ -111,12 +112,13 @@ impl Plugin for Revisit {
 impl Default for Revisit {
     fn default() -> Self {
         Revisit {
-            note: None,
+            notes: Vec::with_capacity(16),
             sample_rate: 44100.0,
             angle: 0.0,
         }
     }
 }
+
 
 fn sample_time_to_f32(sample_time: usize, sample_rate: f32) -> f32 {
     sample_time as f32 / sample_rate
