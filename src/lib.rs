@@ -2,14 +2,24 @@
 #[macro_use]
 extern crate vst;
 extern crate rand;
+extern crate wmidi;
 
-use vst::{buffer::AudioBuffer, plugin::{Category, Info, Plugin}};
+use std::convert::TryFrom;
+
+use vst::{api::{Events, Supported}, buffer::{AudioBuffer, Outputs}, plugin::{CanDo, Category, Info, Plugin}};
+use wmidi::{MidiMessage, Note};
 
 #[derive(Default)]
-struct Revisit;
+struct Revisit {
+    play: bool,
+}
 
 // We're implementing a trait `Plugin` that does all the VST-y stuff for us.
 impl Plugin for Revisit {
+    fn init(&mut self) {
+        self.play = false;
+    }
+
     fn get_info(&self) -> Info {
         Info {
             name: "Revisit".to_string(),
@@ -28,12 +38,59 @@ impl Plugin for Revisit {
         }
     }
 
+    fn can_do(&self, can_do: CanDo) -> Supported {
+        match can_do {
+            CanDo::ReceiveMidiEvent => Supported::Yes,
+            _ => Supported::No,
+        }
+    }
+
     fn process(&mut self, buffer: &mut AudioBuffer<f32>) {
         let (_, mut output_buffer) = buffer.split();
+
+        if !self.play {
+            clear_output_buffer(&mut output_buffer);
+            return;
+        }
+
         for channel in output_buffer.into_iter() {
             for sample in channel {
                 *sample = (rand::random::<f32>() - 0.5) * 0.1;
             }
+        }
+    }
+
+    fn process_events(&mut self, events: &Events) {
+        for event in events.events() {
+            match event {
+                vst::event::Event::Midi(event) => {
+                    let message = MidiMessage::try_from(&event.data as &[u8]);
+                    if let Ok(message) = message {
+                        match message {
+                            MidiMessage::NoteOn(_, note, vel) => {
+                                self.play = true;
+                            }
+                            MidiMessage::NoteOff(_, note, vel) => {
+                                self.play = false;
+                            }
+                            _ => {
+                                println!("Unrecognized MidiMessage! {:?}", message)
+                            }
+                        }
+                    }
+                }
+                _ => {
+                    println!("Unrecognized event!")
+                }
+            }
+        }
+    }
+}
+
+fn clear_output_buffer(output: &mut Outputs<f32>) {
+    for channel in output.into_iter() {
+        for sample in channel {
+            *sample = 0.0;
         }
     }
 }
