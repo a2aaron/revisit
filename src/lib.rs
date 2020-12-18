@@ -9,17 +9,17 @@ use std::convert::TryFrom;
 use vst::{api::{Events, Supported}, buffer::{AudioBuffer, Outputs}, plugin::{CanDo, Category, Info, Plugin}};
 use wmidi::{MidiMessage, Note};
 
-#[derive(Default)]
+const TAU: f32 = std::f32::consts::TAU;
+
 struct Revisit {
-    play: bool,
+    // Whether or not the VST should play sound
+    note: Option<Note>,
+    sample_rate: f32,
+    // What time the VST is at, in samples
+    angle: f32,
 }
 
-// We're implementing a trait `Plugin` that does all the VST-y stuff for us.
 impl Plugin for Revisit {
-    fn init(&mut self) {
-        self.play = false;
-    }
-
     fn get_info(&self) -> Info {
         Info {
             name: "Revisit".to_string(),
@@ -45,19 +45,39 @@ impl Plugin for Revisit {
         }
     }
 
+    // Output audio given the current state of the VST
     fn process(&mut self, buffer: &mut AudioBuffer<f32>) {
         let (_, mut output_buffer) = buffer.split();
 
-        if !self.play {
-            clear_output_buffer(&mut output_buffer);
-            return;
-        }
+        // Reset the timer if there isn't any audio being played
+        // This avoids issues with round off errors when dealing with high
+        // float values.
+        // if self.note.is_none() {
+            // self.sample_time = 0;
+        // }
 
+        // Use a seperate time value for each channel
+        // We don't want to use self.time for each channel because we want each
+        // channel to use the same time.
+        let mut angle = self.angle;
         for channel in output_buffer.into_iter() {
+            angle = self.angle;
             for sample in channel {
-                *sample = (rand::random::<f32>() - 0.5) * 0.1;
+                let volume = 0.25;
+                let signal = match self.note {
+                    Some(note) => {
+                        let angular_frequency = Note::to_freq_f32(note) / self.sample_rate;
+                        // Constrain the angle between 0 and 1, reduces roundoff error
+                        angle = (angle + angular_frequency) % 1.0;
+
+                        (angle * TAU).sin()
+                    },
+                    None => 0.0,
+                };
+                *sample = signal * volume;
             }
         }
+        self.angle = angle;
     }
 
     fn process_events(&mut self, events: &Events) {
@@ -68,10 +88,10 @@ impl Plugin for Revisit {
                     if let Ok(message) = message {
                         match message {
                             MidiMessage::NoteOn(_, note, vel) => {
-                                self.play = true;
+                                self.note = Some(note);
                             }
                             MidiMessage::NoteOff(_, note, vel) => {
-                                self.play = false;
+                                self.note = None;
                             }
                             _ => {
                                 println!("Unrecognized MidiMessage! {:?}", message)
@@ -85,6 +105,21 @@ impl Plugin for Revisit {
             }
         }
     }
+}
+
+
+impl Default for Revisit {
+    fn default() -> Self {
+        Revisit {
+            note: None,
+            sample_rate: 44100.0,
+            angle: 0.0,
+        }
+    }
+}
+
+fn sample_time_to_f32(sample_time: usize, sample_rate: f32) -> f32 {
+    sample_time as f32 / sample_rate
 }
 
 fn clear_output_buffer(output: &mut Outputs<f32>) {
