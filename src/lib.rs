@@ -18,13 +18,13 @@ use wmidi::{MidiMessage, Note, U7};
 const TAU: f32 = std::f32::consts::TAU;
 
 // Default values for parameters
-const ATTACK: f32 = 10.0 / 1000.0;
-const DECAY: f32 = 50.0 / 1000.0;
+const ATTACK: f32 = 0.1;
+const DECAY: f32 = 0.2;
 const SUSTAIN: f32 = 0.3;
 const RELEASE: f32 = 0.3;
 const VOLUME: f32 = 0.5;
+const SHAPE: f32 = 0.225; // (triangle)
 const RETRIGGER_TIME: usize = 88; // 88 samples is about 2 miliseconds
-
 #[derive(Debug, Clone, Copy)]
 enum NoteState {
     // The note is being held down
@@ -38,6 +38,40 @@ enum NoteState {
     // Vel is the velocity that the note was (will go down to zero over 10 samples)
     // Notes exit this state after 10 samples.
     Retrigger { time: usize, vel: f32 },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NoteShape {
+    Sine,
+    Square,
+    Sawtooth,
+    Triangle,
+}
+
+impl From<f32> for NoteShape {
+    fn from(x: f32) -> Self {
+        if x < 0.25 {
+            NoteShape::Sine
+        } else if x < 0.5 {
+            NoteShape::Triangle
+        } else if x < 0.75 {
+            NoteShape::Square
+        } else {
+            NoteShape::Sawtooth
+        }
+    }
+}
+
+impl std::fmt::Display for NoteShape {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use NoteShape::*;
+        match self {
+            Sine => write!(f, "Sine"),
+            Square => write!(f, "Square"),
+            Sawtooth => write!(f, "Sawtooth"),
+            Triangle => write!(f, "Triangle"),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -61,24 +95,51 @@ impl Oscillator {
     }
 
     /// Get num_samples worth of samples from the Oscillator
-    fn values(&mut self, num_samples: usize, sample_rate: f32, envelope: Envelope) -> Vec<f32> {
+    fn values(
+        &mut self,
+        num_samples: usize,
+        sample_rate: f32,
+        envelope: Envelope,
+        shape: NoteShape,
+    ) -> Vec<f32> {
         let mut buf = Vec::with_capacity(num_samples);
+
+        // What position through the waveform the oscillator is at.
+        // Ranges from [0.0, 1.0]
         let mut angle = self.angle;
+
+        // The pitch of the note, in hz
         let pitch = Note::to_freq_f32(self.pitch);
         for _ in 0..num_samples {
-            // Get the sine signal
-            let value = (angle * TAU).sin();
+            // Get the raw signal
+            let value = match shape {
+                // See https://www.desmos.com/calculator/dqg8kdvung for visuals
+                NoteShape::Sine => (angle * TAU).sin(),
+                NoteShape::Sawtooth => (angle * 2.0) - 1.0,
+                NoteShape::Square => {
+                    if angle < 0.5 {
+                        -1.0
+                    } else {
+                        1.0
+                    }
+                }
+                NoteShape::Triangle => -2.0 * (2.0 * angle - 1.0).abs() + 1.0,
+            };
+            // Apply volume envelope
             let value = value * self.envelope(sample_rate, envelope);
             buf.push(value);
 
-            // Constrain the angle between 0 and 1, reduces roundoff error
+            // Update the angle. Each sample is 1.0 / sample_rate apart for a
+            // complete waveform. We multiply by the pitch to scale faster.
+            // We also constrain the angle between 0 and 1, as this reduces
+            // roundoff error.
             let angle_delta = pitch / sample_rate;
             angle = (angle + angle_delta) % 1.0;
 
             self.time += 1;
 
             // If it has been 10 samples in the retrigger state, switch back to
-            // the held state.
+            // the held state. This also resets the time.
             if let NoteState::Retrigger {
                 time: retrigger_time,
                 vel: _,
@@ -91,6 +152,9 @@ impl Oscillator {
             }
         }
 
+        // Update the tracked angle. We do it like this instead of adding it all
+        // at once as this reduces the error induced by multiplying the large
+        // number of samples.
         self.angle = angle;
         buf
     }
@@ -129,7 +193,10 @@ impl Oscillator {
     }
 
     /// Computes the envelope multiplier. Time is the number of samples since the
-    /// start of the note.
+    /// start of the note. This depends on the state of the note:
+    /// Held - do normal attack/decay/sustain envelope
+    /// Released - do release envelope, going from the released velocity to zero
+    /// Retrigger - do short envelope from retrigger velocity to zero
     fn full_envelope(
         time: usize,
         note_state: NoteState,
@@ -162,6 +229,7 @@ impl Oscillator {
     }
 }
 
+/// An ADSR envelope.
 #[derive(Debug, Clone, Copy)]
 struct Envelope {
     // In seconds
@@ -194,16 +262,18 @@ impl From<&RevisitParameters> for Envelope {
     }
 }
 
-// The raw parameter values that a host DAW will set and modify.
-// These are unscaled and are always in the [0.0, 1.0] range
+/// The raw parameter values that a host DAW will set and modify.
+/// These are unscaled and are always in the [0.0, 1.0] range
 struct RevisitParameters {
     attack: AtomicFloat,
     decay: AtomicFloat,
     sustain: AtomicFloat,
     release: AtomicFloat,
     volume: AtomicFloat,
+    shape: AtomicFloat,
 }
 
+/// The type of parameter. "Error" is included as a convience type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ParameterType {
     Attack,
@@ -211,6 +281,7 @@ enum ParameterType {
     Sustain,
     Release,
     Volume,
+    Shape,
     Error,
 }
 
@@ -223,6 +294,7 @@ impl From<i32> for ParameterType {
             2 => Sustain,
             3 => Release,
             4 => Volume,
+            5 => Shape,
             _ => Error,
         }
     }
@@ -244,8 +316,8 @@ impl Plugin for Revisit {
             unique_id: 413612,
             version: 1,
             category: Category::Synth,
-            // 5 parameters -- ADSR + Volume
-            parameters: 5,
+            // ADSR + Volume + Note Shape
+            parameters: 6,
             // No audio inputs
             inputs: 0,
             // Two channel audio!
@@ -266,7 +338,8 @@ impl Plugin for Revisit {
     fn process(&mut self, buffer: &mut AudioBuffer<f32>) {
         // Get the relevant parameters
         let envelope = Envelope::from(self.params.as_ref());
-        let volume = self.params.volume.get() * 2.0;
+        let volume = self.params.volume.get() * 0.25;
+        let shape = NoteShape::from(self.params.shape.get());
 
         // remove "dead" notes
         let sample_rate = self.sample_rate;
@@ -280,7 +353,7 @@ impl Plugin for Revisit {
         let mut output: Vec<f32> = (0..num_samples).map(|_| 0.0).collect();
 
         for note in &mut self.notes {
-            let osc_buffer = note.values(num_samples, self.sample_rate, envelope);
+            let osc_buffer = note.values(num_samples, self.sample_rate, envelope, shape);
             output = output
                 .iter()
                 .zip(osc_buffer.iter())
@@ -339,6 +412,7 @@ impl PluginParameters for RevisitParameters {
         match index.into() {
             Attack | Decay | Release => " sec".to_string(),
             Sustain | Volume => "%".to_string(),
+            NoteShape => "".to_string(),
             Error => "".to_string(),
         }
     }
@@ -351,7 +425,8 @@ impl PluginParameters for RevisitParameters {
             Decay => format!("{:.2}", envelope.decay),
             Sustain => format!("{:.2}", envelope.sustain * 100.0),
             Release => format!("{:.2}", envelope.release),
-            Volume => format!("{:.2}", self.volume.get() * 2.0 * 100.0),
+            Volume => format!("{:.2}", self.volume.get() * 100.0),
+            Shape => format!("{}", NoteShape::from(self.shape.get())),
             Error => "".to_string(),
         }
     }
@@ -364,6 +439,7 @@ impl PluginParameters for RevisitParameters {
             Sustain => "Sustain".to_string(),
             Release => "Release".to_string(),
             Volume => "Volume".to_string(),
+            Shape => "Note Shape".to_string(),
             Error => "".to_string(),
         }
     }
@@ -376,6 +452,7 @@ impl PluginParameters for RevisitParameters {
             Sustain => self.sustain.get(),
             Release => self.release.get(),
             Volume => self.volume.get(),
+            Shape => self.shape.get(),
             Error => 0.0,
         }
     }
@@ -388,6 +465,7 @@ impl PluginParameters for RevisitParameters {
             Sustain => self.sustain.set(value),
             Release => self.release.set(value),
             Volume => self.volume.set(value),
+            Shape => self.shape.set(value),
             Error => (),
         }
     }
@@ -412,6 +490,7 @@ impl Default for Revisit {
                 sustain: AtomicFloat::new(SUSTAIN),
                 release: AtomicFloat::new(RELEASE),
                 volume: AtomicFloat::new(VOLUME),
+                shape: AtomicFloat::new(SHAPE),
             }),
         }
     }
