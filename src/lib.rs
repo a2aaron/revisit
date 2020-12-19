@@ -17,10 +17,12 @@ use wmidi::{MidiMessage, Note, U7};
 
 const TAU: f32 = std::f32::consts::TAU;
 
+// Default values for parameters
 const ATTACK: f32 = 10.0 / 1000.0;
 const DECAY: f32 = 50.0 / 1000.0;
 const SUSTAIN: f32 = 0.3;
 const RELEASE: f32 = 0.3;
+const VOLUME: f32 = 0.5;
 const RETRIGGER_TIME: usize = 88; // 88 samples is about 2 miliseconds
 
 #[derive(Debug, Clone, Copy)]
@@ -192,17 +194,44 @@ impl From<&RevisitParameters> for Envelope {
     }
 }
 
+// The raw parameter values that a host DAW will set and modify.
+// These are unscaled and are always in the [0.0, 1.0] range
 struct RevisitParameters {
     attack: AtomicFloat,
     decay: AtomicFloat,
     sustain: AtomicFloat,
     release: AtomicFloat,
+    volume: AtomicFloat,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ParameterType {
+    Attack,
+    Decay,
+    Sustain,
+    Release,
+    Volume,
+    Error,
+}
+
+impl From<i32> for ParameterType {
+    fn from(i: i32) -> Self {
+        use ParameterType::*;
+        match i {
+            0 => Attack,
+            1 => Decay,
+            2 => Sustain,
+            3 => Release,
+            4 => Volume,
+            _ => Error,
+        }
+    }
 }
 
 struct Revisit {
     notes: Vec<Oscillator>,
     sample_rate: f32,
-    envelope: Arc<RevisitParameters>,
+    params: Arc<RevisitParameters>,
 }
 
 impl Plugin for Revisit {
@@ -215,8 +244,8 @@ impl Plugin for Revisit {
             unique_id: 413612,
             version: 1,
             category: Category::Synth,
-            // 4 parameters -- ADSR
-            parameters: 4,
+            // 5 parameters -- ADSR + Volume
+            parameters: 5,
             // No audio inputs
             inputs: 0,
             // Two channel audio!
@@ -235,13 +264,16 @@ impl Plugin for Revisit {
 
     // Output audio given the current state of the VST
     fn process(&mut self, buffer: &mut AudioBuffer<f32>) {
-        let envelope = Envelope::from(self.envelope.as_ref());
+        // Get the relevant parameters
+        let envelope = Envelope::from(self.params.as_ref());
+        let volume = self.params.volume.get() * 2.0;
 
         // remove "dead" notes
         let sample_rate = self.sample_rate;
         self.notes
             .retain(|osc| osc.is_alive(sample_rate, envelope.release));
 
+        // Get sound for each note
         let num_samples = buffer.samples();
         let (_, mut output_buffer) = buffer.split();
 
@@ -256,16 +288,16 @@ impl Plugin for Revisit {
                 .collect();
         }
 
+        // Write sound
         for channel in output_buffer.into_iter() {
             for (i, sample) in channel.iter_mut().enumerate() {
-                let volume = 1.0;
                 *sample = output[i] * volume;
             }
         }
     }
 
     fn process_events(&mut self, events: &Events) {
-        let envelope = Envelope::from(self.envelope.as_ref());
+        let envelope = Envelope::from(self.params.as_ref());
         for event in events.events() {
             match event {
                 vst::event::Event::Midi(event) => {
@@ -273,6 +305,7 @@ impl Plugin for Revisit {
                     if let Ok(message) = message {
                         match message {
                             MidiMessage::NoteOn(_, pitch, vel) => {
+                                // On note on, either add or retrigger the note
                                 if let Some(i) = self.notes.iter().position(|x| x.pitch == pitch) {
                                     self.notes[i].retrigger(self.sample_rate, envelope);
                                 } else {
@@ -280,6 +313,7 @@ impl Plugin for Revisit {
                                 }
                             }
                             MidiMessage::NoteOff(_, pitch, _) => {
+                                // On note off, send note off
                                 if let Some(i) = self.notes.iter().position(|x| x.pitch == pitch) {
                                     self.notes[i].note_off(self.sample_rate, envelope);
                                 }
@@ -293,63 +327,73 @@ impl Plugin for Revisit {
         }
     }
 
+    // Needed so that the host knows what parameters exist
     fn get_parameter_object(&mut self) -> Arc<dyn PluginParameters> {
-        Arc::clone(&self.envelope) as Arc<dyn PluginParameters>
+        Arc::clone(&self.params) as Arc<dyn PluginParameters>
     }
 }
 
 impl PluginParameters for RevisitParameters {
     fn get_parameter_label(&self, index: i32) -> String {
-        match index {
-            0 | 1 | 3 => " sec".to_string(),
-            2 => "%".to_string(),
-            _ => "".to_string(),
+        use ParameterType::*;
+        match index.into() {
+            Attack | Decay | Release => " sec".to_string(),
+            Sustain | Volume => "%".to_string(),
+            Error => "".to_string(),
         }
     }
 
     fn get_parameter_text(&self, index: i32) -> String {
         let envelope = Envelope::from(self);
-        match index {
-            0 => format!("{:.2}", envelope.attack),
-            1 => format!("{:.2}", envelope.decay),
-            2 => format!("{:.2}", envelope.sustain * 100.0),
-            3 => format!("{:.2}", envelope.release),
-            _ => "".to_string(),
+        use ParameterType::*;
+        match index.into() {
+            Attack => format!("{:.2}", envelope.attack),
+            Decay => format!("{:.2}", envelope.decay),
+            Sustain => format!("{:.2}", envelope.sustain * 100.0),
+            Release => format!("{:.2}", envelope.release),
+            Volume => format!("{:.2}", self.volume.get() * 2.0 * 100.0),
+            Error => "".to_string(),
         }
     }
 
     fn get_parameter_name(&self, index: i32) -> String {
-        match index {
-            0 => "Attack".to_string(),
-            1 => "Decay".to_string(),
-            2 => "Sustain".to_string(),
-            3 => "Release".to_string(),
-            _ => "".to_string(),
+        use ParameterType::*;
+        match index.into() {
+            Attack => "Attack".to_string(),
+            Decay => "Decay".to_string(),
+            Sustain => "Sustain".to_string(),
+            Release => "Release".to_string(),
+            Volume => "Volume".to_string(),
+            Error => "".to_string(),
         }
     }
 
     fn get_parameter(&self, index: i32) -> f32 {
-        match index {
-            0 => self.attack.get(),
-            1 => self.decay.get(),
-            2 => self.sustain.get(),
-            3 => self.release.get(),
-            _ => 0.0,
+        use ParameterType::*;
+        match index.into() {
+            Attack => self.attack.get(),
+            Decay => self.decay.get(),
+            Sustain => self.sustain.get(),
+            Release => self.release.get(),
+            Volume => self.volume.get(),
+            Error => 0.0,
         }
     }
 
     fn set_parameter(&self, index: i32, value: f32) {
-        match index {
-            0 => self.attack.set(value),
-            1 => self.decay.set(value),
-            2 => self.sustain.set(value),
-            3 => self.release.set(value),
-            _ => (),
+        use ParameterType::*;
+        match index.into() {
+            Attack => self.attack.set(value),
+            Decay => self.decay.set(value),
+            Sustain => self.sustain.set(value),
+            Release => self.release.set(value),
+            Volume => self.volume.set(value),
+            Error => (),
         }
     }
 
     fn can_be_automated(&self, index: i32) -> bool {
-        matches!(index, 0 | 1 | 2 | 3)
+        ParameterType::from(index) != ParameterType::Error
     }
 
     fn string_to_parameter(&self, index: i32, text: String) -> bool {
@@ -362,11 +406,12 @@ impl Default for Revisit {
         Revisit {
             notes: Vec::with_capacity(16),
             sample_rate: 44100.0,
-            envelope: Arc::new(RevisitParameters {
+            params: Arc::new(RevisitParameters {
                 attack: AtomicFloat::new(ATTACK),
                 decay: AtomicFloat::new(DECAY),
                 sustain: AtomicFloat::new(SUSTAIN),
                 release: AtomicFloat::new(RELEASE),
+                volume: AtomicFloat::new(VOLUME),
             }),
         }
     }
