@@ -5,7 +5,7 @@ extern crate vst;
 extern crate rand;
 extern crate wmidi;
 
-use std::{convert::TryFrom, iter::Rev, sync::Arc};
+use std::{convert::TryFrom, sync::Arc};
 
 use vst::{
     api::{Events, Supported},
@@ -172,16 +172,26 @@ struct Envelope {
     release: f32,
 }
 
-impl From<&Arc<RevisitParameters>> for Envelope {
-    fn from(params: &Arc<RevisitParameters>) -> Self {
+impl From<&RevisitParameters> for Envelope {
+    fn from(params: &RevisitParameters) -> Self {
+        // Apply exponetial scaling to input values.
+        // This makes it easier to select small envelope lengths.
+        let attack = ease_in_expo(params.attack.get());
+        let decay = ease_in_expo(params.decay.get());
+        let sustain = params.sustain.get();
+        let release = ease_in_expo(params.release.get());
         Envelope {
-            attack: params.attack.get(),
-            decay: params.decay.get(),
-            sustain: params.sustain.get(),
-            release: params.release.get(),
+            // Clamp values to around 1 ms minimum.
+            // This avoids division by zero problems.
+            // Also prevents annoying clicking which is undesirable.
+            attack: (attack * 2.0).max(1.0 / 1000.0),
+            decay: (decay * 5.0).max(1.0 / 1000.0),
+            sustain,
+            release: (release * 5.0).max(1.0 / 1000.0),
         }
     }
 }
+
 struct RevisitParameters {
     attack: AtomicFloat,
     decay: AtomicFloat,
@@ -225,7 +235,7 @@ impl Plugin for Revisit {
 
     // Output audio given the current state of the VST
     fn process(&mut self, buffer: &mut AudioBuffer<f32>) {
-        let envelope = Envelope::from(&self.envelope);
+        let envelope = Envelope::from(self.envelope.as_ref());
 
         // remove "dead" notes
         let sample_rate = self.sample_rate;
@@ -255,7 +265,7 @@ impl Plugin for Revisit {
     }
 
     fn process_events(&mut self, events: &Events) {
-        let envelope = Envelope::from(&self.envelope);
+        let envelope = Envelope::from(self.envelope.as_ref());
         for event in events.events() {
             match event {
                 vst::event::Event::Midi(event) => {
@@ -298,11 +308,12 @@ impl PluginParameters for RevisitParameters {
     }
 
     fn get_parameter_text(&self, index: i32) -> String {
+        let envelope = Envelope::from(self);
         match index {
-            0 => format!("{:.2}", self.attack.get()),
-            1 => format!("{:.2}", self.decay.get()),
-            2 => format!("{:.2}", self.sustain.get() * 100.0),
-            3 => format!("{:.2}", self.release.get()),
+            0 => format!("{:.2}", envelope.attack),
+            1 => format!("{:.2}", envelope.decay),
+            2 => format!("{:.2}", envelope.sustain * 100.0),
+            3 => format!("{:.2}", envelope.release),
             _ => "".to_string(),
         }
     }
@@ -319,22 +330,20 @@ impl PluginParameters for RevisitParameters {
 
     fn get_parameter(&self, index: i32) -> f32 {
         match index {
-            0 => self.attack.get() * 2.0,
-            1 => self.decay.get() * 5.0,
+            0 => self.attack.get(),
+            1 => self.decay.get(),
             2 => self.sustain.get(),
-            3 => self.release.get() * 5.0,
+            3 => self.release.get(),
             _ => 0.0,
         }
     }
 
     fn set_parameter(&self, index: i32, value: f32) {
         match index {
-            // clamp values to around 1 ms minimum
-            // this avoids division by zero problems
-            0 => self.attack.set((value * 2.0).max(1.0 / 1000.0)),
-            1 => self.decay.set((value * 5.0).max(1.0 / 1000.0)),
+            0 => self.attack.set(value),
+            1 => self.decay.set(value),
             2 => self.sustain.set(value),
-            3 => self.release.set((value * 5.0).max(1.0 / 1000.0)),
+            3 => self.release.set(value),
             _ => (),
         }
     }
