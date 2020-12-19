@@ -21,7 +21,7 @@ struct Oscillator {
     angle: f32,
     // time (in samples) since start of note
     time: usize,
-    release_time: Option<usize>,
+    release_state: Option<(usize, f32)>,
 }
 
 impl Oscillator {
@@ -31,7 +31,7 @@ impl Oscillator {
             vel,
             angle: 0.0,
             time: 0,
-            release_time: None,
+            release_state: None,
         }
     }
 
@@ -64,24 +64,16 @@ impl Oscillator {
 
     fn envelope(&self, sample_rate: f32) -> f32 {
         let time = self.time as f32 / sample_rate;
-        let attack = 0.2;
-        let decay = 0.1;
+        let attack = 1.0;
+        let decay = 1.0;
         let sustain = 0.5;
         let release = 1.0;
-        if let Some(release_time) = self.release_time {
+        if let Some((release_time, release_vel)) = self.release_state {
             // Release
             let time = (self.time - release_time) as f32 / sample_rate;
-            lerp(sustain, 0.0, time / release)
-        } else if time < attack {
-            // Attack
-            time / attack
-        } else if time < attack + decay {
-            // Decay
-            let time = time - attack;
-            lerp(1.0, sustain, time / decay)
+            lerp(release_vel, 0.0, time / release)
         } else {
-            // Sustain
-            sustain
+            ads_env(attack, decay, sustain, time)
         }
     }
 
@@ -89,19 +81,20 @@ impl Oscillator {
         (Note::to_freq_f32(self.pitch) * self.angle * TAU).sin()
     }
 
-    fn note_off(&mut self) {
-        self.release_time = Some(self.time);
+    fn note_off(&mut self, sample_rate: f32) {
+        let vel = ads_env(1.0, 1.0, 0.5, self.time as f32 / sample_rate);
+        self.release_state = Some((self.time, vel));
     }
 
     fn retrigger(&mut self) {
-        self.release_time = None;
+        self.release_state = None;
         self.time = 0;
     }
 
     fn is_alive(&self, sample_rate: f32) -> bool {
-        match self.release_time {
+        match self.release_state {
             None => true,
-            Some(release_time) => (self.time - release_time) as f32 / sample_rate < 1.0,
+            Some((release_time, _)) => (self.time - release_time) as f32 / sample_rate < 1.0,
         }
     }
 }
@@ -181,7 +174,7 @@ impl Plugin for Revisit {
                             }
                             MidiMessage::NoteOff(_, pitch, _) => {
                                 if let Some(i) = self.notes.iter().position(|x| x.pitch == pitch) {
-                                    self.notes[i].note_off();
+                                    self.notes[i].note_off(self.sample_rate);
                                 }
                             }
                             _ => println!("Unrecognized MidiMessage! {:?}", message),
@@ -212,6 +205,20 @@ fn clear_output_buffer(output: &mut Outputs<f32>) {
         for sample in channel {
             *sample = 0.0;
         }
+    }
+}
+
+fn ads_env(attack: f32, decay: f32, sustain: f32, time: f32) -> f32 {
+    if time < attack {
+        // Attack
+        time / attack
+    } else if time < attack + decay {
+        // Decay
+        let time = time - attack;
+        lerp(1.0, sustain, time / decay)
+    } else {
+        // Sustain
+        sustain
     }
 }
 
