@@ -1,4 +1,5 @@
-// `vst` uses macros, so we'll need to specify that we're using them!
+#![feature(clamp)]
+
 #[macro_use]
 extern crate vst;
 extern crate rand;
@@ -15,13 +16,34 @@ use wmidi::{MidiMessage, Note, U7};
 
 const TAU: f32 = std::f32::consts::TAU;
 
+const ATTACK: f32 = 10.0 / 1000.0;
+const DECAY: f32 = 50.0 / 1000.0;
+const SUSTAIN: f32 = 0.3;
+const RELEASE: f32 = 0.3;
+const RETRIGGER_TIME: usize = 88; // 88 samples is about 2 miliseconds
+
+#[derive(Debug, Clone, Copy)]
+enum NoteState {
+    // The note is being held down
+    Held,
+    // The note has just been released. Time is in seconds and denotes how many
+    // seconds since the oscillator has started. Vel is the velocity that the
+    // note was at (will go down to zero)
+    Released { time: usize, vel: f32 },
+    // The note has just be retriggered during a release. Time is in samples
+    // and denotes how many simples it has been since the oscillator has started.
+    // Vel is the velocity that the note was (will go down to zero over 10 samples)
+    // Notes exit this state after 10 samples.
+    Retrigger { time: usize, vel: f32 },
+}
+
+#[derive(Debug)]
 struct Oscillator {
     pitch: Note,
     vel: U7,
     angle: f32,
-    // time (in samples) since start of note
     time: usize,
-    release_state: Option<(usize, f32)>,
+    note_state: NoteState,
 }
 
 impl Oscillator {
@@ -31,16 +53,11 @@ impl Oscillator {
             vel,
             angle: 0.0,
             time: 0,
-            release_state: None,
+            note_state: NoteState::Held,
         }
     }
 
-    fn tick_angle(&mut self, num_samples: usize, sample_rate: f32) {
-        // Constrain the angle between 0 and 1, reduces roundoff error
-        let angle_delta = num_samples as f32 / sample_rate;
-        self.angle = (self.angle + angle_delta) % 1.0;
-    }
-
+    /// Get num_samples worth of samples from the Oscillator
     fn values(&mut self, num_samples: usize, sample_rate: f32) -> Vec<f32> {
         let mut buf = Vec::with_capacity(num_samples);
         let mut angle = self.angle;
@@ -56,45 +73,78 @@ impl Oscillator {
             angle = (angle + angle_delta) % 1.0;
 
             self.time += 1;
+
+            // If it has been 10 samples in the retrigger state, switch back to
+            // the held state.
+            if let NoteState::Retrigger {
+                time: retrigger_time,
+                vel: _,
+            } = self.note_state
+            {
+                if self.time - retrigger_time > RETRIGGER_TIME {
+                    self.note_state = NoteState::Held;
+                    self.time = 0;
+                }
+            }
         }
 
         self.angle = angle;
         buf
     }
 
+    /// Get the current envelope multiplier
     fn envelope(&self, sample_rate: f32) -> f32 {
-        let time = self.time as f32 / sample_rate;
-        let attack = 1.0;
-        let decay = 1.0;
-        let sustain = 0.5;
-        let release = 1.0;
-        if let Some((release_time, release_vel)) = self.release_state {
-            // Release
-            let time = (self.time - release_time) as f32 / sample_rate;
-            lerp(release_vel, 0.0, time / release)
-        } else {
-            ads_env(attack, decay, sustain, time)
+        Oscillator::full_envelope(self.time, self.note_state, sample_rate)
+    }
+
+    /// Release the note
+    fn note_off(&mut self, sample_rate: f32) {
+        self.note_state = NoteState::Released {
+            time: self.time,
+            vel: self.envelope(sample_rate),
+        };
+    }
+
+    /// Retrigger the note
+    fn retrigger(&mut self, sample_rate: f32) {
+        self.note_state = NoteState::Retrigger {
+            time: self.time,
+            vel: self.envelope(sample_rate),
+        };
+    }
+
+    /// Returns true if the note is "alive" (playing audio). A note is dead if
+    /// it is in the release state and it is after the total release time.
+    fn is_alive(&self, sample_rate: f32) -> bool {
+        match self.note_state {
+            NoteState::Held | NoteState::Retrigger { time: _, vel: _ } => true,
+            NoteState::Released {
+                time: release_time,
+                vel: _,
+            } => (self.time - release_time) as f32 / sample_rate < RELEASE,
         }
     }
 
-    fn value(&self) -> f32 {
-        (Note::to_freq_f32(self.pitch) * self.angle * TAU).sin()
-    }
-
-    fn note_off(&mut self, sample_rate: f32) {
-        let vel = ads_env(1.0, 1.0, 0.5, self.time as f32 / sample_rate);
-        self.release_state = Some((self.time, vel));
-    }
-
-    fn retrigger(&mut self) {
-        self.release_state = None;
-        self.time = 0;
-    }
-
-    fn is_alive(&self, sample_rate: f32) -> bool {
-        match self.release_state {
-            None => true,
-            Some((release_time, _)) => (self.time - release_time) as f32 / sample_rate < 1.0,
+    /// Computes the envelope multiplier. Time is the number of samples since the
+    /// start of the note.
+    fn full_envelope(time: usize, note_state: NoteState, sample_rate: f32) -> f32 {
+        match note_state {
+            NoteState::Held => ads_env(ATTACK, DECAY, SUSTAIN, time as f32 / sample_rate),
+            NoteState::Released {
+                time: rel_time,
+                vel,
+            } => {
+                let time = (time - rel_time) as f32 / sample_rate;
+                lerp(vel, 0.0, time / RELEASE)
+            }
+            NoteState::Retrigger {
+                time: retrig_time,
+                vel,
+            } => {
+                // Forcibly decay over 10 seconds.
+                let time = (time - retrig_time) as f32 / RETRIGGER_TIME as f32;
+                lerp(vel, 0.0, time)
+            }
         }
     }
 }
@@ -167,7 +217,7 @@ impl Plugin for Revisit {
                         match message {
                             MidiMessage::NoteOn(_, pitch, vel) => {
                                 if let Some(i) = self.notes.iter().position(|x| x.pitch == pitch) {
-                                    self.notes[i].retrigger();
+                                    self.notes[i].retrigger(self.sample_rate);
                                 } else {
                                     self.notes.push(Oscillator::new(pitch, vel));
                                 }
@@ -223,7 +273,7 @@ fn ads_env(attack: f32, decay: f32, sustain: f32, time: f32) -> f32 {
 }
 
 fn lerp(start: f32, end: f32, x: f32) -> f32 {
-    (end - start) * x + start
+    (end - start) * x.clamp(0.0, 1.0) + start
 }
 
 // Make sure you call this, or nothing will happen.
