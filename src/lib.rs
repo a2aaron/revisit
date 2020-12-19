@@ -6,7 +6,11 @@ extern crate wmidi;
 
 use std::convert::TryFrom;
 
-use vst::{api::{Events, Supported}, buffer::{AudioBuffer, Outputs}, plugin::{CanDo, Category, Info, Plugin}};
+use vst::{
+    api::{Events, Supported},
+    buffer::{AudioBuffer, Outputs},
+    plugin::{CanDo, Category, Info, Plugin},
+};
 use wmidi::{MidiMessage, Note, U7};
 
 const TAU: f32 = std::f32::consts::TAU;
@@ -24,24 +28,24 @@ impl Oscillator {
         self.angle = (self.angle + angle_delta) % 1.0;
     }
 
-fn values(&mut self, num_samples: usize, sample_rate: f32) -> Vec<f32> {
-    let mut buf = Vec::with_capacity(num_samples);
-    let mut angle = self.angle;
-    let pitch = Note::to_freq_f32(self.pitch);
-    for _ in 0..num_samples {
-        let value = (angle * TAU).sin();
-        buf.push(value);
+    fn values(&mut self, num_samples: usize, sample_rate: f32) -> Vec<f32> {
+        let mut buf = Vec::with_capacity(num_samples);
+        let mut angle = self.angle;
+        let pitch = Note::to_freq_f32(self.pitch);
+        for _ in 0..num_samples {
+            let value = (angle * TAU).sin();
+            buf.push(value);
 
-        // Constrain the angle between 0 and 1, reduces roundoff error
-        let angle_delta = pitch / sample_rate;
-        angle = (angle + angle_delta) % 1.0;
+            // Constrain the angle between 0 and 1, reduces roundoff error
+            let angle_delta = pitch / sample_rate;
+            angle = (angle + angle_delta) % 1.0;
+        }
+
+        self.angle = angle;
+        buf
     }
 
-    self.angle = angle;
-    buf
-}
-
-    fn value(&self) -> f32 {    
+    fn value(&self) -> f32 {
         (Note::to_freq_f32(self.pitch) * self.angle * TAU).sin()
     }
 }
@@ -58,7 +62,7 @@ impl Plugin for Revisit {
             vendor: "a2aaron".to_string(),
             // Used by hosts to differentiate between plugins.
             // Don't worry much about this now - just fill in a random number.
-            unique_id: 413612, 
+            unique_id: 413612,
             version: 1,
             category: Category::Synth,
 
@@ -86,7 +90,11 @@ impl Plugin for Revisit {
 
         for note in &mut self.notes {
             let osc_buffer = note.values(num_samples, self.sample_rate);
-            output = output.iter().zip(osc_buffer.iter()).map(|(&a, &b)| a + b).collect();
+            output = output
+                .iter()
+                .zip(osc_buffer.iter())
+                .map(|(&a, &b)| a + b)
+                .collect();
         }
 
         for channel in output_buffer.into_iter() {
@@ -105,27 +113,26 @@ impl Plugin for Revisit {
                     if let Ok(message) = message {
                         match message {
                             MidiMessage::NoteOn(_, pitch, vel) => {
-                                self.notes.push(Oscillator {pitch, vel, angle: 0.0});
+                                self.notes.push(Oscillator {
+                                    pitch,
+                                    vel,
+                                    angle: 0.0,
+                                });
                             }
                             MidiMessage::NoteOff(_, pitch, vel) => {
                                 if let Some(i) = self.notes.iter().position(|x| x.pitch == pitch) {
                                     self.notes.remove(i);
                                 }
                             }
-                            _ => {
-                                println!("Unrecognized MidiMessage! {:?}", message)
-                            }
+                            _ => println!("Unrecognized MidiMessage! {:?}", message),
                         }
                     }
                 }
-                _ => {
-                    println!("Unrecognized event!")
-                }
+                _ => println!("Unrecognized event!"),
             }
         }
     }
 }
-
 
 impl Default for Revisit {
     fn default() -> Self {
@@ -135,7 +142,6 @@ impl Default for Revisit {
         }
     }
 }
-
 
 fn sample_time_to_f32(sample_time: usize, sample_rate: f32) -> f32 {
     sample_time as f32 / sample_rate
@@ -150,4 +156,4 @@ fn clear_output_buffer(output: &mut Outputs<f32>) {
 }
 
 // Make sure you call this, or nothing will happen.
-plugin_main!(Revisit); 
+plugin_main!(Revisit);
