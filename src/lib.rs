@@ -7,16 +7,48 @@ extern crate wmidi;
 use std::convert::TryFrom;
 
 use vst::{api::{Events, Supported}, buffer::{AudioBuffer, Outputs}, plugin::{CanDo, Category, Info, Plugin}};
-use wmidi::{MidiMessage, Note};
+use wmidi::{MidiMessage, Note, U7};
 
 const TAU: f32 = std::f32::consts::TAU;
 
-struct Revisit {
-    // Whether or not the VST should play sound
-    notes: Vec<Note>,
-    sample_rate: f32,
-    // What time the VST is at, in samples
+struct Oscillator {
+    pitch: Note,
+    vel: U7,
     angle: f32,
+}
+
+impl Oscillator {
+    fn tick_angle(&mut self, num_samples: usize, sample_rate: f32) {
+        // Constrain the angle between 0 and 1, reduces roundoff error
+        let angle_delta = num_samples as f32 / sample_rate;
+        self.angle = (self.angle + angle_delta) % 1.0;
+    }
+
+fn values(&mut self, num_samples: usize, sample_rate: f32) -> Vec<f32> {
+    let mut buf = Vec::with_capacity(num_samples);
+    let mut angle = self.angle;
+    let pitch = Note::to_freq_f32(self.pitch);
+    for _ in 0..num_samples {
+        let value = (angle * TAU).sin();
+        buf.push(value);
+
+        // Constrain the angle between 0 and 1, reduces roundoff error
+        let angle_delta = pitch / sample_rate;
+        angle = (angle + angle_delta) % 1.0;
+    }
+
+    self.angle = angle;
+    buf
+}
+
+    fn value(&self) -> f32 {    
+        (Note::to_freq_f32(self.pitch) * self.angle * TAU).sin()
+    }
+}
+
+struct Revisit {
+    notes: Vec<Oscillator>,
+    sample_rate: f32,
 }
 
 impl Plugin for Revisit {
@@ -47,36 +79,22 @@ impl Plugin for Revisit {
 
     // Output audio given the current state of the VST
     fn process(&mut self, buffer: &mut AudioBuffer<f32>) {
+        let num_samples = buffer.samples();
         let (_, mut output_buffer) = buffer.split();
 
-        // Reset the timer if there isn't any audio being played
-        // This avoids issues with round off errors when dealing with high
-        // float values.
-        // if self.note.is_none() {
-            // self.sample_time = 0;
-        // }
+        let mut output: Vec<f32> = (0..num_samples).map(|_| 0.0).collect();
 
-        // Use a seperate time value for each channel
-        // We don't want to use self.time for each channel because we want each
-        // channel to use the same time.
-        let mut angle = self.angle;
+        for note in &mut self.notes {
+            let osc_buffer = note.values(num_samples, self.sample_rate);
+            output = output.iter().zip(osc_buffer.iter()).map(|(&a, &b)| a + b).collect();
+        }
+
         for channel in output_buffer.into_iter() {
-            angle = self.angle;
-            for sample in channel {
+            for (i, sample) in channel.iter_mut().enumerate() {
                 let volume = 0.25;
-                let mut signal = 0.0;
-
-                // Constrain the angle between 0 and 1, reduces roundoff error
-                let angular_frequency = 1.0 / self.sample_rate;
-                angle = (angle + angular_frequency) % 1.0;
-
-                for note in &self.notes {
-                    signal += (Note::to_freq_f32(*note) * angle * TAU).sin()
-                }
-                *sample = signal * volume;
+                *sample = output[i] * volume;
             }
         }
-        self.angle = angle;
     }
 
     fn process_events(&mut self, events: &Events) {
@@ -86,11 +104,11 @@ impl Plugin for Revisit {
                     let message = MidiMessage::try_from(&event.data as &[u8]);
                     if let Ok(message) = message {
                         match message {
-                            MidiMessage::NoteOn(_, note, vel) => {
-                                self.notes.push(note);
+                            MidiMessage::NoteOn(_, pitch, vel) => {
+                                self.notes.push(Oscillator {pitch, vel, angle: 0.0});
                             }
-                            MidiMessage::NoteOff(_, note, vel) => {
-                                if let Some(i) = self.notes.iter().position(|x| x == &note) {
+                            MidiMessage::NoteOff(_, pitch, vel) => {
+                                if let Some(i) = self.notes.iter().position(|x| x.pitch == pitch) {
                                     self.notes.remove(i);
                                 }
                             }
@@ -114,7 +132,6 @@ impl Default for Revisit {
         Revisit {
             notes: Vec::with_capacity(16),
             sample_rate: 44100.0,
-            angle: 0.0,
         }
     }
 }
