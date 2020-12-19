@@ -19,9 +19,22 @@ struct Oscillator {
     pitch: Note,
     vel: U7,
     angle: f32,
+    // time (in samples) since start of note
+    time: usize,
+    release_time: Option<usize>,
 }
 
 impl Oscillator {
+    fn new(pitch: Note, vel: U7) -> Oscillator {
+        Oscillator {
+            pitch,
+            vel,
+            angle: 0.0,
+            time: 0,
+            release_time: None,
+        }
+    }
+
     fn tick_angle(&mut self, num_samples: usize, sample_rate: f32) {
         // Constrain the angle between 0 and 1, reduces roundoff error
         let angle_delta = num_samples as f32 / sample_rate;
@@ -33,20 +46,63 @@ impl Oscillator {
         let mut angle = self.angle;
         let pitch = Note::to_freq_f32(self.pitch);
         for _ in 0..num_samples {
+            // Get the sine signal
             let value = (angle * TAU).sin();
+            let value = value * self.envelope(sample_rate);
             buf.push(value);
 
             // Constrain the angle between 0 and 1, reduces roundoff error
             let angle_delta = pitch / sample_rate;
             angle = (angle + angle_delta) % 1.0;
+
+            self.time += 1;
         }
 
         self.angle = angle;
         buf
     }
 
+    fn envelope(&self, sample_rate: f32) -> f32 {
+        let time = self.time as f32 / sample_rate;
+        let attack = 0.2;
+        let decay = 0.1;
+        let sustain = 0.5;
+        let release = 1.0;
+        if let Some(release_time) = self.release_time {
+            // Release
+            let time = (self.time - release_time) as f32 / sample_rate;
+            lerp(sustain, 0.0, time / release)
+        } else if time < attack {
+            // Attack
+            time / attack
+        } else if time < attack + decay {
+            // Decay
+            let time = time - attack;
+            lerp(1.0, sustain, time / decay)
+        } else {
+            // Sustain
+            sustain
+        }
+    }
+
     fn value(&self) -> f32 {
         (Note::to_freq_f32(self.pitch) * self.angle * TAU).sin()
+    }
+
+    fn note_off(&mut self) {
+        self.release_time = Some(self.time);
+    }
+
+    fn retrigger(&mut self) {
+        self.release_time = None;
+        self.time = 0;
+    }
+
+    fn is_alive(&self, sample_rate: f32) -> bool {
+        match self.release_time {
+            None => true,
+            Some(release_time) => (self.time - release_time) as f32 / sample_rate < 1.0,
+        }
     }
 }
 
@@ -83,6 +139,10 @@ impl Plugin for Revisit {
 
     // Output audio given the current state of the VST
     fn process(&mut self, buffer: &mut AudioBuffer<f32>) {
+        // remove "dead" notes
+        let sample_rate = self.sample_rate;
+        self.notes.retain(|osc| osc.is_alive(sample_rate));
+
         let num_samples = buffer.samples();
         let (_, mut output_buffer) = buffer.split();
 
@@ -113,15 +173,15 @@ impl Plugin for Revisit {
                     if let Ok(message) = message {
                         match message {
                             MidiMessage::NoteOn(_, pitch, vel) => {
-                                self.notes.push(Oscillator {
-                                    pitch,
-                                    vel,
-                                    angle: 0.0,
-                                });
-                            }
-                            MidiMessage::NoteOff(_, pitch, vel) => {
                                 if let Some(i) = self.notes.iter().position(|x| x.pitch == pitch) {
-                                    self.notes.remove(i);
+                                    self.notes[i].retrigger();
+                                } else {
+                                    self.notes.push(Oscillator::new(pitch, vel));
+                                }
+                            }
+                            MidiMessage::NoteOff(_, pitch, _) => {
+                                if let Some(i) = self.notes.iter().position(|x| x.pitch == pitch) {
+                                    self.notes[i].note_off();
                                 }
                             }
                             _ => println!("Unrecognized MidiMessage! {:?}", message),
@@ -153,6 +213,10 @@ fn clear_output_buffer(output: &mut Outputs<f32>) {
             *sample = 0.0;
         }
     }
+}
+
+fn lerp(start: f32, end: f32, x: f32) -> f32 {
+    (end - start) * x + start
 }
 
 // Make sure you call this, or nothing will happen.
