@@ -1,12 +1,13 @@
-#![feature(clamp)]
-
 #[macro_use]
 extern crate vst;
+extern crate log;
 extern crate rand;
+extern crate simple_logging;
 extern crate wmidi;
 
 use std::{convert::TryFrom, sync::Arc};
 
+use log::{info, LevelFilter};
 use vst::{
     api::{Events, Supported},
     buffer::{AudioBuffer, Outputs},
@@ -311,6 +312,11 @@ struct Revisit {
 }
 
 impl Plugin for Revisit {
+    fn init(&mut self) {
+        simple_logging::log_to_file("revisit.log", LevelFilter::Info);
+        info!("Begin VST log");
+    }
+
     fn get_info(&self) -> Info {
         Info {
             name: "Revisit".to_string(),
@@ -340,6 +346,8 @@ impl Plugin for Revisit {
 
     // Output audio given the current state of the VST
     fn process(&mut self, buffer: &mut AudioBuffer<f32>) {
+        info!("Processing frame");
+
         // Get the relevant parameters
         let envelope = Envelope::from(self.params.as_ref());
         let volume = self.params.volume.get() * 0.25;
@@ -380,6 +388,10 @@ impl Plugin for Revisit {
     }
 
     fn process_events(&mut self, events: &Events) {
+        info!(
+            "Processing MIDI events. Total events: {}",
+            events.num_events
+        );
         let envelope = Envelope::from(self.params.as_ref());
         for event in events.events() {
             match event {
@@ -394,23 +406,39 @@ impl Plugin for Revisit {
                                 } else {
                                     self.notes.push(Oscillator::new(pitch, vel));
                                 }
+                                info!(
+                                    "NoteOn event! {:?} @ {:?}, frame delta: {}",
+                                    pitch, vel, event.delta_frames
+                                );
                             }
                             MidiMessage::NoteOff(_, pitch, _) => {
                                 // On note off, send note off
                                 if let Some(i) = self.notes.iter().position(|x| x.pitch == pitch) {
                                     self.notes[i].note_off(self.sample_rate, envelope);
                                 }
+                                info!(
+                                    "NoteOff event! {:?}, frame delta: {}",
+                                    pitch, event.delta_frames
+                                );
                             }
                             MidiMessage::PitchBendChange(_, pitch_bend) => {
                                 self.pitch_bend = to_pitch_multiplier(pitch_bend, 12);
+                                info!(
+                                    "Pitch Bend event! {:?} (mult: {}, frame delta: {})",
+                                    pitch_bend, self.pitch_bend, event.delta_frames
+                                );
                             }
-                            _ => println!("Unrecognized MidiMessage! {:?}", message),
+                            _ => info!("Unrecognized MidiMessage! {:?}", message),
                         }
                     }
                 }
-                _ => println!("Unrecognized event!"),
+                _ => info!("Unrecognized event!"),
             }
         }
+    }
+
+    fn stop_process(&mut self) {
+        info!("Stopping process...");
     }
 
     // Needed so that the host knows what parameters exist
