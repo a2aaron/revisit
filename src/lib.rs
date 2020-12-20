@@ -13,7 +13,7 @@ use vst::{
     plugin::{CanDo, Category, Info, Plugin, PluginParameters},
     util::AtomicFloat,
 };
-use wmidi::{MidiMessage, Note, U7};
+use wmidi::{MidiMessage, Note, PitchBend, U14, U7};
 
 const TAU: f32 = std::f32::consts::TAU;
 
@@ -101,6 +101,7 @@ impl Oscillator {
         sample_rate: f32,
         envelope: Envelope,
         shape: NoteShape,
+        pitch_bend: f32,
     ) -> Vec<f32> {
         let mut buf = Vec::with_capacity(num_samples);
 
@@ -108,9 +109,10 @@ impl Oscillator {
         // Ranges from [0.0, 1.0]
         let mut angle = self.angle;
 
-        // The pitch of the note, in hz
-        let pitch = Note::to_freq_f32(self.pitch);
         for _ in 0..num_samples {
+            // The pitch of the note, in hz
+            let pitch = Note::to_freq_f32(self.pitch) * pitch_bend;
+
             // Get the raw signal
             let value = match shape {
                 // See https://www.desmos.com/calculator/dqg8kdvung for visuals
@@ -304,6 +306,8 @@ struct Revisit {
     notes: Vec<Oscillator>,
     sample_rate: f32,
     params: Arc<RevisitParameters>,
+    // a multiplier to the current notes
+    pitch_bend: f32,
 }
 
 impl Plugin for Revisit {
@@ -353,7 +357,13 @@ impl Plugin for Revisit {
         let mut output: Vec<f32> = (0..num_samples).map(|_| 0.0).collect();
 
         for note in &mut self.notes {
-            let osc_buffer = note.values(num_samples, self.sample_rate, envelope, shape);
+            let osc_buffer = note.values(
+                num_samples,
+                self.sample_rate,
+                envelope,
+                shape,
+                self.pitch_bend,
+            );
             output = output
                 .iter()
                 .zip(osc_buffer.iter())
@@ -390,6 +400,9 @@ impl Plugin for Revisit {
                                 if let Some(i) = self.notes.iter().position(|x| x.pitch == pitch) {
                                     self.notes[i].note_off(self.sample_rate, envelope);
                                 }
+                            }
+                            MidiMessage::PitchBendChange(_, pitch_bend) => {
+                                self.pitch_bend = to_pitch_multiplier(pitch_bend, 12);
                             }
                             _ => println!("Unrecognized MidiMessage! {:?}", message),
                         }
@@ -492,8 +505,31 @@ impl Default for Revisit {
                 volume: AtomicFloat::new(VOLUME),
                 shape: AtomicFloat::new(SHAPE),
             }),
+            pitch_bend: 1.0,
         }
     }
+}
+
+fn normalize_pitch_bend(pitch_bend: PitchBend) -> f32 {
+    // A pitchbend is a U14 in range [0, 0x3FFF] with 0x2000 meaning "no bend",
+    // 0x0 meaning "max down bend" and 0x3FFF meaning "max up bend".
+    // convert to u16 - range [0, 0x3FFF]
+    let pitch_bend = U14::data_to_slice(&[pitch_bend])[0];
+    // convert to i16 - range [-0x2000, 0x1FFF]
+    let pitch_bend = pitch_bend as i16 - 0x2000;
+    // convert to f32 - range [-1.0, 1.0]
+    pitch_bend as f32 * (1.0 / 0x2000 as f32)
+}
+
+fn to_pitch_multiplier(pitch_bend: PitchBend, semitones: i32) -> f32 {
+    // Pitch bend is now [-1.0, 1.0]
+    let pitch_bend = normalize_pitch_bend(pitch_bend);
+    // Given any note, the note a single semitone away is 2^1/12 times the original note
+    // So (2^1/12)^n is n semitones away
+    let exponent = 2.0f32.powf(semitones as f32 / 12.0);
+    // We take an exponential here because frequency is exponential with respect
+    // to note value
+    exponent.powf(pitch_bend)
 }
 
 fn sample_time_to_f32(sample_time: usize, sample_rate: f32) -> f32 {
