@@ -29,9 +29,15 @@ const SUSTAIN: f32 = 0.3;
 const RELEASE: f32 = 0.3;
 const VOLUME: f32 = 0.5;
 const SHAPE: f32 = 0.225; // (triangle)
-const RETRIGGER_TIME: usize = 88; // 88 samples is about 2 miliseconds
+const RETRIGGER_TIME: usize = 88; // 88 samples is about 2 miliseconds.
+
+type Angle = f32;
+
 #[derive(Debug, Clone, Copy)]
 enum NoteState {
+    // The note is not being held down, but no previous NoteOn or NoteOff exists
+    // for the note.
+    None,
     // The note is being held down
     Held,
     // The note has just been released. Time is in seconds and denotes how many
@@ -86,6 +92,8 @@ struct Oscillator {
     angle: f32,
     time: usize,
     note_state: NoteState,
+    note_on: Option<i32>,
+    note_off: Option<i32>,
 }
 
 impl Oscillator {
@@ -95,7 +103,9 @@ impl Oscillator {
             vel,
             angle: 0.0,
             time: 0,
-            note_state: NoteState::Held,
+            note_state: NoteState::None,
+            note_on: None,
+            note_off: None,
         }
     }
 
@@ -108,41 +118,45 @@ impl Oscillator {
         shape: NoteShape,
         pitch_bend: &[f32],
     ) {
-        // What position through the waveform the oscillator is at.
-        // Ranges from [0.0, 1.0]
-        let mut angle = self.angle;
+        let mut amplitude = Vec::with_capacity(dest.len());
 
+        // Get volume envelope
         for i in 0..dest.len() {
-            // The pitch of the note, in hz
-            let pitch = Note::to_freq_f32(self.pitch) * pitch_bend[i];
+            let vel = self.envelope(sample_rate, envelope);
+            amplitude.push(vel);
 
-            // Get the raw signal
-            let value = match shape {
-                // See https://www.desmos.com/calculator/dqg8kdvung for visuals
-                NoteShape::Sine => (angle * TAU).sin(),
-                NoteShape::Sawtooth => (angle * 2.0) - 1.0,
-                NoteShape::Square => {
-                    if angle < 0.5 {
-                        -1.0
-                    } else {
-                        1.0
-                    }
+            // Only advance time if the note is being held down!
+            match self.note_state {
+                NoteState::None => (),
+                _ => self.time += 1,
+            }
+
+            // Trigger note on events
+            match self.note_on {
+                Some(note_on) if note_on as usize == i => {
+                    self.note_state = match self.note_state {
+                        NoteState::None => NoteState::Held,
+                        _ => NoteState::Retrigger {
+                            time: self.time,
+                            vel,
+                        },
+                    };
+                    self.note_on = None;
                 }
-                NoteShape::Triangle => -2.0 * (2.0 * angle - 1.0).abs() + 1.0,
-            };
+                _ => (),
+            }
 
-            // Apply volume envelope
-            let value = value * self.envelope(sample_rate, envelope);
-            dest[i] = value;
-
-            // Update the angle. Each sample is 1.0 / sample_rate apart for a
-            // complete waveform. We multiply by the pitch to scale faster.
-            // We also constrain the angle between 0 and 1, as this reduces
-            // roundoff error.
-            let angle_delta = pitch / sample_rate;
-            angle = (angle + angle_delta) % 1.0;
-
-            self.time += 1;
+            // Trigger note off events
+            match self.note_off {
+                Some(note_off) if note_off as usize == i => {
+                    self.note_state = NoteState::Released {
+                        time: self.time,
+                        vel,
+                    };
+                    self.note_off = None;
+                }
+                _ => (),
+            }
 
             // If it has been 10 samples in the retrigger state, switch back to
             // the held state. This also resets the time.
@@ -158,10 +172,19 @@ impl Oscillator {
             }
         }
 
-        // Update the tracked angle. We do it like this instead of adding it all
-        // at once as this reduces the error induced by multiplying the large
-        // number of samples.
-        self.angle = angle;
+        // Generate the signal.
+        // Update the tracked angle. Note that this is more accurate than just
+        // recomputing the angle with a multiply because that method will
+        // induce more round off error due to the large mangitudes involved.
+        self.angle = generate_signal(
+            dest,
+            self.angle,
+            sample_rate,
+            self.pitch,
+            shape,
+            &amplitude,
+            pitch_bend,
+        );
     }
 
     /// Get the current envelope multiplier
@@ -170,26 +193,20 @@ impl Oscillator {
     }
 
     /// Release the note
-    fn note_off(&mut self, sample_rate: f32, envelope: Envelope) {
-        self.note_state = NoteState::Released {
-            time: self.time,
-            vel: self.envelope(sample_rate, envelope),
-        };
+    fn note_off(&mut self, frame_delta: i32) {
+        self.note_off = Some(frame_delta);
     }
 
-    /// Retrigger the note
-    fn retrigger(&mut self, sample_rate: f32, envelope: Envelope) {
-        self.note_state = NoteState::Retrigger {
-            time: self.time,
-            vel: self.envelope(sample_rate, envelope),
-        };
+    /// Trigger or Retrigger the note
+    fn note_on(&mut self, frame_delta: i32) {
+        self.note_on = Some(frame_delta);
     }
 
     /// Returns true if the note is "alive" (playing audio). A note is dead if
     /// it is in the release state and it is after the total release time.
     fn is_alive(&self, sample_rate: f32, release: f32) -> bool {
         match self.note_state {
-            NoteState::Held | NoteState::Retrigger { time: _, vel: _ } => true,
+            NoteState::None | NoteState::Held | NoteState::Retrigger { time: _, vel: _ } => true,
             NoteState::Released {
                 time: release_time,
                 vel: _,
@@ -209,6 +226,7 @@ impl Oscillator {
         envelope: Envelope,
     ) -> f32 {
         match note_state {
+            NoteState::None => 0.0,
             NoteState::Held => ads_env(
                 envelope.attack,
                 envelope.decay,
@@ -358,7 +376,6 @@ impl Plugin for Revisit {
 
         // Get the relevant parameters
         let num_samples = buffer.samples();
-        let sample_rate = self.sample_rate;
         let envelope = Envelope::from(self.params.as_ref());
         let volume = self.params.volume.get() * 0.25;
         let shape = NoteShape::from(self.params.shape.get());
@@ -372,10 +389,6 @@ impl Plugin for Revisit {
             .iter()
             .map(|normalized| to_pitch_multiplier(*normalized, 12))
             .collect();
-
-        // remove "dead" notes
-        self.notes
-            .retain(|osc| osc.is_alive(sample_rate, envelope.release));
 
         // Get sound for each note
         let (_, mut output_buffer) = buffer.split();
@@ -414,6 +427,20 @@ impl Plugin for Revisit {
             );
         }
         let envelope = Envelope::from(self.params.as_ref());
+        let sample_rate = self.sample_rate;
+        // remove "dead" notes
+        // we do this in process_events _before_ processing any midi messages
+        // because this is the start of a new frame, and we want to make sure
+        // that midi messages do not apply to dead notes
+        // ex: if we do this after processing midi messages, a bug occurs where
+        // - frame 0 - note is in release state and is dead by end of frame
+        // - frame 1 - process events send midi messages to dead note
+        // - frame 1 - process removes dead note
+        // - frame 1 - user is confused to why note does not play despite holding
+        //             down key (the KeyOn event was "eaten" by the dead note!)
+        self.notes
+            .retain(|osc| osc.is_alive(sample_rate, envelope.release));
+
         // Clear pitch bend to get new messages
         self.pitch_bend.clear();
         for event in events.events() {
@@ -424,11 +451,17 @@ impl Plugin for Revisit {
                         match message {
                             MidiMessage::NoteOn(_, pitch, vel) => {
                                 // On note on, either add or retrigger the note
-                                if let Some(i) = self.notes.iter().position(|x| x.pitch == pitch) {
-                                    self.notes[i].retrigger(self.sample_rate, envelope);
+                                let osc = if let Some(osc) =
+                                    self.notes.iter_mut().find(|x| x.pitch == pitch)
+                                {
+                                    osc
                                 } else {
-                                    self.notes.push(Oscillator::new(pitch, vel));
-                                }
+                                    let osc = Oscillator::new(pitch, vel);
+                                    self.notes.push(osc);
+                                    self.notes.last_mut().unwrap()
+                                };
+
+                                osc.note_on(event.delta_frames);
                                 info!(
                                     "NoteOn event! {:?} @ {:?}, frame delta: {}",
                                     pitch, vel, event.delta_frames
@@ -437,7 +470,7 @@ impl Plugin for Revisit {
                             MidiMessage::NoteOff(_, pitch, _) => {
                                 // On note off, send note off
                                 if let Some(i) = self.notes.iter().position(|x| x.pitch == pitch) {
-                                    self.notes[i].note_off(self.sample_rate, envelope);
+                                    self.notes[i].note_off(event.delta_frames);
                                 }
                                 info!(
                                     "NoteOff event! {:?}, frame delta: {}",
@@ -632,6 +665,67 @@ fn to_pitch_multiplier(normalized_pitch_bend: f32, semitones: i32) -> f32 {
     exponent.powf(normalized_pitch_bend)
 }
 
+/// Fill dest with the generated signal.
+/// dest - the buffer to write the signal to.
+/// starting_angle - the starting angle of the note
+/// note - the pitch of the note
+/// sample_rate - the sample rate of the audio, in samples/second
+/// shape - the note shape to use
+/// amplitude - the amplitude envelope
+/// pitch_bend - the pitch bend envelope
+/// returns the new angle
+fn generate_signal(
+    dest: &mut [f32],
+    starting_angle: Angle,
+    sample_rate: f32,
+    note: Note,
+    shape: NoteShape,
+    amplitude: &[f32],
+    pitch_bend: &[f32],
+) -> f32 {
+    // What position through the waveform the oscillator is at.
+    // Ranges from [0.0, 1.0]
+    let mut angle = starting_angle;
+
+    for i in 0..dest.len() {
+        // The pitch of the note, in hz
+        let pitch = Note::to_freq_f32(note) * pitch_bend[i];
+
+        // Get the raw signal
+        let value = match shape {
+            // See https://www.desmos.com/calculator/dqg8kdvung for visuals
+            NoteShape::Sine => (angle * TAU).sin(),
+            NoteShape::Sawtooth => (angle * 2.0) - 1.0,
+            NoteShape::Square => {
+                if angle < 0.5 {
+                    -1.0
+                } else {
+                    1.0
+                }
+            }
+            NoteShape::Triangle => -2.0 * (2.0 * angle - 1.0).abs() + 1.0,
+        };
+
+        // Apply volume envelope
+        let value = value * amplitude[i];
+        dest[i] = value;
+        // dest[i] = amplitude[i];
+
+        // Update the angle. Each sample is 1.0 / sample_rate apart for a
+        // complete waveform. We multiply by the pitch to scale faster.
+        // We also constrain the angle between 0 and 1, as this reduces
+        // roundoff error.
+        let angle_delta = pitch / sample_rate;
+        angle = (angle + angle_delta) % 1.0;
+    }
+
+    angle
+}
+
+// Get the envelope value given attack, decay, and sustain values.
+// Attack, decay, and time are all in the same units (seconds usually)
+// Sustain is a value in range [0.0, 1.0]
+// Returned value is also in range [0.0, 1.0]
 fn ads_env(attack: f32, decay: f32, sustain: f32, time: f32) -> f32 {
     if time < attack {
         // Attack
