@@ -29,16 +29,12 @@ const VOL_ATTACK: f32 = 0.1;
 const VOL_DECAY: f32 = 0.2;
 const VOL_SUSTAIN: f32 = 0.3;
 const VOL_RELEASE: f32 = 0.3;
-const PITCH_ATTACK: f32 = 1.0 / 1000.0;
+const PITCH_ATTACK: f32 = 1.0 / 10000.0;
 const PITCH_DECAY: f32 = 0.2;
-const PITCH_SUSTAIN: f32 = 0.0;
-const PITCH_RELEASE: f32 = 1.0 / 1000.0;
+const PITCH_MULTIPLY: f32 = 0.5;
+const PITCH_RELEASE: f32 = 1.0 / 10000.0;
 
 const RETRIGGER_TIME: usize = 88; // 88 samples is about 2 miliseconds.
-
-// Defines the maximum attack, decay, and release values for envelopes
-const VOL_ENV_MAXES: (f32, f32, f32) = (2.0, 5.0, 5.0);
-const PITCH_ENV_MAXES: (f32, f32, f32) = (1.0, 1.0, 1.0);
 
 type Angle = f32;
 
@@ -125,6 +121,7 @@ impl Oscillator {
         sample_rate: f32,
         vol_adsr: Envelope,
         pitch_adsr: Envelope,
+        pitch_multiplier: f32,
         shape: NoteShape,
         pitch_bend: &[f32],
     ) {
@@ -137,7 +134,7 @@ impl Oscillator {
             amplitude.push(vel);
 
             // Get pitch envelope
-            pitch_env[i] += self.envelope(sample_rate, pitch_adsr);
+            pitch_env[i] += self.envelope(sample_rate, pitch_adsr) * pitch_multiplier;
 
             // Only advance time if the note is being held down!
             match self.note_state {
@@ -284,23 +281,39 @@ impl Envelope {
     // maximums is a three-tuple of (attack, decay, release) and is the max time
     // of those settings, when the repsective parameter is 1.0
     // All values are in seconds.
-    fn from_params(params: &RevisitParametersEnvelope, maximums: (f32, f32, f32)) -> Self {
+    fn from_params(params: &RevisitParametersEnvelope, env_type: EnvelopeType) -> Self {
         // Apply exponetial scaling to input values.
         // This makes it easier to select small envelope lengths.
         let attack = ease_in_expo(params.attack.get());
         let decay = ease_in_expo(params.decay.get());
         let sustain = params.sustain.get();
         let release = ease_in_expo(params.release.get());
-        Envelope {
-            // Clamp values to around 1 ms minimum.
-            // This avoids division by zero problems.
-            // Also prevents annoying clicking which is undesirable.
-            attack: (attack * maximums.0).max(1.0 / 1000.0),
-            decay: (decay * maximums.1).max(1.0 / 1000.0),
-            sustain,
-            release: (release * maximums.2).max(1.0 / 1000.0),
+
+        match env_type {
+            EnvelopeType::Amplitude => {
+                Envelope {
+                    // Clamp values to around 1 ms minimum.
+                    // This avoids division by zero problems.
+                    // Also prevents annoying clicking which is undesirable.
+                    attack: (attack * 2.0).max(1.0 / 1000.0),
+                    decay: (decay * 5.0).max(1.0 / 1000.0),
+                    sustain,
+                    release: (release * 5.0).max(1.0 / 1000.0),
+                }
+            }
+            EnvelopeType::Pitch => Envelope {
+                attack: (attack * 2.0).max(1.0 / 10000.0),
+                decay: (decay * 5.0).max(1.0 / 10000.0),
+                sustain: 0.0,
+                release: (release * 5.0).max(1.0 / 10000.0),
+            },
         }
     }
+}
+
+enum EnvelopeType {
+    Amplitude,
+    Pitch,
 }
 
 /// The raw parameter values that a host DAW will set and modify.
@@ -331,7 +344,7 @@ enum ParameterType {
     VolRelease,
     PitchAttack,
     PitchDecay,
-    PitchSustain,
+    PitchMultiply,
     PitchRelease,
     Error,
 }
@@ -348,7 +361,7 @@ impl From<i32> for ParameterType {
             5 => VolRelease,
             6 => PitchAttack,
             7 => PitchDecay,
-            8 => PitchSustain,
+            8 => PitchMultiply,
             9 => PitchRelease,
             _ => Error,
         }
@@ -408,9 +421,9 @@ impl Plugin for Revisit {
 
         // Get the relevant parameters
         let num_samples = buffer.samples();
-        let vol_adsr = Envelope::from_params(&self.params.vol_env, VOL_ENV_MAXES);
-        let pitch_adsr = Envelope::from_params(&self.params.pitch_env, PITCH_ENV_MAXES);
-
+        let vol_adsr = Envelope::from_params(&self.params.vol_env, EnvelopeType::Amplitude);
+        let pitch_adsr = Envelope::from_params(&self.params.pitch_env, EnvelopeType::Pitch);
+        let pitch_multiplier = (self.params.pitch_env.sustain.get() - 0.5) * 2.0;
         let volume = self.params.volume.get() * 0.25;
         let shape = NoteShape::from(self.params.shape.get());
 
@@ -430,6 +443,7 @@ impl Plugin for Revisit {
                 self.sample_rate,
                 vol_adsr,
                 pitch_adsr,
+                pitch_multiplier,
                 shape,
                 &pitch_envelope,
             );
@@ -456,7 +470,7 @@ impl Plugin for Revisit {
                 events.num_events
             );
         }
-        let envelope = Envelope::from_params(&self.params.vol_env, VOL_ENV_MAXES);
+        let envelope = Envelope::from_params(&self.params.vol_env, EnvelopeType::Amplitude);
         let sample_rate = self.sample_rate;
         // remove "dead" notes
         // we do this in process_events _before_ processing any midi messages
@@ -545,15 +559,15 @@ impl PluginParameters for RevisitParameters {
             VolAttack | VolDecay | VolRelease | PitchAttack | PitchDecay | PitchRelease => {
                 " sec".to_string()
             }
-            VolSustain | PitchSustain | Volume => "%".to_string(),
+            VolSustain | PitchMultiply | Volume => "%".to_string(),
             Shape => "".to_string(),
             Error => "".to_string(),
         }
     }
 
     fn get_parameter_text(&self, index: i32) -> String {
-        let vol_env = Envelope::from_params(&self.vol_env, VOL_ENV_MAXES);
-        let pitch_env = Envelope::from_params(&self.pitch_env, PITCH_ENV_MAXES);
+        let vol_env = Envelope::from_params(&self.vol_env, EnvelopeType::Amplitude);
+        let pitch_env = Envelope::from_params(&self.pitch_env, EnvelopeType::Pitch);
         use ParameterType::*;
         match index.into() {
             VolAttack => format!("{:.2}", vol_env.attack),
@@ -562,7 +576,7 @@ impl PluginParameters for RevisitParameters {
             VolRelease => format!("{:.2}", vol_env.release),
             PitchAttack => format!("{:.2}", pitch_env.attack),
             PitchDecay => format!("{:.2}", pitch_env.decay),
-            PitchSustain => format!("{:.2}", pitch_env.sustain * 100.0),
+            PitchMultiply => format!("{:.2}", pitch_env.sustain * 100.0),
             PitchRelease => format!("{:.2}", pitch_env.release),
             Volume => format!("{:.2}", self.volume.get() * 100.0),
             Shape => format!("{}", NoteShape::from(self.shape.get())),
@@ -581,7 +595,7 @@ impl PluginParameters for RevisitParameters {
             VolRelease => "Release (Volume)".to_string(),
             PitchAttack => "Attack (Pitch Bend)".to_string(),
             PitchDecay => "Decay (Pitch Bend)".to_string(),
-            PitchSustain => "Sustain (Pitch Bend)".to_string(),
+            PitchMultiply => "Multiply (Pitch Bend)".to_string(),
             PitchRelease => "Release (Pitch Bend)".to_string(),
             Error => "".to_string(),
         }
@@ -598,7 +612,7 @@ impl PluginParameters for RevisitParameters {
             VolRelease => self.vol_env.release.get(),
             PitchAttack => self.pitch_env.attack.get(),
             PitchDecay => self.pitch_env.decay.get(),
-            PitchSustain => self.pitch_env.sustain.get(),
+            PitchMultiply => self.pitch_env.sustain.get(),
             PitchRelease => self.pitch_env.release.get(),
             Error => 0.0,
         }
@@ -615,7 +629,7 @@ impl PluginParameters for RevisitParameters {
             VolRelease => self.vol_env.release.set(value),
             PitchAttack => self.pitch_env.attack.set(value),
             PitchDecay => self.pitch_env.decay.set(value),
-            PitchSustain => self.pitch_env.sustain.set(value),
+            PitchMultiply => self.pitch_env.sustain.set(value),
             PitchRelease => self.pitch_env.release.set(value),
             Error => (),
         }
@@ -645,7 +659,7 @@ impl Default for Revisit {
                 pitch_env: RevisitParametersEnvelope {
                     attack: AtomicFloat::new(PITCH_ATTACK),
                     decay: AtomicFloat::new(PITCH_DECAY),
-                    sustain: AtomicFloat::new(PITCH_SUSTAIN),
+                    sustain: AtomicFloat::new(PITCH_MULTIPLY),
                     release: AtomicFloat::new(PITCH_RELEASE),
                 },
                 volume: AtomicFloat::new(VOLUME),
