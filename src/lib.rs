@@ -5,6 +5,10 @@ extern crate rand;
 extern crate simple_logging;
 extern crate wmidi;
 
+mod neighbor_pairs;
+
+use neighbor_pairs::NeighborPairsIter;
+
 use std::{convert::TryFrom, sync::Arc};
 
 use log::{info, LevelFilter};
@@ -348,7 +352,9 @@ impl Plugin for Revisit {
 
     // Output audio given the current state of the VST
     fn process(&mut self, buffer: &mut AudioBuffer<f32>) {
-        info!("Processing frame");
+        if !self.notes.is_empty() {
+            info!("Processing frame, total notes: {}", self.notes.len());
+        }
 
         // Get the relevant parameters
         let num_samples = buffer.samples();
@@ -357,18 +363,15 @@ impl Plugin for Revisit {
         let volume = self.params.volume.get() * 0.25;
         let shape = NoteShape::from(self.params.shape.get());
 
-        // Sort pitch bend changes by delta_frame.
-        self.pitch_bend.sort_unstable_by(|a, b| a.1.cmp(&b.1));
-
-        let pitch_envelope = to_pitch_envelope(&self.pitch_bend, self.last_pitch_bend, num_samples);
+        let pitch_envelope: Vec<f32> =
+            to_pitch_envelope(&self.pitch_bend, self.last_pitch_bend, num_samples).collect();
         self.last_pitch_bend = *pitch_envelope.last().expect("Pitch envelope was empty?");
+
         // convert the normalized pitch bends into pitch multipliers
         let pitch_envelope: Vec<f32> = pitch_envelope
             .iter()
             .map(|normalized| to_pitch_multiplier(*normalized, 12))
             .collect();
-
-        self.pitch_bend.clear();
 
         // remove "dead" notes
         self.notes
@@ -404,11 +407,15 @@ impl Plugin for Revisit {
     }
 
     fn process_events(&mut self, events: &Events) {
-        info!(
-            "Processing MIDI events. Total events: {}",
-            events.num_events
-        );
+        if events.num_events > 0 {
+            info!(
+                "Processing MIDI events. Total events: {}",
+                events.num_events
+            );
+        }
         let envelope = Envelope::from(self.params.as_ref());
+        // Clear pitch bend to get new messages
+        self.pitch_bend.clear();
         for event in events.events() {
             match event {
                 vst::event::Event::Midi(event) => {
@@ -453,6 +460,9 @@ impl Plugin for Revisit {
                 _ => info!("Unrecognized event!"),
             }
         }
+
+        // Sort pitch bend changes by delta_frame.
+        self.pitch_bend.sort_unstable_by(|a, b| a.1.cmp(&b.1));
     }
 
     fn stop_process(&mut self) {
@@ -557,44 +567,47 @@ impl Default for Revisit {
     }
 }
 
-// Returns a vector of size num_samples which linearly interpolates between the
+// Returns an iterator of size num_samples which linearly interpolates between the
 // points specified by pitch_bend. last_pitch_bend is assumed to be the "-1th"
 // value and is used as the starting point.
+// Thank you to Cassie for this code!
 fn to_pitch_envelope(
     pitch_bend: &[(f32, i32)],
-    last_pitch_bend: f32,
+    prev_pitch_bend: f32,
     num_samples: usize,
-) -> Vec<f32> {
-    fn interpolate_n(start: f32, end: f32, num: usize) -> Vec<f32> {
-        (0..num)
-            .map(|i| lerp(start, end, i as f32 / num as f32))
-            .collect()
+) -> impl Iterator<Item = f32> + '_ {
+    // Linearly interpolate over num values
+    fn interpolate_n(start: f32, end: f32, num: usize) -> impl Iterator<Item = f32> {
+        (0..num).map(move |i| lerp(start, end, i as f32 / num as f32))
     }
 
-    let mut buf = Vec::with_capacity(num_samples);
-    let mut start = last_pitch_bend;
-    let (mut end, mut num) = match pitch_bend.first() {
-        None => (last_pitch_bend, num_samples),
-        Some((pitch, num)) => (*pitch, *num as usize),
-    };
+    // We first make the first and last points to interpolate over. The first
+    // point is just prev_pitch_bend, and the last point either gets the value
+    // of the last point in pitch_bend, or just prev_pitch_bend if pitch_bend
+    // is empty. If pitch_bend is nonempty, this means that the last "segment"
+    // is constant value, which is okay since we can't see into the future
+    // TODO: Use linear extrapolation for the last segment.
+    let first = Some((prev_pitch_bend, 0));
 
-    buf.append(&mut interpolate_n(start, end, num));
-    for i in 0..pitch_bend.len() {
-        start = end;
-        match pitch_bend.get(i + 1) {
-            None => {
-                end = start;
-                num = num_samples - buf.len();
-            }
-            Some((pitch, next_i)) => {
-                end = *pitch;
-                num = *next_i as usize - buf.len();
-            }
-        }
+    let last_bend = pitch_bend
+        .last()
+        .map(|&(bend, _)| bend)
+        .unwrap_or(prev_pitch_bend);
+    let last = Some((last_bend, num_samples as i32));
 
-        buf.append(&mut interpolate_n(start, end, num));
-    }
-    buf
+    // Now we make a list of points, starting with the first point, then all of
+    // pitch_bend, then the last point
+    first
+        .into_iter()
+        .chain(pitch_bend.iter().copied())
+        .chain(last)
+        // Make it a NeighborPairs so we can get the current point and the next point
+        .neighbor_pairs()
+        // Then interpolate the elements.
+        .flat_map(|((start, a), (end, b))| {
+            let num = b - a;
+            interpolate_n(start, end, num as usize)
+        })
 }
 
 fn normalize_pitch_bend(pitch_bend: PitchBend) -> f32 {
