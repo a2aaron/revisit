@@ -102,7 +102,7 @@ impl Oscillator {
         sample_rate: f32,
         envelope: Envelope,
         shape: NoteShape,
-        pitch_bend: f32,
+        pitch_bend: &[f32],
     ) -> Vec<f32> {
         let mut buf = Vec::with_capacity(num_samples);
 
@@ -110,9 +110,9 @@ impl Oscillator {
         // Ranges from [0.0, 1.0]
         let mut angle = self.angle;
 
-        for _ in 0..num_samples {
+        for i in 0..num_samples {
             // The pitch of the note, in hz
-            let pitch = Note::to_freq_f32(self.pitch) * pitch_bend;
+            let pitch = Note::to_freq_f32(self.pitch) * pitch_bend[i];
 
             // Get the raw signal
             let value = match shape {
@@ -128,6 +128,7 @@ impl Oscillator {
                 }
                 NoteShape::Triangle => -2.0 * (2.0 * angle - 1.0).abs() + 1.0,
             };
+
             // Apply volume envelope
             let value = value * self.envelope(sample_rate, envelope);
             buf.push(value);
@@ -307,8 +308,9 @@ struct Revisit {
     notes: Vec<Oscillator>,
     sample_rate: f32,
     params: Arc<RevisitParameters>,
-    // a multiplier to the current notes
-    pitch_bend: f32,
+    // (normalized pitchbend value, frame delta)
+    pitch_bend: Vec<(f32, i32)>,
+    last_pitch_bend: f32,
 }
 
 impl Plugin for Revisit {
@@ -349,17 +351,29 @@ impl Plugin for Revisit {
         info!("Processing frame");
 
         // Get the relevant parameters
+        let num_samples = buffer.samples();
+        let sample_rate = self.sample_rate;
         let envelope = Envelope::from(self.params.as_ref());
         let volume = self.params.volume.get() * 0.25;
         let shape = NoteShape::from(self.params.shape.get());
 
+        // Sort pitch bend changes by delta_frame.
+        self.pitch_bend.sort_unstable_by(|a, b| a.1.cmp(&b.1));
+        let pitch_envelope = to_pitch_envelope(&self.pitch_bend, self.last_pitch_bend, num_samples);
+        self.last_pitch_bend = *pitch_envelope.last().expect("Pitch envelope was empty?");
+        // convert the normalized pitch bends into pitch multipliers
+        let pitch_envelope: Vec<f32> = pitch_envelope
+            .iter()
+            .map(|normalized| to_pitch_multiplier(*normalized, 12))
+            .collect();
+
+        self.pitch_bend.clear();
+
         // remove "dead" notes
-        let sample_rate = self.sample_rate;
         self.notes
             .retain(|osc| osc.is_alive(sample_rate, envelope.release));
 
         // Get sound for each note
-        let num_samples = buffer.samples();
         let (_, mut output_buffer) = buffer.split();
 
         let mut output: Vec<f32> = (0..num_samples).map(|_| 0.0).collect();
@@ -370,7 +384,7 @@ impl Plugin for Revisit {
                 self.sample_rate,
                 envelope,
                 shape,
-                self.pitch_bend,
+                &pitch_envelope,
             );
             output = output
                 .iter()
@@ -422,10 +436,12 @@ impl Plugin for Revisit {
                                 );
                             }
                             MidiMessage::PitchBendChange(_, pitch_bend) => {
-                                self.pitch_bend = to_pitch_multiplier(pitch_bend, 12);
+                                self.pitch_bend
+                                    .push((normalize_pitch_bend(pitch_bend), event.delta_frames));
                                 info!(
-                                    "Pitch Bend event! {:?} (mult: {}, frame delta: {})",
-                                    pitch_bend, self.pitch_bend, event.delta_frames
+                                    "Pitch Bend event! {:?} frame delta: {}",
+                                    normalize_pitch_bend(pitch_bend),
+                                    event.delta_frames
                                 );
                             }
                             _ => info!("Unrecognized MidiMessage! {:?}", message),
@@ -533,9 +549,50 @@ impl Default for Revisit {
                 volume: AtomicFloat::new(VOLUME),
                 shape: AtomicFloat::new(SHAPE),
             }),
-            pitch_bend: 1.0,
+            pitch_bend: Vec::with_capacity(16),
+            last_pitch_bend: 0.0,
         }
     }
+}
+
+// Returns a vector of size num_samples which linearly interpolates between the
+// points specified by pitch_bend. last_pitch_bend is assumed to be the "-1th"
+// value and is used as the starting point.
+fn to_pitch_envelope(
+    pitch_bend: &[(f32, i32)],
+    last_pitch_bend: f32,
+    num_samples: usize,
+) -> Vec<f32> {
+    fn interpolate_n(start: f32, end: f32, num: usize) -> Vec<f32> {
+        (0..num)
+            .map(|i| lerp(start, end, i as f32 / num as f32))
+            .collect()
+    }
+
+    let mut buf = Vec::with_capacity(num_samples);
+    let mut start = last_pitch_bend;
+    let (mut end, mut num) = match pitch_bend.first() {
+        None => (last_pitch_bend, num_samples),
+        Some((pitch, num)) => (*pitch, *num as usize),
+    };
+
+    buf.append(&mut interpolate_n(start, end, num));
+    for i in 0..pitch_bend.len() {
+        start = end;
+        match pitch_bend.get(i + 1) {
+            None => {
+                end = start;
+                num = num_samples - buf.len();
+            }
+            Some((pitch, next_i)) => {
+                end = *pitch;
+                num = *next_i as usize - buf.len();
+            }
+        }
+
+        buf.append(&mut interpolate_n(start, end, num));
+    }
+    buf
 }
 
 fn normalize_pitch_bend(pitch_bend: PitchBend) -> f32 {
@@ -549,15 +606,15 @@ fn normalize_pitch_bend(pitch_bend: PitchBend) -> f32 {
     pitch_bend as f32 * (1.0 / 0x2000 as f32)
 }
 
-fn to_pitch_multiplier(pitch_bend: PitchBend, semitones: i32) -> f32 {
-    // Pitch bend is now [-1.0, 1.0]
-    let pitch_bend = normalize_pitch_bend(pitch_bend);
+// Converts a normalized pitch bend (range [-1.0, 1.0]) to the appropriate pitch
+// multiplier.
+fn to_pitch_multiplier(normalized_pitch_bend: f32, semitones: i32) -> f32 {
     // Given any note, the note a single semitone away is 2^1/12 times the original note
     // So (2^1/12)^n is n semitones away
     let exponent = 2.0f32.powf(semitones as f32 / 12.0);
     // We take an exponential here because frequency is exponential with respect
     // to note value
-    exponent.powf(pitch_bend)
+    exponent.powf(normalized_pitch_bend)
 }
 
 fn sample_time_to_f32(sample_time: usize, sample_rate: f32) -> f32 {
