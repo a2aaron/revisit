@@ -23,11 +23,11 @@ use wmidi::{MidiMessage, Note, PitchBend, U14, U7};
 const TAU: f32 = std::f32::consts::TAU;
 
 // Default values for parameters
-const VOLUME: f32 = 0.5;
+const VOLUME: f32 = 0.33;
 const SHAPE: f32 = 0.225; // (triangle)
 const VOL_ATTACK: f32 = 0.1;
 const VOL_DECAY: f32 = 0.2;
-const VOL_SUSTAIN: f32 = 0.3;
+const VOL_SUSTAIN: f32 = 0.5;
 const VOL_RELEASE: f32 = 0.3;
 const PITCH_ATTACK: f32 = 1.0 / 10000.0;
 const PITCH_DECAY: f32 = 0.2;
@@ -148,7 +148,7 @@ impl Oscillator {
     ) {
         for i in 0..dest.len() {
             // Get volume envelope
-            let vel = vol_adsr.get(self.time, self.note_state, sample_rate) * self.vel;
+            let vel = vol_adsr.get(self.time, self.note_state, sample_rate);
 
             // Get pitch envelope
             let pitch = pitch_bend[i] + pitch_adsr.get(self.time, self.note_state, sample_rate);
@@ -202,8 +202,8 @@ impl Oscillator {
             // Get the raw signal
             let value = shape.get(self.angle);
 
-            // Apply volume envelope
-            let value = value * vel;
+            // Apply volume envelope and note velocity
+            let value = value * vel * self.vel;
             dest[i] = value;
 
             // The pitch of the note after applying pitch multipliers
@@ -436,7 +436,7 @@ impl Plugin for Revisit {
         // Get the relevant parameters
         let num_samples = buffer.samples();
         let vol_adsr = AmplitudeADSR::from_params(&self.params.vol_env);
-        let volume = self.params.volume.get() * 0.25;
+        let volume = self.params.volume.get();
 
         let pitch_adsr = PitchADSR::from_params(&self.params.pitch_env);
         let shape = NoteShape::from(self.params.shape.get());
