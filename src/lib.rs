@@ -442,9 +442,11 @@ impl Plugin for Revisit {
         let shape = NoteShape::from(self.params.shape.get());
 
         // Get the envelope from MIDI pitch bend
-        let pitch_envelope: Vec<f32> =
-            to_pitch_envelope(&self.pitch_bend, self.last_pitch_bend, num_samples).collect();
-        self.last_pitch_bend = *pitch_envelope.last().expect("Pitch envelope was empty?");
+        let (pitch_bends, last_bend) =
+            to_pitch_envelope(&self.pitch_bend, self.last_pitch_bend, num_samples);
+        self.last_pitch_bend = last_bend;
+
+        let pitch_bends: Vec<f32> = pitch_bends.collect();
 
         // Get sound for each note
         let (_, mut output_buffer) = buffer.split();
@@ -458,7 +460,7 @@ impl Plugin for Revisit {
                 vol_adsr,
                 pitch_adsr,
                 shape,
-                &pitch_envelope,
+                &pitch_bends,
             );
 
             output = output
@@ -696,7 +698,7 @@ fn to_pitch_envelope(
     pitch_bend: &[(f32, i32)],
     prev_pitch_bend: f32,
     num_samples: usize,
-) -> impl Iterator<Item = f32> + '_ {
+) -> (impl Iterator<Item = f32> + '_, f32) {
     // Linearly interpolate over num values
     fn interpolate_n(start: f32, end: f32, num: usize) -> impl Iterator<Item = f32> {
         (0..num).map(move |i| lerp(start, end, i as f32 / num as f32))
@@ -718,7 +720,7 @@ fn to_pitch_envelope(
 
     // Now we make a list of points, starting with the first point, then all of
     // pitch_bend, then the last point
-    first
+    let iter = first
         .into_iter()
         .chain(pitch_bend.iter().copied())
         .chain(last)
@@ -728,7 +730,9 @@ fn to_pitch_envelope(
         .flat_map(|((start, a), (end, b))| {
             let num = b - a;
             interpolate_n(start, end, num as usize)
-        })
+        });
+
+    (iter, last_bend)
 }
 
 fn normalize_U7(num: U7) -> f32 {
