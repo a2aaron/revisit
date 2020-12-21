@@ -436,8 +436,9 @@ impl Plugin for Revisit {
         // Get the relevant parameters
         let num_samples = buffer.samples();
         let vol_adsr = AmplitudeADSR::from_params(&self.params.vol_env);
-        let pitch_adsr = PitchADSR::from_params(&self.params.pitch_env);
         let volume = self.params.volume.get() * 0.25;
+
+        let pitch_adsr = PitchADSR::from_params(&self.params.pitch_env);
         let shape = NoteShape::from(self.params.shape.get());
 
         // Get the envelope from MIDI pitch bend
@@ -556,6 +557,10 @@ impl Plugin for Revisit {
 
     fn stop_process(&mut self) {
         info!("Stopping process...");
+    }
+
+    fn set_sample_rate(&mut self, rate: f32) {
+        self.sample_rate = rate;
     }
 
     // Needed so that the host knows what parameters exist
