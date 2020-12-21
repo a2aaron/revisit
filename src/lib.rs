@@ -10,7 +10,7 @@ use std::{convert::TryFrom, sync::Arc};
 use log::{info, LevelFilter};
 use vst::{
     api::{Events, Supported},
-    buffer::{AudioBuffer, Outputs},
+    buffer::AudioBuffer,
     plugin::{CanDo, Category, Info, Plugin, PluginParameters},
     util::AtomicFloat,
 };
@@ -95,22 +95,20 @@ impl Oscillator {
         }
     }
 
-    /// Get num_samples worth of samples from the Oscillator
+    /// Fills dest with the signal of the oscillator
     fn values(
         &mut self,
-        num_samples: usize,
+        dest: &mut [f32],
         sample_rate: f32,
         envelope: Envelope,
         shape: NoteShape,
         pitch_bend: &[f32],
-    ) -> Vec<f32> {
-        let mut buf = Vec::with_capacity(num_samples);
-
+    ) {
         // What position through the waveform the oscillator is at.
         // Ranges from [0.0, 1.0]
         let mut angle = self.angle;
 
-        for i in 0..num_samples {
+        for i in 0..dest.len() {
             // The pitch of the note, in hz
             let pitch = Note::to_freq_f32(self.pitch) * pitch_bend[i];
 
@@ -131,7 +129,7 @@ impl Oscillator {
 
             // Apply volume envelope
             let value = value * self.envelope(sample_rate, envelope);
-            buf.push(value);
+            dest[i] = value;
 
             // Update the angle. Each sample is 1.0 / sample_rate apart for a
             // complete waveform. We multiply by the pitch to scale faster.
@@ -160,7 +158,6 @@ impl Oscillator {
         // at once as this reduces the error induced by multiplying the large
         // number of samples.
         self.angle = angle;
-        buf
     }
 
     /// Get the current envelope multiplier
@@ -315,7 +312,10 @@ struct Revisit {
 
 impl Plugin for Revisit {
     fn init(&mut self) {
-        simple_logging::log_to_file("revisit.log", LevelFilter::Info);
+        let result = simple_logging::log_to_file("revisit.log", LevelFilter::Info);
+        if let Err(err) = result {
+            println!("Couldn't start logging! {}", err);
+        }
         info!("Begin VST log");
     }
 
@@ -359,6 +359,7 @@ impl Plugin for Revisit {
 
         // Sort pitch bend changes by delta_frame.
         self.pitch_bend.sort_unstable_by(|a, b| a.1.cmp(&b.1));
+
         let pitch_envelope = to_pitch_envelope(&self.pitch_bend, self.last_pitch_bend, num_samples);
         self.last_pitch_bend = *pitch_envelope.last().expect("Pitch envelope was empty?");
         // convert the normalized pitch bends into pitch multipliers
@@ -376,16 +377,17 @@ impl Plugin for Revisit {
         // Get sound for each note
         let (_, mut output_buffer) = buffer.split();
 
-        let mut output: Vec<f32> = (0..num_samples).map(|_| 0.0).collect();
-
+        let mut output = vec![0.0; num_samples];
+        let mut osc_buffer = vec![0.0; num_samples];
         for note in &mut self.notes {
-            let osc_buffer = note.values(
-                num_samples,
+            note.values(
+                &mut osc_buffer,
                 self.sample_rate,
                 envelope,
                 shape,
                 &pitch_envelope,
             );
+
             output = output
                 .iter()
                 .zip(osc_buffer.iter())
@@ -469,7 +471,7 @@ impl PluginParameters for RevisitParameters {
         match index.into() {
             Attack | Decay | Release => " sec".to_string(),
             Sustain | Volume => "%".to_string(),
-            NoteShape => "".to_string(),
+            Shape => "".to_string(),
             Error => "".to_string(),
         }
     }
@@ -531,7 +533,7 @@ impl PluginParameters for RevisitParameters {
         ParameterType::from(index) != ParameterType::Error
     }
 
-    fn string_to_parameter(&self, index: i32, text: String) -> bool {
+    fn string_to_parameter(&self, _index: i32, _text: String) -> bool {
         false
     }
 }
@@ -615,18 +617,6 @@ fn to_pitch_multiplier(normalized_pitch_bend: f32, semitones: i32) -> f32 {
     // We take an exponential here because frequency is exponential with respect
     // to note value
     exponent.powf(normalized_pitch_bend)
-}
-
-fn sample_time_to_f32(sample_time: usize, sample_rate: f32) -> f32 {
-    sample_time as f32 / sample_rate
-}
-
-fn clear_output_buffer(output: &mut Outputs<f32>) {
-    for channel in output.into_iter() {
-        for sample in channel {
-            *sample = 0.0;
-        }
-    }
 }
 
 fn ads_env(attack: f32, decay: f32, sustain: f32, time: f32) -> f32 {
