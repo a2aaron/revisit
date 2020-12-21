@@ -67,6 +67,25 @@ enum NoteShape {
     Triangle,
 }
 
+impl NoteShape {
+    // Return the raw waveform using the given angle
+    fn get(&self, angle: Angle) -> f32 {
+        match self {
+            // See https://www.desmos.com/calculator/dqg8kdvung for visuals
+            NoteShape::Sine => (angle * TAU).sin(),
+            NoteShape::Sawtooth => (angle * 2.0) - 1.0,
+            NoteShape::Square => {
+                if angle < 0.5 {
+                    -1.0
+                } else {
+                    1.0
+                }
+            }
+            NoteShape::Triangle => -2.0 * (2.0 * angle - 1.0).abs() + 1.0,
+        }
+    }
+}
+
 impl From<f32> for NoteShape {
     fn from(x: f32) -> Self {
         if x < 0.25 {
@@ -127,16 +146,12 @@ impl Oscillator {
         shape: NoteShape,
         pitch_bend: &[f32],
     ) {
-        let mut amplitude = Vec::with_capacity(dest.len());
-        let mut pitch_env = Vec::from(pitch_bend);
-
         for i in 0..dest.len() {
             // Get volume envelope
             let vel = vol_adsr.get(self.time, self.note_state, sample_rate);
-            amplitude.push(vel);
 
             // Get pitch envelope
-            pitch_env[i] += pitch_adsr.get(self.time, self.note_state, sample_rate);
+            let pitch = pitch_bend[i] + pitch_adsr.get(self.time, self.note_state, sample_rate);
 
             // Only advance time if the note is being held down!
             match self.note_state {
@@ -183,21 +198,24 @@ impl Oscillator {
                     self.time = 0;
                 }
             }
-        }
 
-        // Generate the signal.
-        // Update the tracked angle. Note that this is more accurate than just
-        // recomputing the angle with a multiply because that method will
-        // induce more round off error due to the large mangitudes involved.
-        self.angle = generate_signal(
-            dest,
-            self.angle,
-            sample_rate,
-            self.pitch,
-            shape,
-            &amplitude,
-            &pitch_env,
-        );
+            // Get the raw signal
+            let value = shape.get(self.angle);
+
+            // Apply volume envelope
+            let value = value * vel;
+            dest[i] = value;
+
+            // The pitch of the note after applying pitch multipliers
+            let pitch = Note::to_freq_f32(self.pitch) * to_pitch_multiplier(pitch, 12);
+
+            // Update the angle. Each sample is 1.0 / sample_rate apart for a
+            // complete waveform. We also multiply by pitch to advance the right amount
+            // We also constrain the angle between 0 and 1, as this reduces
+            // roundoff error.
+            let angle_delta = pitch / sample_rate;
+            self.angle = (self.angle + angle_delta) % 1.0;
+        }
     }
 
     /// Release the note
@@ -309,45 +327,6 @@ impl ADSR for PitchADSR {
             note_state,
             sample_rate,
         ) * self.multiply
-    }
-}
-
-/// Return the envelope value that the given ADSR would have at `time`.
-/// `time`        - number of samples since the start of the note
-/// `sample_rate` - in hz/second
-/// `note_state`  - affects where in the envelope the note is at
-/// Held - do normal attack/decay/sustain envelope
-/// Released - do release envelope, going from the released velocity to zero
-/// Retrigger - do short envelope from retrigger velocity to zero
-fn envelope(
-    adsr: (f32, f32, f32, f32),
-    time: usize,
-    note_state: NoteState,
-    sample_rate: SampleRate,
-) -> f32 {
-    let attack = adsr.0;
-    let decay = adsr.1;
-    let sustain = adsr.2;
-    let release = adsr.3;
-
-    match note_state {
-        NoteState::None => 0.0,
-        NoteState::Held => ads_env(attack, decay, sustain, time as f32 / sample_rate),
-        NoteState::Released {
-            time: rel_time,
-            vel,
-        } => {
-            let time = (time - rel_time) as f32 / sample_rate;
-            lerp(vel, 0.0, time / release)
-        }
-        NoteState::Retrigger {
-            time: retrig_time,
-            vel,
-        } => {
-            // Forcibly decay over RETRIGGER_TIME.
-            let time = (time - retrig_time) as f32 / RETRIGGER_TIME as f32;
-            lerp(vel, 0.0, time)
-        }
     }
 }
 
@@ -769,61 +748,43 @@ fn to_pitch_multiplier(normalized_pitch_bend: f32, semitones: i32) -> f32 {
     exponent.powf(normalized_pitch_bend)
 }
 
-/// Fill dest with the generated signal.
-/// dest - the buffer to write the signal to.
-/// starting_angle - the starting angle of the note
-/// note - the pitch of the note
-/// sample_rate - the sample rate of the audio, in samples/second
-/// shape - the note shape to use
-/// amplitude - the amplitude envelope
-/// pitch_bend - the pitch bend envelope, in normalized pitch bend
-/// returns the new angle
-fn generate_signal(
-    dest: &mut [f32],
-    starting_angle: Angle,
+/// Return the envelope value that the given ADSR would have at `time`.
+/// `time`        - number of samples since the start of the note
+/// `sample_rate` - in hz/second
+/// `note_state`  - affects where in the envelope the note is at
+/// Held - do normal attack/decay/sustain envelope
+/// Released - do release envelope, going from the released velocity to zero
+/// Retrigger - do short envelope from retrigger velocity to zero
+fn envelope(
+    adsr: (f32, f32, f32, f32),
+    time: usize,
+    note_state: NoteState,
     sample_rate: SampleRate,
-    note: Note,
-    shape: NoteShape,
-    amplitude: &[f32],
-    pitch_bend: &[f32],
 ) -> f32 {
-    // What position through the waveform the oscillator is at.
-    // Ranges from [0.0, 1.0]
-    let mut angle = starting_angle;
+    let attack = adsr.0;
+    let decay = adsr.1;
+    let sustain = adsr.2;
+    let release = adsr.3;
 
-    for i in 0..dest.len() {
-        // The pitch of the note, in hz
-        let pitch = Note::to_freq_f32(note) * to_pitch_multiplier(pitch_bend[i], 12);
-
-        // Get the raw signal
-        let value = match shape {
-            // See https://www.desmos.com/calculator/dqg8kdvung for visuals
-            NoteShape::Sine => (angle * TAU).sin(),
-            NoteShape::Sawtooth => (angle * 2.0) - 1.0,
-            NoteShape::Square => {
-                if angle < 0.5 {
-                    -1.0
-                } else {
-                    1.0
-                }
-            }
-            NoteShape::Triangle => -2.0 * (2.0 * angle - 1.0).abs() + 1.0,
-        };
-
-        // Apply volume envelope
-        let value = value * amplitude[i];
-        dest[i] = value;
-        // dest[i] = amplitude[i];
-
-        // Update the angle. Each sample is 1.0 / sample_rate apart for a
-        // complete waveform. We multiply by the pitch to scale faster.
-        // We also constrain the angle between 0 and 1, as this reduces
-        // roundoff error.
-        let angle_delta = pitch / sample_rate;
-        angle = (angle + angle_delta) % 1.0;
+    match note_state {
+        NoteState::None => 0.0,
+        NoteState::Held => ads_env(attack, decay, sustain, time as f32 / sample_rate),
+        NoteState::Released {
+            time: rel_time,
+            vel,
+        } => {
+            let time = (time - rel_time) as f32 / sample_rate;
+            lerp(vel, 0.0, time / release)
+        }
+        NoteState::Retrigger {
+            time: retrig_time,
+            vel,
+        } => {
+            // Forcibly decay over RETRIGGER_TIME.
+            let time = (time - retrig_time) as f32 / RETRIGGER_TIME as f32;
+            lerp(vel, 0.0, time)
+        }
     }
-
-    angle
 }
 
 // Get the envelope value given attack, decay, and sustain values.
@@ -856,5 +817,5 @@ fn ease_in_expo(x: f32) -> f32 {
     }
 }
 
-// Make sure you call this, or nothing will happen.
+// Export symbols for main
 plugin_main!(Revisit);
