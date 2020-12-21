@@ -33,6 +33,7 @@ const PITCH_ATTACK: f32 = 1.0 / 10000.0;
 const PITCH_DECAY: f32 = 0.2;
 const PITCH_MULTIPLY: f32 = 0.5;
 const PITCH_RELEASE: f32 = 1.0 / 10000.0;
+const LOW_PASS_ALPHA: f32 = 0.5;
 
 const RETRIGGER_TIME: usize = 88; // 88 samples is about 2 miliseconds.
 
@@ -119,6 +120,7 @@ struct Oscillator {
     angle: f32,
     time: usize,
     note_state: NoteState,
+    low_pass_output: Option<f32>,
     note_on: Option<i32>,
     note_off: Option<i32>,
 }
@@ -131,6 +133,7 @@ impl Oscillator {
             angle: 0.0,
             time: 0,
             note_state: NoteState::None,
+            low_pass_output: None,
             note_on: None,
             note_off: None,
         }
@@ -145,6 +148,7 @@ impl Oscillator {
         pitch_adsr: PitchADSR,
         shape: NoteShape,
         pitch_bend: &[f32],
+        low_pass_alpha: f32,
     ) {
         for i in 0..dest.len() {
             // Get volume envelope
@@ -204,6 +208,20 @@ impl Oscillator {
 
             // Apply volume envelope and note velocity
             let value = value * vel * self.vel;
+
+            // Apply low pass filter
+            let value = if let Some(low) = self.low_pass_output {
+                // If low is NaN or Infinity, reset it.
+                let low = if low.is_finite() { low } else { value };
+
+                let value = low + low_pass_alpha * (value - low);
+                self.low_pass_output = Some(value);
+                value
+            } else {
+                self.low_pass_output = Some(value);
+                value
+            };
+
             dest[i] = value;
 
             // The pitch of the note after applying pitch multipliers
@@ -337,6 +355,7 @@ struct RevisitParameters {
     pitch_env: RevisitParametersEnvelope,
     volume: AtomicFloat,
     shape: AtomicFloat,
+    low_pass_alpha: AtomicFloat,
 }
 
 // Convience struct, represents parameters that are part of an envelope
@@ -360,6 +379,7 @@ enum ParameterType {
     PitchDecay,
     PitchMultiply,
     PitchRelease,
+    LowPassAlpha,
     Error,
 }
 
@@ -377,6 +397,7 @@ impl From<i32> for ParameterType {
             7 => PitchDecay,
             8 => PitchMultiply,
             9 => PitchRelease,
+            10 => LowPassAlpha,
             _ => Error,
         }
     }
@@ -409,8 +430,8 @@ impl Plugin for Revisit {
             unique_id: 413612,
             version: 1,
             category: Category::Synth,
-            // Volume + Note Shape + Volume ADSR + Pitch ADSR
-            parameters: 1 + 1 + 4 + 4,
+            // Volume + Note Shape + Volume ADSR + Pitch ADSR + LowPassAlpha
+            parameters: 1 + 1 + 4 + 4 + 1,
             // No audio inputs
             inputs: 0,
             // Two channel audio!
@@ -441,6 +462,8 @@ impl Plugin for Revisit {
         let pitch_adsr = PitchADSR::from_params(&self.params.pitch_env);
         let shape = NoteShape::from(self.params.shape.get());
 
+        let low_pass_alpha = self.params.low_pass_alpha.get();
+
         // Get the envelope from MIDI pitch bend
         let (pitch_bends, last_bend) =
             to_pitch_envelope(&self.pitch_bend, self.last_pitch_bend, num_samples);
@@ -461,6 +484,7 @@ impl Plugin for Revisit {
                 pitch_adsr,
                 shape,
                 &pitch_bends,
+                low_pass_alpha,
             );
 
             output = output
@@ -579,7 +603,7 @@ impl PluginParameters for RevisitParameters {
                 " sec".to_string()
             }
             VolSustain | PitchMultiply | Volume => "%".to_string(),
-            Shape => "".to_string(),
+            Shape | LowPassAlpha => "".to_string(),
             Error => "".to_string(),
         }
     }
@@ -599,6 +623,7 @@ impl PluginParameters for RevisitParameters {
             PitchRelease => format!("{:.2}", pitch_env.release),
             Volume => format!("{:.2}", self.volume.get() * 100.0),
             Shape => format!("{}", NoteShape::from(self.shape.get())),
+            LowPassAlpha => format!("{}", self.low_pass_alpha.get()),
             Error => "".to_string(),
         }
     }
@@ -616,6 +641,7 @@ impl PluginParameters for RevisitParameters {
             PitchDecay => "Decay (Pitch Bend)".to_string(),
             PitchMultiply => "Multiply (Pitch Bend)".to_string(),
             PitchRelease => "Release (Pitch Bend)".to_string(),
+            LowPassAlpha => "Low Pass Alpha".to_string(),
             Error => "".to_string(),
         }
     }
@@ -633,6 +659,7 @@ impl PluginParameters for RevisitParameters {
             PitchDecay => self.pitch_env.decay.get(),
             PitchMultiply => self.pitch_env.sustain.get(),
             PitchRelease => self.pitch_env.release.get(),
+            LowPassAlpha => self.low_pass_alpha.get(),
             Error => 0.0,
         }
     }
@@ -650,6 +677,7 @@ impl PluginParameters for RevisitParameters {
             PitchDecay => self.pitch_env.decay.set(value),
             PitchMultiply => self.pitch_env.sustain.set(value),
             PitchRelease => self.pitch_env.release.set(value),
+            LowPassAlpha => self.low_pass_alpha.set(value),
             Error => (),
         }
     }
@@ -683,6 +711,7 @@ impl Default for Revisit {
                 },
                 volume: AtomicFloat::new(VOLUME),
                 shape: AtomicFloat::new(SHAPE),
+                low_pass_alpha: AtomicFloat::new(LOW_PASS_ALPHA),
             }),
             pitch_bend: Vec::with_capacity(16),
             last_pitch_bend: 0.0,
