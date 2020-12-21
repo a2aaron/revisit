@@ -115,7 +115,7 @@ impl std::fmt::Display for NoteShape {
 #[derive(Debug)]
 struct Oscillator {
     pitch: Note,
-    vel: U7,
+    vel: f32,
     angle: f32,
     time: usize,
     note_state: NoteState,
@@ -127,7 +127,7 @@ impl Oscillator {
     fn new(pitch: Note, vel: U7) -> Oscillator {
         Oscillator {
             pitch,
-            vel,
+            vel: normalize_U7(vel),
             angle: 0.0,
             time: 0,
             note_state: NoteState::None,
@@ -148,7 +148,7 @@ impl Oscillator {
     ) {
         for i in 0..dest.len() {
             // Get volume envelope
-            let vel = vol_adsr.get(self.time, self.note_state, sample_rate);
+            let vel = vol_adsr.get(self.time, self.note_state, sample_rate) * self.vel;
 
             // Get pitch envelope
             let pitch = pitch_bend[i] + pitch_adsr.get(self.time, self.note_state, sample_rate);
@@ -729,6 +729,13 @@ fn to_pitch_envelope(
             let num = b - a;
             interpolate_n(start, end, num as usize)
         })
+}
+
+fn normalize_U7(num: U7) -> f32 {
+    // A U7 in is in range [0, 127]
+    let num = U7::data_to_bytes(&[num])[0];
+    // convert to f32 - range [0.0, 1.0]
+    num as f32 / 127.0
 }
 
 fn normalize_pitch_bend(pitch_bend: PitchBend) -> f32 {
