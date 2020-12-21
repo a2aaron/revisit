@@ -36,7 +36,10 @@ const PITCH_RELEASE: f32 = 1.0 / 10000.0;
 
 const RETRIGGER_TIME: usize = 88; // 88 samples is about 2 miliseconds.
 
+/// A value in range [0.0, 1.0] which denotes the position wihtin a wave cycle.
 type Angle = f32;
+/// The sample rate in Hz/seconds.
+type SampleRate = f32;
 
 #[derive(Debug, Clone, Copy)]
 enum NoteState {
@@ -118,7 +121,7 @@ impl Oscillator {
     fn values(
         &mut self,
         dest: &mut [f32],
-        sample_rate: f32,
+        sample_rate: SampleRate,
         vol_adsr: AmplitudeADSR,
         pitch_adsr: PitchADSR,
         shape: NoteShape,
@@ -209,7 +212,7 @@ impl Oscillator {
 
     /// Returns true if the note is "alive" (playing audio). A note is dead if
     /// it is in the release state and it is after the total release time.
-    fn is_alive(&self, sample_rate: f32, release: f32) -> bool {
+    fn is_alive(&self, sample_rate: SampleRate, release: f32) -> bool {
         match self.note_state {
             NoteState::None | NoteState::Held | NoteState::Retrigger { time: _, vel: _ } => true,
             NoteState::Released {
@@ -252,7 +255,7 @@ trait ADSR {
     // time is how many samples since the start of the note
     // note_state is what state the note is in
     // sample rate is in hz/second
-    fn get(&self, time: usize, note_state: NoteState, sample_rate: f32) -> f32;
+    fn get(&self, time: usize, note_state: NoteState, sample_rate: SampleRate) -> f32;
 }
 
 impl ADSR for AmplitudeADSR {
@@ -273,7 +276,7 @@ impl ADSR for AmplitudeADSR {
             release: (release * 5.0).max(1.0 / 1000.0),
         }
     }
-    fn get(&self, time: usize, note_state: NoteState, sample_rate: f32) -> f32 {
+    fn get(&self, time: usize, note_state: NoteState, sample_rate: SampleRate) -> f32 {
         envelope(
             (self.attack, self.decay, self.sustain, self.release),
             time,
@@ -299,7 +302,7 @@ impl ADSR for PitchADSR {
         }
     }
 
-    fn get(&self, time: usize, note_state: NoteState, sample_rate: f32) -> f32 {
+    fn get(&self, time: usize, note_state: NoteState, sample_rate: SampleRate) -> f32 {
         envelope(
             (self.attack, self.decay, 0.0, self.release),
             time,
@@ -320,7 +323,7 @@ fn envelope(
     adsr: (f32, f32, f32, f32),
     time: usize,
     note_state: NoteState,
-    sample_rate: f32,
+    sample_rate: SampleRate,
 ) -> f32 {
     let attack = adsr.0;
     let decay = adsr.1;
@@ -402,7 +405,7 @@ impl From<i32> for ParameterType {
 
 struct Revisit {
     notes: Vec<Oscillator>,
-    sample_rate: f32,
+    sample_rate: SampleRate,
     params: Arc<RevisitParameters>,
     // (normalized pitchbend value, frame delta)
     pitch_bend: Vec<(f32, i32)>,
@@ -778,7 +781,7 @@ fn to_pitch_multiplier(normalized_pitch_bend: f32, semitones: i32) -> f32 {
 fn generate_signal(
     dest: &mut [f32],
     starting_angle: Angle,
-    sample_rate: f32,
+    sample_rate: SampleRate,
     note: Note,
     shape: NoteShape,
     amplitude: &[f32],
