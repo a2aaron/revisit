@@ -119,9 +119,8 @@ impl Oscillator {
         &mut self,
         dest: &mut [f32],
         sample_rate: f32,
-        vol_adsr: Envelope,
-        pitch_adsr: Envelope,
-        pitch_multiplier: f32,
+        vol_adsr: AmplitudeADSR,
+        pitch_adsr: PitchADSR,
         shape: NoteShape,
         pitch_bend: &[f32],
     ) {
@@ -130,11 +129,11 @@ impl Oscillator {
 
         for i in 0..dest.len() {
             // Get volume envelope
-            let vel = self.envelope(sample_rate, vol_adsr);
+            let vel = vol_adsr.get(self.time, self.note_state, sample_rate);
             amplitude.push(vel);
 
             // Get pitch envelope
-            pitch_env[i] += self.envelope(sample_rate, pitch_adsr) * pitch_multiplier;
+            pitch_env[i] += pitch_adsr.get(self.time, self.note_state, sample_rate);
 
             // Only advance time if the note is being held down!
             match self.note_state {
@@ -198,11 +197,6 @@ impl Oscillator {
         );
     }
 
-    /// Get the current envelope multiplier
-    fn envelope(&self, sample_rate: f32, envelope: Envelope) -> f32 {
-        Oscillator::full_envelope(self.time, self.note_state, sample_rate, envelope)
-    }
-
     /// Release the note
     fn note_off(&mut self, frame_delta: i32) {
         self.note_off = Some(frame_delta);
@@ -224,48 +218,11 @@ impl Oscillator {
             } => (self.time - release_time) as f32 / sample_rate < release,
         }
     }
-
-    /// Computes the envelope multiplier. Time is the number of samples since the
-    /// start of the note. This depends on the state of the note:
-    /// Held - do normal attack/decay/sustain envelope
-    /// Released - do release envelope, going from the released velocity to zero
-    /// Retrigger - do short envelope from retrigger velocity to zero
-    fn full_envelope(
-        time: usize,
-        note_state: NoteState,
-        sample_rate: f32,
-        envelope: Envelope,
-    ) -> f32 {
-        match note_state {
-            NoteState::None => 0.0,
-            NoteState::Held => ads_env(
-                envelope.attack,
-                envelope.decay,
-                envelope.sustain,
-                time as f32 / sample_rate,
-            ),
-            NoteState::Released {
-                time: rel_time,
-                vel,
-            } => {
-                let time = (time - rel_time) as f32 / sample_rate;
-                lerp(vel, 0.0, time / envelope.release)
-            }
-            NoteState::Retrigger {
-                time: retrig_time,
-                vel,
-            } => {
-                // Forcibly decay over RETRIGGER_TIME.
-                let time = (time - retrig_time) as f32 / RETRIGGER_TIME as f32;
-                lerp(vel, 0.0, time)
-            }
-        }
-    }
 }
 
 /// An ADSR envelope.
 #[derive(Debug, Clone, Copy)]
-struct Envelope {
+struct AmplitudeADSR {
     // In seconds
     attack: f32,
     // In seconds
@@ -276,44 +233,119 @@ struct Envelope {
     release: f32,
 }
 
-impl Envelope {
-    // Convert [0.0, 1.0] normalized parameters into their values in seconds
-    // maximums is a three-tuple of (attack, decay, release) and is the max time
-    // of those settings, when the repsective parameter is 1.0
-    // All values are in seconds.
-    fn from_params(params: &RevisitParametersEnvelope, env_type: EnvelopeType) -> Self {
+#[derive(Debug, Clone, Copy)]
+struct PitchADSR {
+    // In seconds
+    attack: f32,
+    // In seconds
+    decay: f32,
+    // In percent (-1.0 to 1.0)
+    multiply: f32,
+    // In seconds
+    release: f32,
+}
+
+trait ADSR {
+    // Convert [0.0, 1.0] normalized parameters into an envelope.
+    fn from_params(params: &RevisitParametersEnvelope) -> Self;
+    // Get the current envelope value.
+    // time is how many samples since the start of the note
+    // note_state is what state the note is in
+    // sample rate is in hz/second
+    fn get(&self, time: usize, note_state: NoteState, sample_rate: f32) -> f32;
+}
+
+impl ADSR for AmplitudeADSR {
+    fn from_params(params: &RevisitParametersEnvelope) -> Self {
         // Apply exponetial scaling to input values.
         // This makes it easier to select small envelope lengths.
         let attack = ease_in_expo(params.attack.get());
         let decay = ease_in_expo(params.decay.get());
         let sustain = params.sustain.get();
         let release = ease_in_expo(params.release.get());
-
-        match env_type {
-            EnvelopeType::Amplitude => {
-                Envelope {
-                    // Clamp values to around 1 ms minimum.
-                    // This avoids division by zero problems.
-                    // Also prevents annoying clicking which is undesirable.
-                    attack: (attack * 2.0).max(1.0 / 1000.0),
-                    decay: (decay * 5.0).max(1.0 / 1000.0),
-                    sustain,
-                    release: (release * 5.0).max(1.0 / 1000.0),
-                }
-            }
-            EnvelopeType::Pitch => Envelope {
-                attack: (attack * 2.0).max(1.0 / 10000.0),
-                decay: (decay * 5.0).max(1.0 / 10000.0),
-                sustain: 0.0,
-                release: (release * 5.0).max(1.0 / 10000.0),
-            },
+        AmplitudeADSR {
+            // Clamp values to around 1 ms minimum.
+            // This avoids division by zero problems.
+            // Also prevents annoying clicking which is undesirable.
+            attack: (attack * 2.0).max(1.0 / 1000.0),
+            decay: (decay * 5.0).max(1.0 / 1000.0),
+            sustain,
+            release: (release * 5.0).max(1.0 / 1000.0),
         }
+    }
+    fn get(&self, time: usize, note_state: NoteState, sample_rate: f32) -> f32 {
+        envelope(
+            (self.attack, self.decay, self.sustain, self.release),
+            time,
+            note_state,
+            sample_rate,
+        )
     }
 }
 
-enum EnvelopeType {
-    Amplitude,
-    Pitch,
+impl ADSR for PitchADSR {
+    fn from_params(params: &RevisitParametersEnvelope) -> Self {
+        // Apply exponetial scaling to input values.
+        // This makes it easier to select small envelope lengths.
+        let attack = ease_in_expo(params.attack.get());
+        let decay = ease_in_expo(params.decay.get());
+        let multiply = params.sustain.get();
+        let release = ease_in_expo(params.release.get());
+        PitchADSR {
+            attack: (attack * 2.0).max(1.0 / 10000.0),
+            decay: (decay * 5.0).max(1.0 / 10000.0),
+            multiply: (multiply - 0.5) * 2.0,
+            release: (release * 5.0).max(1.0 / 10000.0),
+        }
+    }
+
+    fn get(&self, time: usize, note_state: NoteState, sample_rate: f32) -> f32 {
+        envelope(
+            (self.attack, self.decay, 0.0, self.release),
+            time,
+            note_state,
+            sample_rate,
+        ) * self.multiply
+    }
+}
+
+/// Return the envelope value that the given ADSR would have at `time`.
+/// `time`        - number of samples since the start of the note
+/// `sample_rate` - in hz/second
+/// `note_state`  - affects where in the envelope the note is at
+/// Held - do normal attack/decay/sustain envelope
+/// Released - do release envelope, going from the released velocity to zero
+/// Retrigger - do short envelope from retrigger velocity to zero
+fn envelope(
+    adsr: (f32, f32, f32, f32),
+    time: usize,
+    note_state: NoteState,
+    sample_rate: f32,
+) -> f32 {
+    let attack = adsr.0;
+    let decay = adsr.1;
+    let sustain = adsr.2;
+    let release = adsr.3;
+
+    match note_state {
+        NoteState::None => 0.0,
+        NoteState::Held => ads_env(attack, decay, sustain, time as f32 / sample_rate),
+        NoteState::Released {
+            time: rel_time,
+            vel,
+        } => {
+            let time = (time - rel_time) as f32 / sample_rate;
+            lerp(vel, 0.0, time / release)
+        }
+        NoteState::Retrigger {
+            time: retrig_time,
+            vel,
+        } => {
+            // Forcibly decay over RETRIGGER_TIME.
+            let time = (time - retrig_time) as f32 / RETRIGGER_TIME as f32;
+            lerp(vel, 0.0, time)
+        }
+    }
 }
 
 /// The raw parameter values that a host DAW will set and modify.
@@ -421,9 +453,8 @@ impl Plugin for Revisit {
 
         // Get the relevant parameters
         let num_samples = buffer.samples();
-        let vol_adsr = Envelope::from_params(&self.params.vol_env, EnvelopeType::Amplitude);
-        let pitch_adsr = Envelope::from_params(&self.params.pitch_env, EnvelopeType::Pitch);
-        let pitch_multiplier = (self.params.pitch_env.sustain.get() - 0.5) * 2.0;
+        let vol_adsr = AmplitudeADSR::from_params(&self.params.vol_env);
+        let pitch_adsr = PitchADSR::from_params(&self.params.pitch_env);
         let volume = self.params.volume.get() * 0.25;
         let shape = NoteShape::from(self.params.shape.get());
 
@@ -443,7 +474,6 @@ impl Plugin for Revisit {
                 self.sample_rate,
                 vol_adsr,
                 pitch_adsr,
-                pitch_multiplier,
                 shape,
                 &pitch_envelope,
             );
@@ -470,7 +500,7 @@ impl Plugin for Revisit {
                 events.num_events
             );
         }
-        let envelope = Envelope::from_params(&self.params.vol_env, EnvelopeType::Amplitude);
+        let envelope = AmplitudeADSR::from_params(&self.params.vol_env);
         let sample_rate = self.sample_rate;
         // remove "dead" notes
         // we do this in process_events _before_ processing any midi messages
@@ -566,8 +596,8 @@ impl PluginParameters for RevisitParameters {
     }
 
     fn get_parameter_text(&self, index: i32) -> String {
-        let vol_env = Envelope::from_params(&self.vol_env, EnvelopeType::Amplitude);
-        let pitch_env = Envelope::from_params(&self.pitch_env, EnvelopeType::Pitch);
+        let vol_env = AmplitudeADSR::from_params(&self.vol_env);
+        let pitch_env = PitchADSR::from_params(&self.pitch_env);
         use ParameterType::*;
         match index.into() {
             VolAttack => format!("{:.2}", vol_env.attack),
@@ -576,7 +606,7 @@ impl PluginParameters for RevisitParameters {
             VolRelease => format!("{:.2}", vol_env.release),
             PitchAttack => format!("{:.2}", pitch_env.attack),
             PitchDecay => format!("{:.2}", pitch_env.decay),
-            PitchMultiply => format!("{:.2}", pitch_env.sustain * 100.0),
+            PitchMultiply => format!("{:.2}", pitch_env.multiply * 100.0),
             PitchRelease => format!("{:.2}", pitch_env.release),
             Volume => format!("{:.2}", self.volume.get() * 100.0),
             Shape => format!("{}", NoteShape::from(self.shape.get())),
