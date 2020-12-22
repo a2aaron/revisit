@@ -16,132 +16,132 @@ pub struct Oscillator {
     pub pitch: Note,
     vel: f32,
     angle: f32,
-    time: usize,
-    note_state: NoteState,
+    pub time: usize,
+    pub note_state: NoteState,
     low_pass_output: Option<f32>,
     note_on: Option<i32>,
     note_off: Option<i32>,
+    pub fm: Option<Box<Oscillator>>,
 }
 
 impl Oscillator {
-    pub fn new(pitch: Note, vel: U7) -> Oscillator {
+    pub fn new(pitch: Note, vel: f32, fm: Option<Oscillator>) -> Oscillator {
         Oscillator {
             pitch,
-            vel: normalize_U7(vel),
+            vel,
             angle: 0.0,
             time: 0,
             note_state: NoteState::None,
             low_pass_output: None,
             note_on: None,
             note_off: None,
+            fm: fm.map(|x| Box::new(x)),
         }
     }
 
     /// Fills dest with the signal of the oscillator
-    pub fn values(
+    pub fn next_sample(
         &mut self,
-        dest: &mut [f32],
+        sample_num: usize,
         sample_rate: SampleRate,
-        vol_adsr: AmplitudeADSR,
-        pitch_adsr: PitchADSR,
         shape: NoteShape,
-        pitch_bend: &[f32],
+        vel: f32,
+        pitch: f32,
         low_pass_alpha: f32,
-    ) {
-        for i in 0..dest.len() {
-            // Get volume envelope
-            let vel = vol_adsr.get(self.time, self.note_state, sample_rate);
+    ) -> f32 {
+        // Only advance time if the note is being held down!
+        match self.note_state {
+            NoteState::None => (),
+            _ => self.time += 1,
+        }
 
-            // Get pitch envelope
-            let pitch = pitch_bend[i] + pitch_adsr.get(self.time, self.note_state, sample_rate);
-
-            // Only advance time if the note is being held down!
-            match self.note_state {
-                NoteState::None => (),
-                _ => self.time += 1,
-            }
-
-            // Trigger note on events
-            match self.note_on {
-                Some(note_on) if note_on as usize == i => {
-                    self.note_state = match self.note_state {
-                        NoteState::None => NoteState::Held,
-                        _ => NoteState::Retrigger {
-                            time: self.time,
-                            vel,
-                        },
-                    };
-                    self.note_on = None;
-                }
-                _ => (),
-            }
-
-            // Trigger note off events
-            match self.note_off {
-                Some(note_off) if note_off as usize == i => {
-                    self.note_state = NoteState::Released {
+        // Trigger note on events
+        match self.note_on {
+            Some(note_on) if note_on as usize == sample_num => {
+                self.note_state = match self.note_state {
+                    NoteState::None => NoteState::Held,
+                    _ => NoteState::Retrigger {
                         time: self.time,
                         vel,
-                    };
-                    self.note_off = None;
-                }
-                _ => (),
+                    },
+                };
+                self.note_on = None;
             }
-
-            // If it has been 10 samples in the retrigger state, switch back to
-            // the held state. This also resets the time.
-            if let NoteState::Retrigger {
-                time: retrigger_time,
-                vel: _,
-            } = self.note_state
-            {
-                if self.time - retrigger_time > RETRIGGER_TIME {
-                    self.note_state = NoteState::Held;
-                    self.time = 0;
-                }
-            }
-
-            // Get the raw signal
-            let value = shape.get(self.angle);
-
-            // Apply volume envelope and note velocity
-            let value = value * vel * self.vel;
-
-            // Apply low pass filter
-            let value = if let Some(low) = self.low_pass_output {
-                // If low is NaN or Infinity, reset it.
-                let low = if low.is_finite() { low } else { value };
-
-                let value = low + low_pass_alpha * (value - low);
-                self.low_pass_output = Some(value);
-                value
-            } else {
-                self.low_pass_output = Some(value);
-                value
-            };
-
-            dest[i] = value;
-
-            // The pitch of the note after applying pitch multipliers
-            let pitch = Note::to_freq_f32(self.pitch) * to_pitch_multiplier(pitch, 12);
-
-            // Update the angle. Each sample is 1.0 / sample_rate apart for a
-            // complete waveform. We also multiply by pitch to advance the right amount
-            // We also constrain the angle between 0 and 1, as this reduces
-            // roundoff error.
-            let angle_delta = pitch / sample_rate;
-            self.angle = (self.angle + angle_delta) % 1.0;
+            _ => (),
         }
+
+        // Trigger note off events
+        match self.note_off {
+            Some(note_off) if note_off as usize == sample_num => {
+                self.note_state = NoteState::Released {
+                    time: self.time,
+                    vel,
+                };
+                self.note_off = None;
+            }
+            _ => (),
+        }
+
+        // If it has been 10 samples in the retrigger state, switch back to
+        // the held state. This also resets the time.
+        if let NoteState::Retrigger {
+            time: retrigger_time,
+            vel: _,
+        } = self.note_state
+        {
+            if self.time - retrigger_time > RETRIGGER_TIME {
+                self.note_state = NoteState::Held;
+                self.time = 0;
+            }
+        }
+
+        // Get the raw signal
+        let value = shape.get(self.angle);
+
+        // Apply volume envelope and note velocity
+        let value = value * vel * self.vel;
+
+        // Apply low pass filter
+        let value = if let Some(low) = self.low_pass_output {
+            // If low is NaN or Infinity, reset it.
+            let low = if low.is_finite() { low } else { value };
+
+            let value = low + low_pass_alpha * (value - low);
+            self.low_pass_output = Some(value);
+            value
+        } else {
+            self.low_pass_output = Some(value);
+            value
+        };
+
+        // The pitch of the note after applying pitch multipliers
+        let pitch = Note::to_freq_f32(self.pitch) * to_pitch_multiplier(pitch, 12);
+
+        // Update the angle. Each sample is 1.0 / sample_rate apart for a
+        // complete waveform. We also multiply by pitch to advance the right amount
+        // We also constrain the angle between 0 and 1, as this reduces
+        // roundoff error.
+        let angle_delta = pitch / sample_rate;
+        self.angle = (self.angle + angle_delta) % 1.0;
+
+        value
     }
 
     /// Release the note
     pub fn note_off(&mut self, frame_delta: i32) {
         self.note_off = Some(frame_delta);
+        if let Some(fm) = &mut self.fm {
+            fm.note_off(frame_delta);
+        }
     }
 
     /// Trigger or Retrigger the note
     pub fn note_on(&mut self, frame_delta: i32) {
         self.note_on = Some(frame_delta);
+
+        if let Some(fm) = &mut self.fm {
+            fm.note_on(frame_delta);
+        }
     }
 
     /// Returns true if the note is "alive" (playing audio). A note is dead if

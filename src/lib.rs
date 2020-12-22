@@ -9,8 +9,8 @@ mod neighbor_pairs;
 mod sound_gen;
 
 use sound_gen::{
-    ease_in_expo, ease_in_poly, normalize_pitch_bend, to_pitch_envelope, AmplitudeADSR, NoteShape,
-    Oscillator, PitchADSR, SampleRate,
+    ease_in_expo, ease_in_poly, normalize_U7, normalize_pitch_bend, to_pitch_envelope,
+    AmplitudeADSR, NoteShape, Oscillator, PitchADSR, SampleRate, ADSR,
 };
 
 use std::{convert::TryFrom, sync::Arc};
@@ -99,23 +99,43 @@ impl Plugin for Revisit {
         let (_, mut output_buffer) = buffer.split();
 
         let mut output = vec![0.0; num_samples];
-        let mut osc_buffer = vec![0.0; num_samples];
-        for note in &mut self.notes {
-            note.values(
-                &mut osc_buffer,
-                self.sample_rate,
-                params.vol_adsr,
-                params.pitch_adsr,
-                params.shape,
-                &pitch_bends,
-                params.low_pass_alpha,
-            );
+        for osc in &mut self.notes {
+            for i in 0..num_samples {
+                let vel = params
+                    .vol_adsr
+                    .get(osc.time, osc.note_state, self.sample_rate);
 
-            output = output
-                .iter()
-                .zip(osc_buffer.iter())
-                .map(|(&a, &b)| a + b)
-                .collect();
+                let pitch = params
+                    .pitch_adsr
+                    .get(osc.time, osc.note_state, self.sample_rate);
+
+                let pitch = pitch + pitch_bends[i];
+
+                let fm_pitch = match &mut osc.fm {
+                    Some(fm) => fm.next_sample(
+                        i,
+                        self.sample_rate,
+                        params.shape,
+                        vel,
+                        pitch,
+                        params.low_pass_alpha,
+                    ),
+                    None => 0.0,
+                };
+
+                let pitch = pitch + fm_pitch;
+
+                let sample = osc.next_sample(
+                    i,
+                    self.sample_rate,
+                    params.shape,
+                    vel,
+                    pitch,
+                    params.low_pass_alpha,
+                );
+
+                output[i] += sample;
+            }
         }
 
         // Write sound
@@ -157,7 +177,9 @@ impl Plugin for Revisit {
                                 {
                                     osc
                                 } else {
-                                    let osc = Oscillator::new(pitch, vel);
+                                    let fm_osc = Oscillator::new(pitch, 1.0, None);
+                                    let osc =
+                                        Oscillator::new(pitch, normalize_U7(vel), Some(fm_osc));
                                     self.notes.push(osc);
                                     self.notes.last_mut().unwrap()
                                 };
