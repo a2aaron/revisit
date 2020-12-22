@@ -35,7 +35,7 @@ impl Oscillator {
             low_pass_output: None,
             note_on: None,
             note_off: None,
-            fm: fm.map(|x| Box::new(x)),
+            fm: fm.map(Box::new),
         }
     }
 
@@ -47,7 +47,7 @@ impl Oscillator {
         shape: NoteShape,
         vel: f32,
         pitch: f32,
-        low_pass_alpha: f32,
+        low_pass_alpha: Option<f32>,
     ) -> f32 {
         // Only advance time if the note is being held down!
         match self.note_state {
@@ -96,26 +96,25 @@ impl Oscillator {
         }
 
         // Get the raw signal
-        let value = shape.get(self.angle);
+        let mut value = shape.get(self.angle);
 
         // Apply volume envelope and note velocity
-        let value = value * vel * self.vel;
+        value *= vel * self.vel;
 
         // Apply low pass filter
-        let value = if let Some(low) = self.low_pass_output {
-            // If low is NaN or Infinity, reset it.
-            let low = if low.is_finite() { low } else { value };
+        if let Some(alpha) = low_pass_alpha {
+            // If there is a prior low pass output (ie: this is the second sample)
+            if let Some(low) = self.low_pass_output {
+                // If low is NaN or Infinity, reset it.
+                let low = if low.is_finite() { low } else { value };
+                value = low + alpha * (value - low);
+            }
 
-            let value = low + low_pass_alpha * (value - low);
             self.low_pass_output = Some(value);
-            value
-        } else {
-            self.low_pass_output = Some(value);
-            value
-        };
+        }
 
         // The pitch of the note after applying pitch multipliers
-        let pitch = Note::to_freq_f32(self.pitch) * to_pitch_multiplier(pitch, 12);
+        let pitch = Note::to_freq_f32(self.pitch) * pitch;
 
         // Update the angle. Each sample is 1.0 / sample_rate apart for a
         // complete waveform. We also multiply by pitch to advance the right amount
@@ -348,7 +347,7 @@ pub fn normalize_pitch_bend(pitch_bend: PitchBend) -> f32 {
 
 // Converts a normalized pitch bend (range [-1.0, 1.0]) to the appropriate pitch
 // multiplier.
-fn to_pitch_multiplier(normalized_pitch_bend: f32, semitones: i32) -> f32 {
+pub fn to_pitch_multiplier(normalized_pitch_bend: f32, semitones: i32) -> f32 {
     // Given any note, the note a single semitone away is 2^1/12 times the original note
     // So (2^1/12)^n is n semitones away
     let exponent = 2.0f32.powf(semitones as f32 / 12.0);
