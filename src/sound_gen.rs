@@ -1,6 +1,6 @@
 use wmidi::{Note, PitchBend, U14, U7};
 
-use crate::{neighbor_pairs::NeighborPairsIter, RevisitParametersEnvelope};
+use crate::neighbor_pairs::NeighborPairsIter;
 
 const TAU: f32 = std::f32::consts::TAU;
 
@@ -183,8 +183,6 @@ pub struct PitchADSR {
 }
 
 pub trait ADSR {
-    // Convert [0.0, 1.0] normalized parameters into an envelope.
-    fn from_params(params: &RevisitParametersEnvelope) -> Self;
     // Get the current envelope value.
     // time is how many samples since the start of the note
     // note_state is what state the note is in
@@ -193,23 +191,6 @@ pub trait ADSR {
 }
 
 impl ADSR for AmplitudeADSR {
-    fn from_params(params: &RevisitParametersEnvelope) -> Self {
-        // Apply exponetial scaling to input values.
-        // This makes it easier to select small envelope lengths.
-        let attack = ease_in_expo(params.attack.get());
-        let decay = ease_in_expo(params.decay.get());
-        let sustain = params.sustain.get();
-        let release = ease_in_expo(params.release.get());
-        AmplitudeADSR {
-            // Clamp values to around 1 ms minimum.
-            // This avoids division by zero problems.
-            // Also prevents annoying clicking which is undesirable.
-            attack: (attack * 2.0).max(1.0 / 1000.0),
-            decay: (decay * 5.0).max(1.0 / 1000.0),
-            sustain,
-            release: (release * 5.0).max(1.0 / 1000.0),
-        }
-    }
     fn get(&self, time: usize, note_state: NoteState, sample_rate: SampleRate) -> f32 {
         envelope(
             (self.attack, self.decay, self.sustain, self.release),
@@ -221,21 +202,6 @@ impl ADSR for AmplitudeADSR {
 }
 
 impl ADSR for PitchADSR {
-    fn from_params(params: &RevisitParametersEnvelope) -> Self {
-        // Apply exponetial scaling to input values.
-        // This makes it easier to select small envelope lengths.
-        let attack = ease_in_expo(params.attack.get());
-        let decay = ease_in_expo(params.decay.get());
-        let multiply = params.sustain.get();
-        let release = ease_in_expo(params.release.get());
-        PitchADSR {
-            attack: (attack * 2.0).max(1.0 / 10000.0),
-            decay: (decay * 5.0).max(1.0 / 10000.0),
-            multiply: (multiply - 0.5) * 2.0,
-            release: (release * 5.0).max(1.0 / 10000.0),
-        }
-    }
-
     fn get(&self, time: usize, note_state: NoteState, sample_rate: SampleRate) -> f32 {
         envelope(
             (self.attack, self.decay, 0.0, self.release),
@@ -452,7 +418,7 @@ fn lerp(start: f32, end: f32, x: f32) -> f32 {
     (end - start) * x.clamp(0.0, 1.0) + start
 }
 
-fn ease_in_expo(x: f32) -> f32 {
+pub fn ease_in_expo(x: f32) -> f32 {
     if x <= 0.0 {
         0.0
     } else {

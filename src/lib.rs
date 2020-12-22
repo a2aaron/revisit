@@ -9,8 +9,8 @@ mod neighbor_pairs;
 mod sound_gen;
 
 use sound_gen::{
-    normalize_pitch_bend, to_pitch_envelope, AmplitudeADSR, NoteShape, Oscillator, PitchADSR,
-    SampleRate, ADSR,
+    ease_in_expo, normalize_pitch_bend, to_pitch_envelope, AmplitudeADSR, NoteShape, Oscillator,
+    PitchADSR, SampleRate,
 };
 
 use std::{convert::TryFrom, sync::Arc};
@@ -40,7 +40,7 @@ const LOW_PASS_ALPHA: f32 = 0.5;
 struct Revisit {
     notes: Vec<Oscillator>,
     sample_rate: SampleRate,
-    params: Arc<RevisitParameters>,
+    params: Arc<RawParameters>,
     // (normalized pitchbend value, frame delta)
     pitch_bend: Vec<(f32, i32)>,
     last_pitch_bend: f32,
@@ -84,19 +84,9 @@ impl Plugin for Revisit {
 
     // Output audio given the current state of the VST
     fn process(&mut self, buffer: &mut AudioBuffer<f32>) {
-        if !self.notes.is_empty() {
-            info!("Processing frame, total notes: {}", self.notes.len());
-        }
-
-        // Get the relevant parameters
         let num_samples = buffer.samples();
-        let vol_adsr = AmplitudeADSR::from_params(&self.params.vol_env);
-        let volume = self.params.volume.get();
 
-        let pitch_adsr = PitchADSR::from_params(&self.params.pitch_env);
-        let shape = NoteShape::from(self.params.shape.get());
-
-        let low_pass_alpha = self.params.low_pass_alpha.get();
+        let params = Parameters::from(self.params.as_ref());
 
         // Get the envelope from MIDI pitch bend
         let (pitch_bends, last_bend) =
@@ -114,11 +104,11 @@ impl Plugin for Revisit {
             note.values(
                 &mut osc_buffer,
                 self.sample_rate,
-                vol_adsr,
-                pitch_adsr,
-                shape,
+                params.vol_adsr,
+                params.pitch_adsr,
+                params.shape,
                 &pitch_bends,
-                low_pass_alpha,
+                params.low_pass_alpha,
             );
 
             output = output
@@ -131,19 +121,13 @@ impl Plugin for Revisit {
         // Write sound
         for channel in output_buffer.into_iter() {
             for (i, sample) in channel.iter_mut().enumerate() {
-                *sample = output[i] * volume;
+                *sample = output[i] * params.volume;
             }
         }
     }
 
     fn process_events(&mut self, events: &Events) {
-        if events.num_events > 0 {
-            info!(
-                "Processing MIDI events. Total events: {}",
-                events.num_events
-            );
-        }
-        let envelope = AmplitudeADSR::from_params(&self.params.vol_env);
+        let envelope = AmplitudeADSR::from(&self.params.vol_adsr);
         let sample_rate = self.sample_rate;
         // remove "dead" notes
         // we do this in process_events _before_ processing any midi messages
@@ -179,35 +163,22 @@ impl Plugin for Revisit {
                                 };
 
                                 osc.note_on(event.delta_frames);
-                                info!(
-                                    "NoteOn event! {:?} @ {:?}, frame delta: {}",
-                                    pitch, vel, event.delta_frames
-                                );
                             }
                             MidiMessage::NoteOff(_, pitch, _) => {
                                 // On note off, send note off
                                 if let Some(i) = self.notes.iter().position(|x| x.pitch == pitch) {
                                     self.notes[i].note_off(event.delta_frames);
                                 }
-                                info!(
-                                    "NoteOff event! {:?}, frame delta: {}",
-                                    pitch, event.delta_frames
-                                );
                             }
                             MidiMessage::PitchBendChange(_, pitch_bend) => {
                                 self.pitch_bend
                                     .push((normalize_pitch_bend(pitch_bend), event.delta_frames));
-                                info!(
-                                    "Pitch Bend event! {:?} frame delta: {}",
-                                    normalize_pitch_bend(pitch_bend),
-                                    event.delta_frames
-                                );
                             }
-                            _ => info!("Unrecognized MidiMessage! {:?}", message),
+                            _ => (),
                         }
                     }
                 }
-                _ => info!("Unrecognized event!"),
+                _ => (),
             }
         }
 
@@ -234,14 +205,14 @@ impl Default for Revisit {
         Revisit {
             notes: Vec::with_capacity(16),
             sample_rate: 44100.0,
-            params: Arc::new(RevisitParameters {
-                vol_env: RevisitParametersEnvelope {
+            params: Arc::new(RawParameters {
+                vol_adsr: RawParametersEnvelope {
                     attack: AtomicFloat::new(VOL_ATTACK),
                     decay: AtomicFloat::new(VOL_DECAY),
                     sustain: AtomicFloat::new(VOL_SUSTAIN),
                     release: AtomicFloat::new(VOL_RELEASE),
                 },
-                pitch_env: RevisitParametersEnvelope {
+                pitch_adsr: RawParametersEnvelope {
                     attack: AtomicFloat::new(PITCH_ATTACK),
                     decay: AtomicFloat::new(PITCH_DECAY),
                     sustain: AtomicFloat::new(PITCH_MULTIPLY),
@@ -257,18 +228,169 @@ impl Default for Revisit {
     }
 }
 
+struct Parameters {
+    vol_adsr: AmplitudeADSR,
+    pitch_adsr: PitchADSR,
+    volume: f32,
+    shape: NoteShape,
+    low_pass_alpha: f32,
+}
+
+impl From<&RawParameters> for Parameters {
+    fn from(params: &RawParameters) -> Self {
+        Parameters {
+            vol_adsr: AmplitudeADSR::from(&params.vol_adsr),
+            pitch_adsr: PitchADSR::from(&params.pitch_adsr),
+            volume: params.volume.get(),
+            shape: NoteShape::from(params.shape.get()),
+            low_pass_alpha: params.low_pass_alpha.get(),
+        }
+    }
+}
+
+impl From<&RawParametersEnvelope> for AmplitudeADSR {
+    fn from(params: &RawParametersEnvelope) -> Self {
+        // Apply exponetial scaling to input values.
+        // This makes it easier to select small envelope lengths.
+        let attack = ease_in_expo(params.attack.get());
+        let decay = ease_in_expo(params.decay.get());
+        let sustain = params.sustain.get();
+        let release = ease_in_expo(params.release.get());
+        AmplitudeADSR {
+            // Clamp values to around 1 ms minimum.
+            // This avoids division by zero problems.
+            // Also prevents annoying clicking which is undesirable.
+            attack: (attack * 2.0).max(1.0 / 1000.0),
+            decay: (decay * 5.0).max(1.0 / 1000.0),
+            sustain,
+            release: (release * 5.0).max(1.0 / 1000.0),
+        }
+    }
+}
+impl From<&RawParametersEnvelope> for PitchADSR {
+    fn from(params: &RawParametersEnvelope) -> Self {
+        // Apply exponetial scaling to input values.
+        // This makes it easier to select small envelope lengths.
+        let attack = ease_in_expo(params.attack.get());
+        let decay = ease_in_expo(params.decay.get());
+        let multiply = params.sustain.get();
+        let release = ease_in_expo(params.release.get());
+        PitchADSR {
+            attack: (attack * 2.0).max(1.0 / 10000.0),
+            decay: (decay * 5.0).max(1.0 / 10000.0),
+            multiply: (multiply - 0.5) * 2.0,
+            release: (release * 5.0).max(1.0 / 10000.0),
+        }
+    }
+}
+
 /// The raw parameter values that a host DAW will set and modify.
 /// These are unscaled and are always in the [0.0, 1.0] range
-struct RevisitParameters {
-    vol_env: RevisitParametersEnvelope,
-    pitch_env: RevisitParametersEnvelope,
+struct RawParameters {
+    vol_adsr: RawParametersEnvelope,
+    pitch_adsr: RawParametersEnvelope,
     volume: AtomicFloat,
     shape: AtomicFloat,
     low_pass_alpha: AtomicFloat,
 }
 
+impl PluginParameters for RawParameters {
+    fn get_parameter_label(&self, index: i32) -> String {
+        use ParameterType::*;
+        match index.into() {
+            VolAttack | VolDecay | VolRelease | PitchAttack | PitchDecay | PitchRelease => {
+                " sec".to_string()
+            }
+            VolSustain | PitchMultiply | Volume => "%".to_string(),
+            Shape | LowPassAlpha => "".to_string(),
+            Error => "".to_string(),
+        }
+    }
+
+    fn get_parameter_text(&self, index: i32) -> String {
+        let params = Parameters::from(self);
+        use ParameterType::*;
+        match index.into() {
+            VolAttack => format!("{:.2}", params.vol_adsr.attack),
+            VolDecay => format!("{:.2}", params.vol_adsr.decay),
+            VolSustain => format!("{:.2}", params.vol_adsr.sustain * 100.0),
+            VolRelease => format!("{:.2}", params.vol_adsr.release),
+            PitchAttack => format!("{:.2}", params.pitch_adsr.attack),
+            PitchDecay => format!("{:.2}", params.pitch_adsr.decay),
+            PitchMultiply => format!("{:.2}", params.pitch_adsr.multiply * 100.0),
+            PitchRelease => format!("{:.2}", params.pitch_adsr.release),
+            Volume => format!("{:.2}", params.volume * 100.0),
+            Shape => format!("{}", params.shape),
+            LowPassAlpha => format!("{}", params.low_pass_alpha),
+            Error => "".to_string(),
+        }
+    }
+
+    fn get_parameter_name(&self, index: i32) -> String {
+        use ParameterType::*;
+        match index.into() {
+            Volume => "Volume".to_string(),
+            Shape => "Note Shape".to_string(),
+            VolAttack => "Attack (Volume)".to_string(),
+            VolDecay => "Decay (Volume)".to_string(),
+            VolSustain => "Sustain (Volume)".to_string(),
+            VolRelease => "Release (Volume)".to_string(),
+            PitchAttack => "Attack (Pitch Bend)".to_string(),
+            PitchDecay => "Decay (Pitch Bend)".to_string(),
+            PitchMultiply => "Multiply (Pitch Bend)".to_string(),
+            PitchRelease => "Release (Pitch Bend)".to_string(),
+            LowPassAlpha => "Low Pass Alpha".to_string(),
+            Error => "".to_string(),
+        }
+    }
+
+    fn get_parameter(&self, index: i32) -> f32 {
+        use ParameterType::*;
+        match index.into() {
+            Volume => self.volume.get(),
+            Shape => self.shape.get(),
+            VolAttack => self.vol_adsr.attack.get(),
+            VolDecay => self.vol_adsr.decay.get(),
+            VolSustain => self.vol_adsr.sustain.get(),
+            VolRelease => self.vol_adsr.release.get(),
+            PitchAttack => self.pitch_adsr.attack.get(),
+            PitchDecay => self.pitch_adsr.decay.get(),
+            PitchMultiply => self.pitch_adsr.sustain.get(),
+            PitchRelease => self.pitch_adsr.release.get(),
+            LowPassAlpha => self.low_pass_alpha.get(),
+            Error => 0.0,
+        }
+    }
+
+    fn set_parameter(&self, index: i32, value: f32) {
+        use ParameterType::*;
+        match index.into() {
+            Volume => self.volume.set(value),
+            Shape => self.shape.set(value),
+            VolAttack => self.vol_adsr.attack.set(value),
+            VolDecay => self.vol_adsr.decay.set(value),
+            VolSustain => self.vol_adsr.sustain.set(value),
+            VolRelease => self.vol_adsr.release.set(value),
+            PitchAttack => self.pitch_adsr.attack.set(value),
+            PitchDecay => self.pitch_adsr.decay.set(value),
+            PitchMultiply => self.pitch_adsr.sustain.set(value),
+            PitchRelease => self.pitch_adsr.release.set(value),
+            LowPassAlpha => self.low_pass_alpha.set(value),
+            Error => (),
+        }
+    }
+
+    fn can_be_automated(&self, index: i32) -> bool {
+        ParameterType::from(index) != ParameterType::Error
+    }
+
+    fn string_to_parameter(&self, _index: i32, _text: String) -> bool {
+        false
+    }
+}
+
 // Convience struct, represents parameters that are part of an envelope
-pub struct RevisitParametersEnvelope {
+pub struct RawParametersEnvelope {
     attack: AtomicFloat,
     decay: AtomicFloat,
     sustain: AtomicFloat,
@@ -309,102 +431,6 @@ impl From<i32> for ParameterType {
             10 => LowPassAlpha,
             _ => Error,
         }
-    }
-}
-
-impl PluginParameters for RevisitParameters {
-    fn get_parameter_label(&self, index: i32) -> String {
-        use ParameterType::*;
-        match index.into() {
-            VolAttack | VolDecay | VolRelease | PitchAttack | PitchDecay | PitchRelease => {
-                " sec".to_string()
-            }
-            VolSustain | PitchMultiply | Volume => "%".to_string(),
-            Shape | LowPassAlpha => "".to_string(),
-            Error => "".to_string(),
-        }
-    }
-
-    fn get_parameter_text(&self, index: i32) -> String {
-        let vol_env = AmplitudeADSR::from_params(&self.vol_env);
-        let pitch_env = PitchADSR::from_params(&self.pitch_env);
-        use ParameterType::*;
-        match index.into() {
-            VolAttack => format!("{:.2}", vol_env.attack),
-            VolDecay => format!("{:.2}", vol_env.decay),
-            VolSustain => format!("{:.2}", vol_env.sustain * 100.0),
-            VolRelease => format!("{:.2}", vol_env.release),
-            PitchAttack => format!("{:.2}", pitch_env.attack),
-            PitchDecay => format!("{:.2}", pitch_env.decay),
-            PitchMultiply => format!("{:.2}", pitch_env.multiply * 100.0),
-            PitchRelease => format!("{:.2}", pitch_env.release),
-            Volume => format!("{:.2}", self.volume.get() * 100.0),
-            Shape => format!("{}", NoteShape::from(self.shape.get())),
-            LowPassAlpha => format!("{}", self.low_pass_alpha.get()),
-            Error => "".to_string(),
-        }
-    }
-
-    fn get_parameter_name(&self, index: i32) -> String {
-        use ParameterType::*;
-        match index.into() {
-            Volume => "Volume".to_string(),
-            Shape => "Note Shape".to_string(),
-            VolAttack => "Attack (Volume)".to_string(),
-            VolDecay => "Decay (Volume)".to_string(),
-            VolSustain => "Sustain (Volume)".to_string(),
-            VolRelease => "Release (Volume)".to_string(),
-            PitchAttack => "Attack (Pitch Bend)".to_string(),
-            PitchDecay => "Decay (Pitch Bend)".to_string(),
-            PitchMultiply => "Multiply (Pitch Bend)".to_string(),
-            PitchRelease => "Release (Pitch Bend)".to_string(),
-            LowPassAlpha => "Low Pass Alpha".to_string(),
-            Error => "".to_string(),
-        }
-    }
-
-    fn get_parameter(&self, index: i32) -> f32 {
-        use ParameterType::*;
-        match index.into() {
-            Volume => self.volume.get(),
-            Shape => self.shape.get(),
-            VolAttack => self.vol_env.attack.get(),
-            VolDecay => self.vol_env.decay.get(),
-            VolSustain => self.vol_env.sustain.get(),
-            VolRelease => self.vol_env.release.get(),
-            PitchAttack => self.pitch_env.attack.get(),
-            PitchDecay => self.pitch_env.decay.get(),
-            PitchMultiply => self.pitch_env.sustain.get(),
-            PitchRelease => self.pitch_env.release.get(),
-            LowPassAlpha => self.low_pass_alpha.get(),
-            Error => 0.0,
-        }
-    }
-
-    fn set_parameter(&self, index: i32, value: f32) {
-        use ParameterType::*;
-        match index.into() {
-            Volume => self.volume.set(value),
-            Shape => self.shape.set(value),
-            VolAttack => self.vol_env.attack.set(value),
-            VolDecay => self.vol_env.decay.set(value),
-            VolSustain => self.vol_env.sustain.set(value),
-            VolRelease => self.vol_env.release.set(value),
-            PitchAttack => self.pitch_env.attack.set(value),
-            PitchDecay => self.pitch_env.decay.set(value),
-            PitchMultiply => self.pitch_env.sustain.set(value),
-            PitchRelease => self.pitch_env.release.set(value),
-            LowPassAlpha => self.low_pass_alpha.set(value),
-            Error => (),
-        }
-    }
-
-    fn can_be_automated(&self, index: i32) -> bool {
-        ParameterType::from(index) != ParameterType::Error
-    }
-
-    fn string_to_parameter(&self, _index: i32, _text: String) -> bool {
-        false
     }
 }
 
