@@ -425,3 +425,7 @@ pub fn ease_in_expo(x: f32) -> f32 {
         2.0f32.powf(10.0 * x - 10.0)
     }
 }
+
+pub fn ease_in_poly(x: f32, i: i32) -> f32 {
+    x.powi(i)
+}

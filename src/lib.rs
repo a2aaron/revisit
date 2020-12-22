@@ -9,8 +9,8 @@ mod neighbor_pairs;
 mod sound_gen;
 
 use sound_gen::{
-    ease_in_expo, normalize_pitch_bend, to_pitch_envelope, AmplitudeADSR, NoteShape, Oscillator,
-    PitchADSR, SampleRate,
+    ease_in_expo, ease_in_poly, normalize_pitch_bend, to_pitch_envelope, AmplitudeADSR, NoteShape,
+    Oscillator, PitchADSR, SampleRate,
 };
 
 use std::{convert::TryFrom, sync::Arc};
@@ -174,11 +174,11 @@ impl Plugin for Revisit {
                                 self.pitch_bend
                                     .push((normalize_pitch_bend(pitch_bend), event.delta_frames));
                             }
-                            _ => (),
+                            _ => println!("shut up clippy"),
                         }
                     }
                 }
-                _ => (),
+                _ => println!("shut up clippy"),
             }
         }
 
@@ -243,7 +243,7 @@ impl From<&RawParameters> for Parameters {
             pitch_adsr: PitchADSR::from(&params.pitch_adsr),
             volume: params.volume.get(),
             shape: NoteShape::from(params.shape.get()),
-            low_pass_alpha: params.low_pass_alpha.get(),
+            low_pass_alpha: ease_in_poly(params.low_pass_alpha.get(), 4).clamp(0.0, 1.0),
         }
     }
 }
@@ -267,6 +267,7 @@ impl From<&RawParametersEnvelope> for AmplitudeADSR {
         }
     }
 }
+
 impl From<&RawParametersEnvelope> for PitchADSR {
     fn from(params: &RawParametersEnvelope) -> Self {
         // Apply exponetial scaling to input values.
