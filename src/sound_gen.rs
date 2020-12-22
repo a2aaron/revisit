@@ -220,12 +220,13 @@ pub enum NoteState {
     Retrigger { time: usize, vel: f32 },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy)]
 pub enum NoteShape {
     Sine,
-    Square,
-    Sawtooth,
-    Triangle,
+    Square(f32),
+    // Sawtooth = 0.0 and 1.0
+    // Triangle = 0.5
+    Skewtooth(f32),
 }
 
 impl NoteShape {
@@ -233,30 +234,47 @@ impl NoteShape {
     fn get(&self, angle: Angle) -> f32 {
         match self {
             // See https://www.desmos.com/calculator/dqg8kdvung for visuals
+            // and https://www.desmos.com/calculator/hs8zd0sfkh for more visuals
             NoteShape::Sine => (angle * TAU).sin(),
-            NoteShape::Sawtooth => (angle * 2.0) - 1.0,
-            NoteShape::Square => {
-                if angle < 0.5 {
+            NoteShape::Square(pulse) => {
+                if angle < *pulse {
                     -1.0
                 } else {
                     1.0
                 }
             }
-            NoteShape::Triangle => -2.0 * (2.0 * angle - 1.0).abs() + 1.0,
+            NoteShape::Skewtooth(pulse) => {
+                let pulse = *pulse;
+                // Sawtooths, avoid divide by zero.
+                // Clippy lint complains about floating point compares but this
+                // is ok to do since 1.0 is exactly representible in floating
+                // point and also pulse is always in range [0.0, 1.0].
+                #[allow(clippy::float_cmp)]
+                if pulse == 0.0 {
+                    return -2.0 * angle + 1.0;
+                } else if pulse == 1.0 {
+                    return 2.0 * angle - 1.0;
+                }
+
+                // Skew Triangles (perfect triangle at 0.5)
+                if angle < pulse {
+                    (2.0 * angle / pulse) - 1.0
+                } else {
+                    -(2.0 * (angle - pulse)) / (1.0 - pulse) + 1.0
+                }
+            }
         }
     }
 }
 
-impl From<f32> for NoteShape {
-    fn from(x: f32) -> Self {
-        if x < 0.25 {
+impl NoteShape {
+    pub fn from_pulse(shape: f32, pulse: f32) -> Self {
+        if shape < 0.33 {
             NoteShape::Sine
-        } else if x < 0.5 {
-            NoteShape::Triangle
-        } else if x < 0.75 {
-            NoteShape::Square
+        } else if shape < 0.66 {
+            NoteShape::Skewtooth(pulse)
         } else {
-            NoteShape::Sawtooth
+            NoteShape::Square(pulse)
         }
     }
 }
@@ -264,12 +282,29 @@ impl From<f32> for NoteShape {
 impl std::fmt::Display for NoteShape {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use NoteShape::*;
-        match self {
-            Sine => write!(f, "Sine"),
-            Square => write!(f, "Square"),
-            Sawtooth => write!(f, "Sawtooth"),
-            Triangle => write!(f, "Triangle"),
-        }
+        let string = match self {
+            Sine => "Sine",
+            Square(pulse) => {
+                if (pulse - 0.5).abs() < 0.1 {
+                    "Square"
+                } else {
+                    "Pulse"
+                }
+            }
+            Skewtooth(pulse) => {
+                if (pulse - 0.0).abs() < 0.1 {
+                    "Reverse Sawtooth"
+                } else if (pulse - 1.0).abs() < 0.1 {
+                    "Sawtooth"
+                } else if (pulse - 0.5).abs() < 0.1 {
+                    "Triangle"
+                } else {
+                    "Skewed Triangle"
+                }
+            }
+        };
+
+        write!(f, "{}", string)
     }
 }
 
@@ -318,6 +353,9 @@ pub fn to_pitch_envelope(
     (iter, last_bend)
 }
 
+// rustc doesn't think "U7" is good snake case style, but its also the name of
+// the type, so oh well.
+#[allow(non_snake_case)]
 pub fn normalize_U7(num: U7) -> f32 {
     // A U7 in is in range [0, 127]
     let num = U7::data_to_bytes(&[num])[0];

@@ -232,6 +232,7 @@ impl Default for Revisit {
             params: Arc::new(RawParameters {
                 volume: AtomicFloat::new(0.33),
                 shape: AtomicFloat::new(0.225), // Triangle
+                pulse: AtomicFloat::new(0.5),
                 vol_adsr: RawParametersEnvelope {
                     attack: AtomicFloat::new(0.1),
                     decay: AtomicFloat::new(0.2),
@@ -274,12 +275,12 @@ impl From<&RawParameters> for Parameters {
             vol_adsr: AmplitudeADSR::from(&params.vol_adsr),
             pitch_adsr: PitchADSR::from(&params.pitch_adsr),
             volume: params.volume.get(),
-            shape: NoteShape::from(params.shape.get()),
+            shape: NoteShape::from_pulse(params.shape.get(), params.pulse.get()),
             low_pass_alpha: ease_in_poly(params.low_pass_alpha.get(), 4).clamp(0.0, 1.0),
             fm_on_off: params.fm_on_off.get() > 0.5,
             fm_vol: params.fm_vol.get() * 2.0,
             fm_pitch_mult: to_pitch_multiplier((params.fm_pitch_mult.get() - 0.5) * 2.0, 24),
-            fm_shape: NoteShape::from(params.fm_shape.get()),
+            fm_shape: NoteShape::from_pulse(params.fm_shape.get(), 0.5),
         }
     }
 }
@@ -328,6 +329,7 @@ struct RawParameters {
     pitch_adsr: RawParametersEnvelope,
     volume: AtomicFloat,
     shape: AtomicFloat,
+    pulse: AtomicFloat,
     low_pass_alpha: AtomicFloat,
     fm_on_off: AtomicFloat,
     fm_vol: AtomicFloat,
@@ -344,7 +346,7 @@ impl PluginParameters for RawParameters {
             }
             VolSustain | PitchMultiply | MasterVolume | FMVolume => "%".to_string(),
             FMPitchMultiplier => "x".to_string(),
-            Shape | LowPassAlpha | FMOnOff | FMShape => "".to_string(),
+            Shape | Pulse | LowPassAlpha | FMOnOff | FMShape => "".to_string(),
             Error => "".to_string(),
         }
     }
@@ -363,6 +365,7 @@ impl PluginParameters for RawParameters {
             PitchRelease => format!("{:.2}", params.pitch_adsr.release),
             MasterVolume => format!("{:.2}", params.volume * 100.0),
             Shape => format!("{}", params.shape),
+            Pulse => format!("{:.2}", self.pulse.get()),
             LowPassAlpha => format!("{:.5}", params.low_pass_alpha),
             FMOnOff => if params.fm_on_off { "On" } else { "Off" }.to_string(),
             FMVolume => format!("{:2}", params.fm_vol * 100.0),
@@ -377,6 +380,7 @@ impl PluginParameters for RawParameters {
         match index.into() {
             MasterVolume => "Master Volume".to_string(),
             Shape => "Note Shape".to_string(),
+            Pulse => "Note Pulse".to_string(),
             VolAttack => "Attack (Volume)".to_string(),
             VolDecay => "Decay (Volume)".to_string(),
             VolSustain => "Sustain (Volume)".to_string(),
@@ -399,6 +403,7 @@ impl PluginParameters for RawParameters {
         match index.into() {
             MasterVolume => self.volume.get(),
             Shape => self.shape.get(),
+            Pulse => self.pulse.get(),
             VolAttack => self.vol_adsr.attack.get(),
             VolDecay => self.vol_adsr.decay.get(),
             VolSustain => self.vol_adsr.sustain.get(),
@@ -421,6 +426,7 @@ impl PluginParameters for RawParameters {
         match index.into() {
             MasterVolume => self.volume.set(value),
             Shape => self.shape.set(value),
+            Pulse => self.pulse.set(value),
             VolAttack => self.vol_adsr.attack.set(value),
             VolDecay => self.vol_adsr.decay.set(value),
             VolSustain => self.vol_adsr.sustain.set(value),
@@ -460,6 +466,7 @@ pub struct RawParametersEnvelope {
 enum ParameterType {
     MasterVolume,
     Shape,
+    Pulse,
     VolAttack,
     VolDecay,
     VolSustain,
@@ -482,19 +489,20 @@ impl From<i32> for ParameterType {
         match i {
             0 => MasterVolume,
             1 => Shape,
-            2 => VolAttack,
-            3 => VolDecay,
-            4 => VolSustain,
-            5 => VolRelease,
-            6 => PitchAttack,
-            7 => PitchDecay,
-            8 => PitchMultiply,
-            9 => PitchRelease,
-            10 => LowPassAlpha,
-            11 => FMOnOff,
-            12 => FMVolume,
-            13 => FMPitchMultiplier,
-            14 => FMShape,
+            2 => Pulse,
+            3 => VolAttack,
+            4 => VolDecay,
+            5 => VolSustain,
+            6 => VolRelease,
+            7 => PitchAttack,
+            8 => PitchDecay,
+            9 => PitchMultiply,
+            10 => PitchRelease,
+            11 => LowPassAlpha,
+            12 => FMOnOff,
+            13 => FMVolume,
+            14 => FMPitchMultiplier,
+            15 => FMShape,
             _ => Error,
         }
     }
