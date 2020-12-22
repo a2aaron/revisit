@@ -26,8 +26,13 @@ use vst::{
 };
 use wmidi::MidiMessage;
 
+struct SoundGenerator {
+    osc: Oscillator,
+    fm: Oscillator,
+}
+
 struct Revisit {
-    notes: Vec<Oscillator>,
+    notes: Vec<SoundGenerator>,
     sample_rate: SampleRate,
     params: Arc<RawParameters>,
     // (normalized pitchbend value, frame delta)
@@ -88,8 +93,9 @@ impl Plugin for Revisit {
         let (_, mut output_buffer) = buffer.split();
 
         let mut output = vec![0.0; num_samples];
-        for osc in &mut self.notes {
+        for gen in &mut self.notes {
             for i in 0..num_samples {
+                let (osc, fm) = (&mut gen.osc, &mut gen.fm);
                 let vel = params
                     .vol_adsr
                     .get(osc.time, osc.note_state, self.sample_rate);
@@ -101,19 +107,18 @@ impl Plugin for Revisit {
 
                 let pitch = to_pitch_multiplier(pitch, 12);
 
-                let fm_pitch = match (params.fm_on_off, &mut osc.fm) {
-                    (true, Some(fm)) => {
-                        let pitch = pitch * params.fm_pitch_mult;
-                        fm.next_sample(
-                            i,
-                            self.sample_rate,
-                            params.fm_shape,
-                            params.fm_vol,
-                            pitch,
-                            None,
-                        )
-                    }
-                    _ => 0.0,
+                let fm_pitch = if params.fm_on_off {
+                    let pitch = pitch * params.fm_pitch_mult;
+                    fm.next_sample(
+                        i,
+                        self.sample_rate,
+                        params.fm_shape,
+                        params.fm_vol,
+                        pitch,
+                        None,
+                    )
+                } else {
+                    0.0
                 };
 
                 let pitch = pitch * to_pitch_multiplier(fm_pitch, 24);
@@ -153,7 +158,7 @@ impl Plugin for Revisit {
         // - frame 1 - user is confused to why note does not play despite holding
         //             down key (the KeyOn event was "eaten" by the dead note!)
         self.notes
-            .retain(|osc| osc.is_alive(sample_rate, envelope.release));
+            .retain(|gen| gen.osc.is_alive(sample_rate, envelope.release));
 
         // Clear pitch bend to get new messages
         self.pitch_bend.clear();
@@ -165,25 +170,28 @@ impl Plugin for Revisit {
                         match message {
                             MidiMessage::NoteOn(_, pitch, vel) => {
                                 // On note on, either add or retrigger the note
-                                let osc = if let Some(osc) =
-                                    self.notes.iter_mut().find(|x| x.pitch == pitch)
+                                let gen = if let Some(osc) =
+                                    self.notes.iter_mut().find(|gen| gen.osc.pitch == pitch)
                                 {
                                     osc
                                 } else {
-                                    // TODO this is dumb. instead have two seperate note things
-                                    let fm_osc = Oscillator::new(pitch, 1.0, None);
-                                    let osc =
-                                        Oscillator::new(pitch, normalize_U7(vel), Some(fm_osc));
-                                    self.notes.push(osc);
+                                    let fm = Oscillator::new(pitch, 1.0);
+                                    let osc = Oscillator::new(pitch, normalize_U7(vel));
+                                    self.notes.push(SoundGenerator { osc, fm });
                                     self.notes.last_mut().unwrap()
                                 };
 
-                                osc.note_on(event.delta_frames);
+                                gen.osc.note_on(event.delta_frames);
+                                gen.fm.note_on(event.delta_frames);
                             }
                             MidiMessage::NoteOff(_, pitch, _) => {
                                 // On note off, send note off
-                                if let Some(i) = self.notes.iter().position(|x| x.pitch == pitch) {
-                                    self.notes[i].note_off(event.delta_frames);
+                                if let Some(i) =
+                                    self.notes.iter().position(|gen| gen.osc.pitch == pitch)
+                                {
+                                    let gen = &mut self.notes[i];
+                                    gen.osc.note_off(event.delta_frames);
+                                    gen.fm.note_off(event.delta_frames);
                                 }
                             }
                             MidiMessage::PitchBendChange(_, pitch_bend) => {

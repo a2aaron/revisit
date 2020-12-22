@@ -21,11 +21,10 @@ pub struct Oscillator {
     low_pass_output: Option<f32>,
     note_on: Option<i32>,
     note_off: Option<i32>,
-    pub fm: Option<Box<Oscillator>>,
 }
 
 impl Oscillator {
-    pub fn new(pitch: Note, vel: f32, fm: Option<Oscillator>) -> Oscillator {
+    pub fn new(pitch: Note, vel: f32) -> Oscillator {
         Oscillator {
             pitch,
             vel,
@@ -35,7 +34,6 @@ impl Oscillator {
             low_pass_output: None,
             note_on: None,
             note_off: None,
-            fm: fm.map(Box::new),
         }
     }
 
@@ -129,18 +127,11 @@ impl Oscillator {
     /// Release the note
     pub fn note_off(&mut self, frame_delta: i32) {
         self.note_off = Some(frame_delta);
-        if let Some(fm) = &mut self.fm {
-            fm.note_off(frame_delta);
-        }
     }
 
     /// Trigger or Retrigger the note
     pub fn note_on(&mut self, frame_delta: i32) {
         self.note_on = Some(frame_delta);
-
-        if let Some(fm) = &mut self.fm {
-            fm.note_on(frame_delta);
-        }
     }
 
     /// Returns true if the note is "alive" (playing audio). A note is dead if
