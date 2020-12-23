@@ -2,26 +2,32 @@
 extern crate vst;
 extern crate log;
 extern crate rand;
+extern crate raw_window_handle;
 extern crate simple_logging;
 extern crate variant_count;
 extern crate wmidi;
 
 mod neighbor_pairs;
 mod sound_gen;
+mod ui;
 
 use std::{convert::TryFrom, sync::Arc};
 
+use iced_baseview::Application;
 use sound_gen::{
     ease_in_expo, ease_in_poly, normalize_U7, normalize_pitch_bend, to_pitch_envelope,
     to_pitch_multiplier, AmplitudeADSR, NoteShape, Oscillator, PitchADSR, SampleRate, ADSR,
 };
 
 use log::{info, LevelFilter};
+use ui::UIFrontEnd;
 use variant_count::VariantCount;
 use vst::{
     api::{Events, Supported},
     buffer::AudioBuffer,
-    plugin::{CanDo, Category, Info, Plugin, PluginParameters},
+    editor::Editor,
+    host::Host,
+    plugin::{CanDo, Category, HostCallback, Info, Plugin, PluginParameters},
     util::AtomicFloat,
 };
 use wmidi::MidiMessage;
@@ -38,9 +44,20 @@ struct Revisit {
     // (normalized pitchbend value, frame delta)
     pitch_bend: Vec<(f32, i32)>,
     last_pitch_bend: f32,
+    gui_initialized: bool,
 }
 
 impl Plugin for Revisit {
+    fn new(host: HostCallback) -> Self {
+        Revisit {
+            params: Arc::new(RawParameters {
+                host,
+                ..Default::default()
+            }),
+            ..Default::default()
+        }
+    }
+
     fn init(&mut self) {
         let result = simple_logging::log_to_file("revisit.log", LevelFilter::Info);
         if let Err(err) = result {
@@ -218,9 +235,20 @@ impl Plugin for Revisit {
         self.sample_rate = rate;
     }
 
-    // Needed so that the host knows what parameters exist
+    // The raw parameters exposed to the host
     fn get_parameter_object(&mut self) -> Arc<dyn PluginParameters> {
         Arc::clone(&self.params) as Arc<dyn PluginParameters>
+    }
+
+    // The GUI exposed to the host
+    fn get_editor(&mut self) -> Option<Box<dyn Editor>> {
+        if self.gui_initialized {
+            None
+        } else {
+            self.gui_initialized = true;
+            let (editor, _) = UIFrontEnd::new(self.params.clone());
+            Some(Box::new(editor))
+        }
     }
 }
 
@@ -229,30 +257,10 @@ impl Default for Revisit {
         Revisit {
             notes: Vec::with_capacity(16),
             sample_rate: 44100.0,
-            params: Arc::new(RawParameters {
-                volume: AtomicFloat::new(0.33),
-                shape: AtomicFloat::new(0.225), // Triangle
-                pulse: AtomicFloat::new(0.5),
-                vol_adsr: RawParametersEnvelope {
-                    attack: AtomicFloat::new(0.1),
-                    decay: AtomicFloat::new(0.2),
-                    sustain: AtomicFloat::new(0.5),
-                    release: AtomicFloat::new(0.3),
-                },
-                pitch_adsr: RawParametersEnvelope {
-                    attack: AtomicFloat::new(1.0 / 10000.0),
-                    decay: AtomicFloat::new(0.2),
-                    sustain: AtomicFloat::new(0.5),
-                    release: AtomicFloat::new(1.0 / 10000.0),
-                },
-                low_pass_alpha: AtomicFloat::new(0.5),
-                fm_on_off: AtomicFloat::new(0.0),     // Off
-                fm_vol: AtomicFloat::new(0.5),        // 100%
-                fm_pitch_mult: AtomicFloat::new(0.5), // 1x
-                fm_shape: AtomicFloat::new(0.0),      // Sine
-            }),
+            params: Arc::new(RawParameters::default()),
             pitch_bend: Vec::with_capacity(16),
             last_pitch_bend: 0.0,
+            gui_initialized: false,
         }
     }
 }
@@ -324,7 +332,7 @@ impl From<&RawParametersEnvelope> for PitchADSR {
 
 /// The raw parameter values that a host DAW will set and modify.
 /// These are unscaled and are always in the [0.0, 1.0] range
-struct RawParameters {
+pub struct RawParameters {
     vol_adsr: RawParametersEnvelope,
     pitch_adsr: RawParametersEnvelope,
     volume: AtomicFloat,
@@ -335,6 +343,7 @@ struct RawParameters {
     fm_vol: AtomicFloat,
     fm_pitch_mult: AtomicFloat,
     fm_shape: AtomicFloat,
+    host: HostCallback,
 }
 
 impl PluginParameters for RawParameters {
@@ -426,7 +435,18 @@ impl PluginParameters for RawParameters {
         match index.into() {
             MasterVolume => self.volume.set(value),
             Shape => self.shape.set(value),
-            Pulse => self.pulse.set(value),
+            Pulse => {
+                // TODO: this is stupid. do the UI update on a background thread
+                let old_value = format!(
+                    "{}",
+                    NoteShape::from_pulse(self.shape.get(), self.pulse.get())
+                );
+                let new_value = format!("{}", NoteShape::from_pulse(self.shape.get(), value));
+                self.pulse.set(value);
+                if old_value != new_value {
+                    self.host.update_display();
+                }
+            }
             VolAttack => self.vol_adsr.attack.set(value),
             VolDecay => self.vol_adsr.decay.set(value),
             VolSustain => self.vol_adsr.sustain.set(value),
@@ -442,6 +462,7 @@ impl PluginParameters for RawParameters {
             FMShape => self.fm_shape.set(value),
             Error => (),
         }
+        // TODO: kick off a message to the GUI that a parameter has changed
     }
 
     fn can_be_automated(&self, index: i32) -> bool {
@@ -450,6 +471,34 @@ impl PluginParameters for RawParameters {
 
     fn string_to_parameter(&self, _index: i32, _text: String) -> bool {
         false
+    }
+}
+
+impl Default for RawParameters {
+    fn default() -> Self {
+        RawParameters {
+            volume: AtomicFloat::new(0.33),
+            shape: AtomicFloat::new(0.225), // Triangle
+            pulse: AtomicFloat::new(0.5),
+            vol_adsr: RawParametersEnvelope {
+                attack: AtomicFloat::new(0.1),
+                decay: AtomicFloat::new(0.2),
+                sustain: AtomicFloat::new(0.5),
+                release: AtomicFloat::new(0.3),
+            },
+            pitch_adsr: RawParametersEnvelope {
+                attack: AtomicFloat::new(1.0 / 10000.0),
+                decay: AtomicFloat::new(0.2),
+                sustain: AtomicFloat::new(0.5),
+                release: AtomicFloat::new(1.0 / 10000.0),
+            },
+            low_pass_alpha: AtomicFloat::new(0.5),
+            fm_on_off: AtomicFloat::new(0.0),     // Off
+            fm_vol: AtomicFloat::new(0.5),        // 100%
+            fm_pitch_mult: AtomicFloat::new(0.5), // 1x
+            fm_shape: AtomicFloat::new(0.0),      // Sine
+            host: Default::default(),
+        }
     }
 }
 
