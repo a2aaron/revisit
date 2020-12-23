@@ -1,8 +1,9 @@
-use std::ffi::c_void;
+use std::{ffi::c_void, time::Duration};
 
-use iced::{Column, Command, Container, Element, Length};
-use iced_audio::{knob, FloatRange};
-use iced_audio::{Knob, Normal};
+use iced::{Column, Command, Container, Element, Length, Subscription};
+use iced_audio::{knob, FloatRange, Knob, Normal};
+use iced_baseview::{Application, Handle, WindowSubs};
+use log::info;
 use raw_window_handle::RawWindowHandle;
 use vst::{editor::Editor, host::Host};
 
@@ -10,44 +11,48 @@ use crate::RawParameters;
 
 #[derive(Debug, Clone, Copy)]
 pub enum Message {
-    Example(Normal),
+    MasterVolume(Normal),
+    ForceRedraw,
 }
 
 pub struct UIFrontEnd {
-    is_open: bool,
     master_vol_knob: knob::State,
     params: std::sync::Arc<RawParameters>,
+    handle: Option<Handle>,
 }
 
-impl iced_baseview::Application for UIFrontEnd {
+impl Application for UIFrontEnd {
     type Message = Message;
     type Executor = iced_baseview::executor::Default;
     type Flags = std::sync::Arc<RawParameters>;
 
     fn new(params: Self::Flags) -> (Self, Command<Self::Message>) {
+        let vol = params.as_ref().volume.get();
         let master_vol_range = FloatRange::default_bipolar();
         let ui = UIFrontEnd {
-            master_vol_knob: knob::State::new(master_vol_range.normal_param(1.0, 1.0)),
+            master_vol_knob: knob::State::new(master_vol_range.normal_param(vol, 1.0)),
             params,
-            is_open: false,
+            handle: None,
         };
         (ui, Command::none())
     }
 
     fn update(&mut self, message: Self::Message) -> Command<Self::Message> {
         match message {
-            Message::Example(normal) => {
+            Message::MasterVolume(normal) => {
                 self.params.volume.set(normal.as_f32());
-                // Make the host DAW update its own parameter display
-                self.params.host.update_display();
+            }
+            Message::ForceRedraw => {
+                self.master_vol_knob.normal_param.value = Normal::new(self.params.volume.get())
             }
         }
+        // Make the host DAW update its own parameter display
+        self.params.host.update_display();
         Command::none()
     }
 
     fn view(&mut self) -> iced::Element<'_, Self::Message> {
-        let master_vol_widget = Knob::new(&mut self.master_vol_knob, Message::Example);
-
+        let master_vol_widget = Knob::new(&mut self.master_vol_knob, Message::MasterVolume);
         let content: Element<_> = Column::new()
             .max_width(100)
             .max_height(100)
@@ -62,6 +67,13 @@ impl iced_baseview::Application for UIFrontEnd {
             .center_x()
             .center_y()
             .into()
+    }
+
+    fn subscription(
+        &self,
+        _window_subs: &mut WindowSubs<Self::Message>,
+    ) -> Subscription<Self::Message> {
+        iced_futures::time::every(Duration::from_millis(33)).map(|_| Message::ForceRedraw)
     }
 }
 
@@ -88,11 +100,12 @@ impl Editor for UIFrontEnd {
                 flags: self.params.clone(),
             };
 
-            let (_handle, _) = iced_baseview::Runner::<UIFrontEnd>::open(
+            let (handle, _) = iced_baseview::Runner::<UIFrontEnd>::open(
                 settings,
                 iced_baseview::Parent::WithParent(parent),
             );
-            self.is_open = true;
+            self.handle = Some(handle);
+            info!("Opened the GUI");
             true
         }
 
@@ -102,8 +115,21 @@ impl Editor for UIFrontEnd {
         }
     }
 
+    fn idle(&mut self) {
+        info!("Got idle message");
+    }
+
+    fn close(&mut self) {
+        info!("Closed the GUI");
+
+        if let Some(handle) = &mut self.handle {
+            handle.request_window_close()
+        };
+        self.handle = None;
+    }
+
     fn is_open(&mut self) -> bool {
-        self.is_open
+        self.handle.is_some()
     }
 }
 

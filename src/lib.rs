@@ -377,7 +377,7 @@ impl PluginParameters for RawParameters {
             Pulse => format!("{:.2}", self.pulse.get()),
             LowPassAlpha => format!("{:.5}", params.low_pass_alpha),
             FMOnOff => if params.fm_on_off { "On" } else { "Off" }.to_string(),
-            FMVolume => format!("{:2}", params.fm_vol * 100.0),
+            FMVolume => format!("{:.2}", params.fm_vol * 100.0),
             FMPitchMultiplier => format!("{:.2}", params.fm_pitch_mult),
             FMShape => format!("{}", params.fm_shape),
             Error => "".to_string(),
@@ -431,6 +431,7 @@ impl PluginParameters for RawParameters {
     }
 
     fn set_parameter(&self, index: i32, value: f32) {
+        info!("Got set_parameter: {} {}", index, value);
         use ParameterType::*;
         match index.into() {
             MasterVolume => self.volume.set(value),
@@ -462,7 +463,6 @@ impl PluginParameters for RawParameters {
             FMShape => self.fm_shape.set(value),
             Error => (),
         }
-        // TODO: kick off a message to the GUI that a parameter has changed
     }
 
     fn can_be_automated(&self, index: i32) -> bool {
