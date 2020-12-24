@@ -210,7 +210,7 @@ checksum = "904dfeac50f3cdaba28fc6f57fdcddb75f49ed61346676a78c4ffe55877802fd"
 [[package]]
 name = "baseview"
 version = "0.1.0"
-source = "git+https://github.com/RustAudio/baseview.git?branch=master#d138cfaccf65f2b5d95ff965efe848c1190ef806"
+source = "git+https://github.com/RustAudio/baseview.git?branch=master#868bd0583c711d12f45ee7e5031e1343a424a93e"
 dependencies = [
  "cocoa 0.24.0",
  "keyboard-types",
@@ -1289,8 +1289,7 @@ dependencies = [
 [[package]]
 name = "iced_audio"
 version = "0.5.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d6b6fc2f39b425c9db6757b69722e9f20afe41a1e1b81897e81d79aa5cad567f"
+source = "git+https://github.com/a2aaron/iced_audio?branch=main#66c34cd61da8bbdda726bb04830587a5cac779e0"
 dependencies = [
  "iced_graphics",
  "iced_native",
@@ -1299,7 +1298,7 @@ dependencies = [
 [[package]]
 name = "iced_baseview"
 version = "0.0.1"
-source = "git+https://github.com/BillyDM/iced_baseview?branch=main#bd2e8e9c25fc54b3e629bc2845aa8dd4ad9ebe96"
+source = "git+https://github.com/BillyDM/iced_baseview?branch=main#95eb94db73dbed3db313902d05b4484c3ae4c785"
 dependencies = [
  "baseview",
  "iced_core",
@@ -2313,6 +2312,7 @@ dependencies = [
 name = "revist"
 version = "0.1.0"
 dependencies = [
+ "baseview",
  "iced",
  "iced_audio",
  "iced_baseview",

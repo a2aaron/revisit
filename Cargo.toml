@@ -14,11 +14,12 @@ log = "0.4.11"
 simple-logging = "2.0.2"
 variant_count = "1.0.0"
 iced = { version = "0.2", features = ["image"] }
-iced_audio = "0.5"
+iced_audio = { git = "https://github.com/a2aaron/iced_audio", branch = "main" }
 iced_baseview = { git = "https://github.com/BillyDM/iced_baseview", branch = "main" }
 iced_native = "0.3.0"
 iced_futures = { version = "0.2.0", features = ["async-std"] }
 raw-window-handle = "0.3.3"
+baseview = { git = "https://github.com/RustAudio/baseview", branch = "master" } 
 
 [lib]
 crate-type = ["cdylib"]

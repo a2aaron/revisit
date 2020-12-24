@@ -43,7 +43,8 @@ impl Application for UIFrontEnd {
                 self.params.volume.set(normal.as_f32());
             }
             Message::ForceRedraw => {
-                self.master_vol_knob.normal_param.value = Normal::new(self.params.volume.get())
+                self.master_vol_knob
+                    .set(Normal::new(self.params.volume.get()));
             }
         }
         // Make the host DAW update its own parameter display
@@ -52,7 +53,9 @@ impl Application for UIFrontEnd {
     }
 
     fn view(&mut self) -> iced::Element<'_, Self::Message> {
-        let master_vol_widget = Knob::new(&mut self.master_vol_knob, Message::MasterVolume);
+        let master_vol_widget = Knob::new(&mut self.master_vol_knob, |normal| {
+            Message::MasterVolume(normal)
+        });
         let content: Element<_> = Column::new()
             .max_width(100)
             .max_height(100)
@@ -73,7 +76,7 @@ impl Application for UIFrontEnd {
         &self,
         _window_subs: &mut WindowSubs<Self::Message>,
     ) -> Subscription<Self::Message> {
-        iced_futures::time::every(Duration::from_millis(33)).map(|_| Message::ForceRedraw)
+        iced_futures::time::every(Duration::from_millis(100)).map(|_| Message::ForceRedraw)
     }
 }
 
@@ -92,18 +95,16 @@ impl Editor for UIFrontEnd {
             let parent = to_windows_handle(parent);
 
             let settings = iced_baseview::Settings {
-                window: iced_baseview::settings::Window {
+                window: baseview::WindowOpenOptions {
                     title: "Revisit".to_string(),
-                    logical_size: (self.size().0 as u32, self.size().1 as u32),
-                    scale_policy: iced_baseview::WindowScalePolicy::SystemScaleFactor,
+                    size: baseview::Size::new(self.size().0 as f64, self.size().1 as f64),
+                    scale: baseview::WindowScalePolicy::SystemScaleFactor,
+                    parent: baseview::Parent::WithParent(parent),
                 },
                 flags: self.params.clone(),
             };
 
-            let (handle, _) = iced_baseview::Runner::<UIFrontEnd>::open(
-                settings,
-                iced_baseview::Parent::WithParent(parent),
-            );
+            let (handle, _) = iced_baseview::Runner::<UIFrontEnd>::open(settings);
             self.handle = Some(handle);
             info!("Opened the GUI");
             true
