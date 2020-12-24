@@ -11,6 +11,14 @@ use vst::{editor::Editor, host::Host};
 
 use crate::{ParameterType, RawParameters};
 
+macro_rules! widget {
+    ($widget:ident, $state:expr, $parameter:expr) => {
+        $widget::new($state, |normal| {
+            Message::ParameterChanged(normal.as_f32(), $parameter)
+        });
+    };
+}
+
 struct RecipeStruct {
     notifier: Arc<Notify>,
 }
@@ -105,21 +113,11 @@ impl Application for UIFrontEnd {
     }
 
     fn view(&mut self) -> iced::Element<'_, Self::Message> {
-        let master_vol_widget = VSlider::new(&mut self.master_vol, |normal| {
-            Message::ParameterChanged(normal.as_f32(), ParameterType::MasterVolume)
-        });
-        let attack_widget = Knob::new(&mut self.attack, |normal| {
-            Message::ParameterChanged(normal.as_f32(), ParameterType::VolAttack)
-        });
-        let decay_widget = Knob::new(&mut self.decay, |normal| {
-            Message::ParameterChanged(normal.as_f32(), ParameterType::VolDecay)
-        });
-        let sustain_widget = Knob::new(&mut self.sustain, |normal| {
-            Message::ParameterChanged(normal.as_f32(), ParameterType::VolSustain)
-        });
-        let release_widget = Knob::new(&mut self.release, |normal| {
-            Message::ParameterChanged(normal.as_f32(), ParameterType::VolRelease)
-        });
+        let master_vol_widget = widget!(VSlider, &mut self.master_vol, ParameterType::MasterVolume);
+        let attack_widget = widget!(Knob, &mut self.attack, ParameterType::VolAttack);
+        let decay_widget = widget!(Knob, &mut self.decay, ParameterType::VolDecay);
+        let sustain_widget = widget!(Knob, &mut self.sustain, ParameterType::VolSustain);
+        let release_widget = widget!(Knob, &mut self.release, ParameterType::VolRelease);
 
         let content: Element<_> = Column::new()
             .max_width(700)
