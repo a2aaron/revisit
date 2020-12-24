@@ -349,6 +349,44 @@ pub struct RawParameters {
     notify: Arc<tokio::sync::Notify>,
 }
 
+impl RawParameters {
+    fn set(&self, value: f32, parameter: ParameterType) {
+        use ParameterType::*;
+        match parameter {
+            MasterVolume => self.volume.set(value),
+            Shape => self.shape.set(value),
+            Pulse => {
+                // TODO: this is stupid
+                let old_value = format!(
+                    "{}",
+                    NoteShape::from_pulse(self.shape.get(), self.pulse.get())
+                );
+                let new_value = format!("{}", NoteShape::from_pulse(self.shape.get(), value));
+
+                self.pulse.set(value);
+
+                if old_value != new_value {
+                    self.host.update_display();
+                }
+            }
+            VolAttack => self.vol_adsr.attack.set(value),
+            VolDecay => self.vol_adsr.decay.set(value),
+            VolSustain => self.vol_adsr.sustain.set(value),
+            VolRelease => self.vol_adsr.release.set(value),
+            PitchAttack => self.pitch_adsr.attack.set(value),
+            PitchDecay => self.pitch_adsr.decay.set(value),
+            PitchMultiply => self.pitch_adsr.sustain.set(value),
+            PitchRelease => self.pitch_adsr.release.set(value),
+            LowPassAlpha => self.low_pass_alpha.set(value),
+            FMOnOff => self.fm_on_off.set(value),
+            FMVolume => self.fm_vol.set(value),
+            FMPitchMultiplier => self.fm_pitch_mult.set(value),
+            FMShape => self.fm_shape.set(value),
+            Error => (),
+        }
+    }
+}
+
 impl PluginParameters for RawParameters {
     fn get_parameter_label(&self, index: i32) -> String {
         use ParameterType::*;
@@ -434,37 +472,7 @@ impl PluginParameters for RawParameters {
     }
 
     fn set_parameter(&self, index: i32, value: f32) {
-        use ParameterType::*;
-        match index.into() {
-            MasterVolume => self.volume.set(value),
-            Shape => self.shape.set(value),
-            Pulse => {
-                // TODO: this is stupid. do the UI update on a background thread
-                let old_value = format!(
-                    "{}",
-                    NoteShape::from_pulse(self.shape.get(), self.pulse.get())
-                );
-                let new_value = format!("{}", NoteShape::from_pulse(self.shape.get(), value));
-                self.pulse.set(value);
-                if old_value != new_value {
-                    self.host.update_display();
-                }
-            }
-            VolAttack => self.vol_adsr.attack.set(value),
-            VolDecay => self.vol_adsr.decay.set(value),
-            VolSustain => self.vol_adsr.sustain.set(value),
-            VolRelease => self.vol_adsr.release.set(value),
-            PitchAttack => self.pitch_adsr.attack.set(value),
-            PitchDecay => self.pitch_adsr.decay.set(value),
-            PitchMultiply => self.pitch_adsr.sustain.set(value),
-            PitchRelease => self.pitch_adsr.release.set(value),
-            LowPassAlpha => self.low_pass_alpha.set(value),
-            FMOnOff => self.fm_on_off.set(value),
-            FMVolume => self.fm_vol.set(value),
-            FMPitchMultiplier => self.fm_pitch_mult.set(value),
-            FMShape => self.fm_shape.set(value),
-            Error => (),
-        }
+        self.set(value, index.into());
         self.notify.as_ref().notify_one();
     }
 
@@ -516,7 +524,7 @@ pub struct RawParametersEnvelope {
 
 /// The type of parameter. "Error" is included as a convience type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, VariantCount)]
-enum ParameterType {
+pub enum ParameterType {
     MasterVolume,
     Shape,
     Pulse,

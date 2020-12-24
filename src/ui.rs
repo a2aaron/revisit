@@ -1,15 +1,15 @@
 use std::ffi::c_void;
 use std::sync::Arc;
 
-use iced::{futures, Column, Command, Container, Element, Length, Subscription};
-use iced_audio::{knob, FloatRange, Knob, Normal};
+use iced::{futures, Align, Column, Command, Container, Element, Length, Subscription};
+use iced_audio::{knob, v_slider, FloatRange, Knob, Normal, NormalParam, VSlider};
 use iced_baseview::{Application, Handle, WindowSubs};
 use log::info;
 use raw_window_handle::RawWindowHandle;
 use tokio::sync::Notify;
 use vst::{editor::Editor, host::Host};
 
-use crate::RawParameters;
+use crate::{ParameterType, RawParameters};
 
 struct RecipeStruct {
     notifier: Arc<Notify>,
@@ -43,12 +43,16 @@ where
 
 #[derive(Debug, Clone, Copy)]
 pub enum Message {
-    MasterVolume(Normal),
+    ParameterChanged(f32, ParameterType),
     ForceRedraw,
 }
 
 pub struct UIFrontEnd {
-    master_vol_knob: knob::State,
+    master_vol: v_slider::State,
+    attack: knob::State,
+    decay: knob::State,
+    sustain: knob::State,
+    release: knob::State,
     params: std::sync::Arc<RawParameters>,
     handle: Option<Handle>,
     notifier: Arc<Notify>,
@@ -61,10 +65,17 @@ impl Application for UIFrontEnd {
 
     fn new(flags: Self::Flags) -> (Self, Command<Self::Message>) {
         let (params, notifier) = flags;
-        let vol = params.as_ref().volume.get();
-        let master_vol_range = FloatRange::default_bipolar();
+        let master_vol = params.volume.get();
+        let attack = params.vol_adsr.attack.get();
+        let decay = params.vol_adsr.decay.get();
+        let sustain = params.vol_adsr.sustain.get();
+        let release = params.vol_adsr.release.get();
         let ui = UIFrontEnd {
-            master_vol_knob: knob::State::new(master_vol_range.normal_param(vol, 1.0)),
+            master_vol: v_slider::State::new(make_normal_param(master_vol, 1.0)),
+            attack: knob::State::new(make_normal_param(attack, 1.0)),
+            decay: knob::State::new(make_normal_param(decay, 1.0)),
+            sustain: knob::State::new(make_normal_param(sustain, 1.0)),
+            release: knob::State::new(make_normal_param(release, 1.0)),
             params,
             handle: None,
             notifier,
@@ -75,12 +86,17 @@ impl Application for UIFrontEnd {
 
     fn update(&mut self, message: Self::Message) -> Command<Self::Message> {
         match message {
-            Message::MasterVolume(normal) => {
-                self.params.volume.set(normal.as_f32());
-            }
+            Message::ParameterChanged(value, param) => self.params.set(value, param),
             Message::ForceRedraw => {
-                self.master_vol_knob
-                    .set(Normal::new(self.params.volume.get()));
+                self.master_vol.set(Normal::new(self.params.volume.get()));
+                self.attack
+                    .set(Normal::new(self.params.vol_adsr.attack.get()));
+                self.decay
+                    .set(Normal::new(self.params.vol_adsr.decay.get()));
+                self.sustain
+                    .set(Normal::new(self.params.vol_adsr.sustain.get()));
+                self.release
+                    .set(Normal::new(self.params.vol_adsr.release.get()));
             }
         }
         // Make the host DAW update its own parameter display
@@ -89,15 +105,32 @@ impl Application for UIFrontEnd {
     }
 
     fn view(&mut self) -> iced::Element<'_, Self::Message> {
-        let master_vol_widget = Knob::new(&mut self.master_vol_knob, |normal| {
-            Message::MasterVolume(normal)
+        let master_vol_widget = VSlider::new(&mut self.master_vol, |normal| {
+            Message::ParameterChanged(normal.as_f32(), ParameterType::MasterVolume)
         });
+        let attack_widget = Knob::new(&mut self.attack, |normal| {
+            Message::ParameterChanged(normal.as_f32(), ParameterType::VolAttack)
+        });
+
         let content: Element<_> = Column::new()
-            .max_width(100)
-            .max_height(100)
+            .max_width(700)
+            .max_height(600)
             .spacing(20)
             .padding(20)
-            .push(master_vol_widget)
+            .push(
+                Column::new()
+                    .max_height(100)
+                    .align_items(Align::Center)
+                    .push(master_vol_widget)
+                    .push(iced::Text::new("Master Volume")),
+            )
+            .push(
+                Column::new()
+                    .max_height(100)
+                    .align_items(Align::Center)
+                    .push(attack_widget)
+                    .push(iced::Text::new("Attack")),
+            )
             .into();
 
         Container::new(content)
@@ -121,7 +154,7 @@ impl Application for UIFrontEnd {
 
 impl Editor for UIFrontEnd {
     fn size(&self) -> (i32, i32) {
-        (200, 200)
+        (800, 600)
     }
 
     fn position(&self) -> (i32, i32) {
@@ -169,6 +202,13 @@ impl Editor for UIFrontEnd {
 
     fn is_open(&mut self) -> bool {
         self.handle.is_some()
+    }
+}
+
+fn make_normal_param(value: f32, default: f32) -> NormalParam {
+    NormalParam {
+        value: Normal::new(value),
+        default: Normal::new(default),
     }
 }
 
