@@ -19,6 +19,12 @@ macro_rules! widget {
     };
 }
 
+fn with_label<'a>(widget: impl Into<Element<'a, Message>>, title: &str) -> Column<'a, Message> {
+    Column::with_children(vec![widget.into(), iced::Text::new(title).into()])
+        .max_height(100)
+        .align_items(Align::Center)
+}
+
 struct RecipeStruct {
     notifier: Arc<Notify>,
 }
@@ -126,47 +132,12 @@ impl Application for UIFrontEnd {
             .padding(20)
             .push(
                 Row::new()
-                    .push(
-                        Column::with_children(vec![
-                            master_vol_widget.into(),
-                            iced::Text::new("Master Volume").into(),
-                        ])
-                        .max_height(100)
-                        .align_items(Align::Center),
-                    )
-                    .push(
-                        Column::with_children(vec![
-                            attack_widget.into(),
-                            iced::Text::new("Attack").into(),
-                        ])
-                        .max_height(100)
-                        .align_items(Align::Center),
-                    )
-                    .push(
-                        Column::with_children(vec![
-                            decay_widget.into(),
-                            iced::Text::new("Decay").into(),
-                        ])
-                        .max_height(100)
-                        .align_items(Align::Center),
-                    )
-                    .push(
-                        Column::with_children(vec![
-                            sustain_widget.into(),
-                            iced::Text::new("Sustain").into(),
-                        ])
-                        .max_height(100)
-                        .align_items(Align::Center),
-                    )
-                    .push(
-                        Column::with_children(vec![
-                            release_widget.into(),
-                            iced::Text::new("Release").into(),
-                        ])
-                        .max_height(100)
-                        .align_items(Align::Center),
-                    )
-                    .align_items(Align::Start),
+                    .push(with_label(master_vol_widget, "Master Volume"))
+                    .push(with_label(attack_widget, "Attack"))
+                    .push(with_label(decay_widget, "Decay"))
+                    .push(with_label(sustain_widget, "Sustain"))
+                    .push(with_label(release_widget, "Release"))
+                    .align_items(Align::Center),
             )
             .into();
 
