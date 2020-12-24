@@ -20,6 +20,7 @@ iced_native = "0.3.0"
 iced_futures = { version = "0.2.0", features = ["async-std"] }
 raw-window-handle = "0.3.3"
 baseview = { git = "https://github.com/RustAudio/baseview", branch = "master" } 
+tokio = { version = "1.0.0", features = ["sync"] }
 
 [lib]
 crate-type = ["cdylib"]

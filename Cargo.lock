@@ -210,7 +210,7 @@ checksum = "904dfeac50f3cdaba28fc6f57fdcddb75f49ed61346676a78c4ffe55877802fd"
 [[package]]
 name = "baseview"
 version = "0.1.0"
-source = "git+https://github.com/RustAudio/baseview.git?branch=master#868bd0583c711d12f45ee7e5031e1343a424a93e"
+source = "git+https://github.com/RustAudio/baseview?branch=master#868bd0583c711d12f45ee7e5031e1343a424a93e"
 dependencies = [
  "cocoa 0.24.0",
  "keyboard-types",
@@ -1289,7 +1289,7 @@ dependencies = [
 [[package]]
 name = "iced_audio"
 version = "0.5.4"
-source = "git+https://github.com/a2aaron/iced_audio?branch=main#66c34cd61da8bbdda726bb04830587a5cac779e0"
+source = "git+https://github.com/a2aaron/iced_audio?branch=main#c36897174f70fa9f3b793d00f6afbba1cf0b3d94"
 dependencies = [
  "iced_graphics",
  "iced_native",
@@ -2322,6 +2322,7 @@ dependencies = [
  "rand",
  "raw-window-handle",
  "simple-logging",
+ "tokio",
  "variant_count",
  "vst",
  "wmidi",
@@ -2683,6 +2684,16 @@ name = "tinyvec_macros"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cda74da7e1a664f795bb1f8a87ec406fb89a02522cf6e50620d016add6dbbf5c"
+
+[[package]]
+name = "tokio"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9f4bfdcbd00fa893ac0549b38aa27080636a0104b0d0c38475a99439405e1df8"
+dependencies = [
+ "autocfg",
+ "pin-project-lite",
+]
 
 [[package]]
 name = "toml"

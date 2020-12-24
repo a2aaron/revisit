@@ -4,6 +4,7 @@ extern crate log;
 extern crate rand;
 extern crate raw_window_handle;
 extern crate simple_logging;
+extern crate tokio;
 extern crate variant_count;
 extern crate wmidi;
 
@@ -246,7 +247,8 @@ impl Plugin for Revisit {
             None
         } else {
             self.gui_initialized = true;
-            let (editor, _) = UIFrontEnd::new(self.params.clone());
+            let notify = self.params.notify.clone();
+            let (editor, _) = UIFrontEnd::new((self.params.clone(), notify));
             Some(Box::new(editor))
         }
     }
@@ -344,6 +346,7 @@ pub struct RawParameters {
     fm_pitch_mult: AtomicFloat,
     fm_shape: AtomicFloat,
     host: HostCallback,
+    notify: Arc<tokio::sync::Notify>,
 }
 
 impl PluginParameters for RawParameters {
@@ -431,7 +434,6 @@ impl PluginParameters for RawParameters {
     }
 
     fn set_parameter(&self, index: i32, value: f32) {
-        info!("Got set_parameter: {} {}", index, value);
         use ParameterType::*;
         match index.into() {
             MasterVolume => self.volume.set(value),
@@ -463,6 +465,7 @@ impl PluginParameters for RawParameters {
             FMShape => self.fm_shape.set(value),
             Error => (),
         }
+        self.notify.as_ref().notify_one();
     }
 
     fn can_be_automated(&self, index: i32) -> bool {
@@ -498,6 +501,7 @@ impl Default for RawParameters {
             fm_pitch_mult: AtomicFloat::new(0.5), // 1x
             fm_shape: AtomicFloat::new(0.0),      // Sine
             host: Default::default(),
+            notify: Arc::new(tokio::sync::Notify::new()),
         }
     }
 }

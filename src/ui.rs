@@ -1,13 +1,45 @@
-use std::{ffi::c_void, time::Duration};
+use std::ffi::c_void;
+use std::sync::Arc;
 
-use iced::{Column, Command, Container, Element, Length, Subscription};
+use iced::{futures, Column, Command, Container, Element, Length, Subscription};
 use iced_audio::{knob, FloatRange, Knob, Normal};
 use iced_baseview::{Application, Handle, WindowSubs};
 use log::info;
 use raw_window_handle::RawWindowHandle;
+use tokio::sync::Notify;
 use vst::{editor::Editor, host::Host};
 
 use crate::RawParameters;
+
+struct RecipeStruct {
+    notifier: Arc<Notify>,
+}
+
+impl<H, I> iced_native::subscription::Recipe<H, I> for RecipeStruct
+where
+    H: std::hash::Hasher,
+{
+    type Output = Message;
+
+    fn hash(&self, state: &mut H) {
+        use std::hash::Hash;
+
+        std::any::TypeId::of::<Self>().hash(state);
+    }
+
+    fn stream(
+        self: Box<Self>,
+        _: futures::stream::BoxStream<'static, I>,
+    ) -> futures::stream::BoxStream<'static, Self::Output> {
+        Box::pin(futures::stream::unfold(
+            self.notifier.clone(),
+            |notifier| async move {
+                notifier.notified().await;
+                Some((Message::ForceRedraw, notifier))
+            },
+        ))
+    }
+}
 
 #[derive(Debug, Clone, Copy)]
 pub enum Message {
@@ -19,21 +51,25 @@ pub struct UIFrontEnd {
     master_vol_knob: knob::State,
     params: std::sync::Arc<RawParameters>,
     handle: Option<Handle>,
+    notifier: Arc<Notify>,
 }
 
 impl Application for UIFrontEnd {
     type Message = Message;
     type Executor = iced_baseview::executor::Default;
-    type Flags = std::sync::Arc<RawParameters>;
+    type Flags = (Arc<RawParameters>, Arc<Notify>);
 
-    fn new(params: Self::Flags) -> (Self, Command<Self::Message>) {
+    fn new(flags: Self::Flags) -> (Self, Command<Self::Message>) {
+        let (params, notifier) = flags;
         let vol = params.as_ref().volume.get();
         let master_vol_range = FloatRange::default_bipolar();
         let ui = UIFrontEnd {
             master_vol_knob: knob::State::new(master_vol_range.normal_param(vol, 1.0)),
             params,
             handle: None,
+            notifier,
         };
+        info!("Called new!");
         (ui, Command::none())
     }
 
@@ -76,7 +112,10 @@ impl Application for UIFrontEnd {
         &self,
         _window_subs: &mut WindowSubs<Self::Message>,
     ) -> Subscription<Self::Message> {
-        iced_futures::time::every(Duration::from_millis(100)).map(|_| Message::ForceRedraw)
+        let recipe = RecipeStruct {
+            notifier: self.notifier.clone(),
+        };
+        Subscription::from_recipe(recipe)
     }
 }
 
@@ -101,11 +140,12 @@ impl Editor for UIFrontEnd {
                     scale: baseview::WindowScalePolicy::SystemScaleFactor,
                     parent: baseview::Parent::WithParent(parent),
                 },
-                flags: self.params.clone(),
+                flags: (self.params.clone(), self.params.notify.clone()),
             };
-
-            let (handle, _) = iced_baseview::Runner::<UIFrontEnd>::open(settings);
-            self.handle = Some(handle);
+            if self.handle.is_none() {
+                let (handle, _) = iced_baseview::Runner::<UIFrontEnd>::open(settings);
+                self.handle = Some(handle);
+            }
             info!("Opened the GUI");
             true
         }
@@ -116,9 +156,7 @@ impl Editor for UIFrontEnd {
         }
     }
 
-    fn idle(&mut self) {
-        info!("Got idle message");
-    }
+    fn idle(&mut self) {}
 
     fn close(&mut self) {
         info!("Closed the GUI");
