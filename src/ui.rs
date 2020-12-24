@@ -1,8 +1,8 @@
 use std::ffi::c_void;
 use std::sync::Arc;
 
-use iced::{futures, Align, Column, Command, Container, Element, Length, Subscription};
-use iced_audio::{knob, v_slider, FloatRange, Knob, Normal, NormalParam, VSlider};
+use iced::{futures, Align, Column, Command, Container, Element, Length, Row, Subscription};
+use iced_audio::{knob, v_slider, Knob, Normal, NormalParam, VSlider};
 use iced_baseview::{Application, Handle, WindowSubs};
 use log::info;
 use raw_window_handle::RawWindowHandle;
@@ -111,6 +111,15 @@ impl Application for UIFrontEnd {
         let attack_widget = Knob::new(&mut self.attack, |normal| {
             Message::ParameterChanged(normal.as_f32(), ParameterType::VolAttack)
         });
+        let decay_widget = Knob::new(&mut self.decay, |normal| {
+            Message::ParameterChanged(normal.as_f32(), ParameterType::VolDecay)
+        });
+        let sustain_widget = Knob::new(&mut self.sustain, |normal| {
+            Message::ParameterChanged(normal.as_f32(), ParameterType::VolSustain)
+        });
+        let release_widget = Knob::new(&mut self.release, |normal| {
+            Message::ParameterChanged(normal.as_f32(), ParameterType::VolRelease)
+        });
 
         let content: Element<_> = Column::new()
             .max_width(700)
@@ -118,18 +127,48 @@ impl Application for UIFrontEnd {
             .spacing(20)
             .padding(20)
             .push(
-                Column::new()
-                    .max_height(100)
-                    .align_items(Align::Center)
-                    .push(master_vol_widget)
-                    .push(iced::Text::new("Master Volume")),
-            )
-            .push(
-                Column::new()
-                    .max_height(100)
-                    .align_items(Align::Center)
-                    .push(attack_widget)
-                    .push(iced::Text::new("Attack")),
+                Row::new()
+                    .push(
+                        Column::with_children(vec![
+                            master_vol_widget.into(),
+                            iced::Text::new("Master Volume").into(),
+                        ])
+                        .max_height(100)
+                        .align_items(Align::Center),
+                    )
+                    .push(
+                        Column::with_children(vec![
+                            attack_widget.into(),
+                            iced::Text::new("Attack").into(),
+                        ])
+                        .max_height(100)
+                        .align_items(Align::Center),
+                    )
+                    .push(
+                        Column::with_children(vec![
+                            decay_widget.into(),
+                            iced::Text::new("Decay").into(),
+                        ])
+                        .max_height(100)
+                        .align_items(Align::Center),
+                    )
+                    .push(
+                        Column::with_children(vec![
+                            sustain_widget.into(),
+                            iced::Text::new("Sustain").into(),
+                        ])
+                        .max_height(100)
+                        .align_items(Align::Center),
+                    )
+                    .push(
+                        Column::with_children(vec![
+                            release_widget.into(),
+                            iced::Text::new("Release").into(),
+                        ])
+                        .max_height(100)
+                        .align_items(Align::Center),
+                    )
+                    .align_items(Align::Start),
             )
             .into();
 
