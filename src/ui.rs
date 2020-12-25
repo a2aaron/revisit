@@ -2,7 +2,7 @@ use std::ffi::c_void;
 use std::sync::Arc;
 
 use iced::{futures, Align, Column, Command, Container, Element, Length, Row, Subscription};
-use iced_audio::{knob, v_slider, Knob, Normal, NormalParam, VSlider};
+use iced_audio::{knob, v_slider, Knob, NormalParam, VSlider};
 use iced_baseview::{Application, Handle, WindowSubs};
 use log::info;
 use raw_window_handle::RawWindowHandle;
@@ -20,11 +20,20 @@ macro_rules! widget {
 }
 
 fn with_label<'a>(widget: impl Into<Element<'a, Message>>, title: &str) -> Column<'a, Message> {
-    Column::with_children(vec![widget.into(), iced::Text::new(title).into()])
-        .max_height(100)
+    Column::with_children(vec![widget.into(), iced::Text::new(title).size(10).into()])
         .align_items(Align::Center)
 }
 
+fn make_normal_param(param_ref: &RawParameters, param_type: ParameterType) -> NormalParam {
+    NormalParam {
+        value: param_ref.get(param_type).into(),
+        default: 1.0.into(),
+    }
+}
+
+fn make_knob(param_ref: &RawParameters, param_type: ParameterType) -> knob::State {
+    knob::State::new(make_normal_param(param_ref, param_type))
+}
 struct RecipeStruct {
     notifier: Arc<Notify>,
 }
@@ -67,6 +76,17 @@ pub struct UIFrontEnd {
     decay: knob::State,
     sustain: knob::State,
     release: knob::State,
+    note_shape: knob::State,
+    note_warp: knob::State,
+    pitch_attack: knob::State,
+    pitch_decay: knob::State,
+    pitch_multiply: knob::State,
+    pitch_release: knob::State,
+    low_pass: knob::State,
+    fm_on_off: knob::State,
+    fm_vol: knob::State,
+    fm_pitch: knob::State,
+    fm_shape: knob::State,
     params: std::sync::Arc<RawParameters>,
     handle: Option<Handle>,
     notifier: Arc<Notify>,
@@ -79,17 +99,27 @@ impl Application for UIFrontEnd {
 
     fn new(flags: Self::Flags) -> (Self, Command<Self::Message>) {
         let (params, notifier) = flags;
-        let master_vol = params.volume.get();
-        let attack = params.vol_adsr.attack.get();
-        let decay = params.vol_adsr.decay.get();
-        let sustain = params.vol_adsr.sustain.get();
-        let release = params.vol_adsr.release.get();
+        let param_ref = params.as_ref();
         let ui = UIFrontEnd {
-            master_vol: v_slider::State::new(make_normal_param(master_vol, 1.0)),
-            attack: knob::State::new(make_normal_param(attack, 1.0)),
-            decay: knob::State::new(make_normal_param(decay, 1.0)),
-            sustain: knob::State::new(make_normal_param(sustain, 1.0)),
-            release: knob::State::new(make_normal_param(release, 1.0)),
+            master_vol: v_slider::State::new(make_normal_param(
+                param_ref,
+                ParameterType::MasterVolume,
+            )),
+            attack: make_knob(param_ref, ParameterType::VolAttack),
+            decay: make_knob(param_ref, ParameterType::VolDecay),
+            sustain: make_knob(param_ref, ParameterType::VolSustain),
+            release: make_knob(param_ref, ParameterType::VolRelease),
+            note_shape: make_knob(param_ref, ParameterType::Shape),
+            note_warp: make_knob(param_ref, ParameterType::Warp),
+            pitch_attack: make_knob(param_ref, ParameterType::PitchAttack),
+            pitch_decay: make_knob(param_ref, ParameterType::PitchDecay),
+            pitch_multiply: make_knob(param_ref, ParameterType::PitchMultiply),
+            pitch_release: make_knob(param_ref, ParameterType::PitchRelease),
+            low_pass: make_knob(param_ref, ParameterType::LowPassAlpha),
+            fm_on_off: make_knob(param_ref, ParameterType::FMOnOff),
+            fm_vol: make_knob(param_ref, ParameterType::FMVolume),
+            fm_pitch: make_knob(param_ref, ParameterType::FMPitchMultiplier),
+            fm_shape: make_knob(param_ref, ParameterType::FMShape),
             params,
             handle: None,
             notifier,
@@ -102,15 +132,38 @@ impl Application for UIFrontEnd {
         match message {
             Message::ParameterChanged(value, param) => self.params.set(value, param),
             Message::ForceRedraw => {
-                self.master_vol.set(Normal::new(self.params.volume.get()));
+                self.master_vol
+                    .set(self.params.get(ParameterType::MasterVolume).into());
                 self.attack
-                    .set(Normal::new(self.params.vol_adsr.attack.get()));
+                    .set(self.params.get(ParameterType::VolAttack).into());
                 self.decay
-                    .set(Normal::new(self.params.vol_adsr.decay.get()));
+                    .set(self.params.get(ParameterType::VolDecay).into());
                 self.sustain
-                    .set(Normal::new(self.params.vol_adsr.sustain.get()));
+                    .set(self.params.get(ParameterType::VolSustain).into());
                 self.release
-                    .set(Normal::new(self.params.vol_adsr.release.get()));
+                    .set(self.params.get(ParameterType::VolRelease).into());
+                self.note_shape
+                    .set(self.params.get(ParameterType::Shape).into());
+                self.note_warp
+                    .set(self.params.get(ParameterType::Warp).into());
+                self.pitch_attack
+                    .set(self.params.get(ParameterType::PitchAttack).into());
+                self.pitch_decay
+                    .set(self.params.get(ParameterType::PitchDecay).into());
+                self.pitch_multiply
+                    .set(self.params.get(ParameterType::PitchMultiply).into());
+                self.pitch_release
+                    .set(self.params.get(ParameterType::PitchRelease).into());
+                self.low_pass
+                    .set(self.params.get(ParameterType::LowPassAlpha).into());
+                self.fm_on_off
+                    .set(self.params.get(ParameterType::FMOnOff).into());
+                self.fm_vol
+                    .set(self.params.get(ParameterType::FMVolume).into());
+                self.fm_pitch
+                    .set(self.params.get(ParameterType::FMPitchMultiplier).into());
+                self.fm_shape
+                    .set(self.params.get(ParameterType::FMShape).into());
             }
         }
         // Make the host DAW update its own parameter display
@@ -124,20 +177,68 @@ impl Application for UIFrontEnd {
         let decay_widget = widget!(Knob, &mut self.decay, ParameterType::VolDecay);
         let sustain_widget = widget!(Knob, &mut self.sustain, ParameterType::VolSustain);
         let release_widget = widget!(Knob, &mut self.release, ParameterType::VolRelease);
-
+        let shape_widget = widget!(Knob, &mut self.note_shape, ParameterType::Shape);
+        let warp_widget = widget!(Knob, &mut self.note_warp, ParameterType::Warp);
+        let pitch_attack_widget = widget!(Knob, &mut self.pitch_attack, ParameterType::PitchAttack);
+        let pitch_decay_widget = widget!(Knob, &mut self.pitch_decay, ParameterType::PitchDecay);
+        let pitch_multiply_widget =
+            widget!(Knob, &mut self.pitch_multiply, ParameterType::PitchMultiply);
+        let pitch_release_widget =
+            widget!(Knob, &mut self.pitch_release, ParameterType::PitchRelease);
+        let low_pass_widget = widget!(Knob, &mut self.low_pass, ParameterType::LowPassAlpha);
+        let fm_on_off_widget = widget!(Knob, &mut self.fm_on_off, ParameterType::FMOnOff);
+        let fm_vol_widget = widget!(Knob, &mut self.fm_vol, ParameterType::FMVolume);
+        let fm_pitch_widget = widget!(Knob, &mut self.fm_pitch, ParameterType::FMPitchMultiplier);
+        let fm_shape_widget = widget!(Knob, &mut self.fm_shape, ParameterType::FMShape);
         let content: Element<_> = Column::new()
             .max_width(700)
             .max_height(600)
             .spacing(20)
             .padding(20)
             .push(
-                Row::new()
-                    .push(with_label(master_vol_widget, "Master Volume"))
-                    .push(with_label(attack_widget, "Attack"))
-                    .push(with_label(decay_widget, "Decay"))
-                    .push(with_label(sustain_widget, "Sustain"))
-                    .push(with_label(release_widget, "Release"))
-                    .align_items(Align::Center),
+                Row::with_children(vec![
+                    with_label(master_vol_widget, "Master Volume").into(),
+                    Column::with_children(vec![
+                        Row::with_children(vec![
+                            with_label(attack_widget, "Attack").into(),
+                            with_label(decay_widget, "Decay").into(),
+                            with_label(sustain_widget, "Sustain").into(),
+                            with_label(release_widget, "Release").into(),
+                        ])
+                        .spacing(20)
+                        .into(),
+                        Row::with_children(vec![
+                            with_label(shape_widget, "Note Shape").into(),
+                            with_label(warp_widget, "Note Warp").into(),
+                        ])
+                        .spacing(20)
+                        .into(),
+                        Row::with_children(vec![
+                            with_label(pitch_attack_widget, "Pitch Attack").into(),
+                            with_label(pitch_decay_widget, "Pitch Decay").into(),
+                            with_label(pitch_multiply_widget, "Pitch Multiply").into(),
+                            with_label(pitch_release_widget, "Pitch Release").into(),
+                        ])
+                        .spacing(20)
+                        .into(),
+                        Row::with_children(vec![
+                            with_label(low_pass_widget, "Low Pass Alpha").into()
+                        ])
+                        .spacing(20)
+                        .into(),
+                        Row::with_children(vec![
+                            with_label(fm_on_off_widget, "FM On/Off").into(),
+                            with_label(fm_vol_widget, "FM Volume").into(),
+                            with_label(fm_pitch_widget, "FM Pitch Multiplier").into(),
+                            with_label(fm_shape_widget, "FM Shape").into(),
+                        ])
+                        .spacing(20)
+                        .into(),
+                    ])
+                    .spacing(5)
+                    .into(),
+                ])
+                .align_items(Align::Center),
             )
             .into();
 
@@ -162,7 +263,7 @@ impl Application for UIFrontEnd {
 
 impl Editor for UIFrontEnd {
     fn size(&self) -> (i32, i32) {
-        (800, 600)
+        (600, 400)
     }
 
     fn position(&self) -> (i32, i32) {
@@ -210,13 +311,6 @@ impl Editor for UIFrontEnd {
 
     fn is_open(&mut self) -> bool {
         self.handle.is_some()
-    }
-}
-
-fn make_normal_param(value: f32, default: f32) -> NormalParam {
-    NormalParam {
-        value: Normal::new(value),
-        default: Normal::new(default),
     }
 }
 

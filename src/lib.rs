@@ -285,12 +285,12 @@ impl From<&RawParameters> for Parameters {
             vol_adsr: AmplitudeADSR::from(&params.vol_adsr),
             pitch_adsr: PitchADSR::from(&params.pitch_adsr),
             volume: params.volume.get(),
-            shape: NoteShape::from_pulse(params.shape.get(), params.pulse.get()),
+            shape: NoteShape::from_warp(params.shape.get(), params.warp.get()),
             low_pass_alpha: ease_in_poly(params.low_pass_alpha.get(), 4).clamp(0.0, 1.0),
             fm_on_off: params.fm_on_off.get() > 0.5,
             fm_vol: params.fm_vol.get() * 2.0,
             fm_pitch_mult: to_pitch_multiplier((params.fm_pitch_mult.get() - 0.5) * 2.0, 24),
-            fm_shape: NoteShape::from_pulse(params.fm_shape.get(), 0.5),
+            fm_shape: NoteShape::from_warp(params.fm_shape.get(), 0.5),
         }
     }
 }
@@ -339,7 +339,7 @@ pub struct RawParameters {
     pitch_adsr: RawParametersEnvelope,
     volume: AtomicFloat,
     shape: AtomicFloat,
-    pulse: AtomicFloat,
+    warp: AtomicFloat,
     low_pass_alpha: AtomicFloat,
     fm_on_off: AtomicFloat,
     fm_vol: AtomicFloat,
@@ -350,20 +350,43 @@ pub struct RawParameters {
 }
 
 impl RawParameters {
+    fn get(&self, parameter: ParameterType) -> f32 {
+        use ParameterType::*;
+        match parameter {
+            MasterVolume => self.volume.get(),
+            Shape => self.shape.get(),
+            Warp => self.warp.get(),
+            VolAttack => self.vol_adsr.attack.get(),
+            VolDecay => self.vol_adsr.decay.get(),
+            VolSustain => self.vol_adsr.sustain.get(),
+            VolRelease => self.vol_adsr.release.get(),
+            PitchAttack => self.pitch_adsr.attack.get(),
+            PitchDecay => self.pitch_adsr.decay.get(),
+            PitchMultiply => self.pitch_adsr.sustain.get(),
+            PitchRelease => self.pitch_adsr.release.get(),
+            LowPassAlpha => self.low_pass_alpha.get(),
+            FMOnOff => self.fm_on_off.get(),
+            FMVolume => self.fm_vol.get(),
+            FMPitchMultiplier => self.fm_pitch_mult.get(),
+            FMShape => self.fm_shape.get(),
+            Error => 0.0,
+        }
+    }
+
     fn set(&self, value: f32, parameter: ParameterType) {
         use ParameterType::*;
         match parameter {
             MasterVolume => self.volume.set(value),
             Shape => self.shape.set(value),
-            Pulse => {
+            Warp => {
                 // TODO: this is stupid
                 let old_value = format!(
                     "{}",
-                    NoteShape::from_pulse(self.shape.get(), self.pulse.get())
+                    NoteShape::from_warp(self.shape.get(), self.warp.get())
                 );
-                let new_value = format!("{}", NoteShape::from_pulse(self.shape.get(), value));
+                let new_value = format!("{}", NoteShape::from_warp(self.shape.get(), value));
 
-                self.pulse.set(value);
+                self.warp.set(value);
 
                 if old_value != new_value {
                     self.host.update_display();
@@ -396,7 +419,7 @@ impl PluginParameters for RawParameters {
             }
             VolSustain | PitchMultiply | MasterVolume | FMVolume => "%".to_string(),
             FMPitchMultiplier => "x".to_string(),
-            Shape | Pulse | LowPassAlpha | FMOnOff | FMShape => "".to_string(),
+            Shape | Warp | LowPassAlpha | FMOnOff | FMShape => "".to_string(),
             Error => "".to_string(),
         }
     }
@@ -415,7 +438,7 @@ impl PluginParameters for RawParameters {
             PitchRelease => format!("{:.2}", params.pitch_adsr.release),
             MasterVolume => format!("{:.2}", params.volume * 100.0),
             Shape => format!("{}", params.shape),
-            Pulse => format!("{:.2}", self.pulse.get()),
+            Warp => format!("{:.2}", self.warp.get()),
             LowPassAlpha => format!("{:.5}", params.low_pass_alpha),
             FMOnOff => if params.fm_on_off { "On" } else { "Off" }.to_string(),
             FMVolume => format!("{:.2}", params.fm_vol * 100.0),
@@ -430,7 +453,7 @@ impl PluginParameters for RawParameters {
         match index.into() {
             MasterVolume => "Master Volume".to_string(),
             Shape => "Note Shape".to_string(),
-            Pulse => "Note Pulse".to_string(),
+            Warp => "Note Warp".to_string(),
             VolAttack => "Attack (Volume)".to_string(),
             VolDecay => "Decay (Volume)".to_string(),
             VolSustain => "Sustain (Volume)".to_string(),
@@ -449,26 +472,7 @@ impl PluginParameters for RawParameters {
     }
 
     fn get_parameter(&self, index: i32) -> f32 {
-        use ParameterType::*;
-        match index.into() {
-            MasterVolume => self.volume.get(),
-            Shape => self.shape.get(),
-            Pulse => self.pulse.get(),
-            VolAttack => self.vol_adsr.attack.get(),
-            VolDecay => self.vol_adsr.decay.get(),
-            VolSustain => self.vol_adsr.sustain.get(),
-            VolRelease => self.vol_adsr.release.get(),
-            PitchAttack => self.pitch_adsr.attack.get(),
-            PitchDecay => self.pitch_adsr.decay.get(),
-            PitchMultiply => self.pitch_adsr.sustain.get(),
-            PitchRelease => self.pitch_adsr.release.get(),
-            LowPassAlpha => self.low_pass_alpha.get(),
-            FMOnOff => self.fm_on_off.get(),
-            FMVolume => self.fm_vol.get(),
-            FMPitchMultiplier => self.fm_pitch_mult.get(),
-            FMShape => self.fm_shape.get(),
-            Error => 0.0,
-        }
+        self.get(index.into())
     }
 
     fn set_parameter(&self, index: i32, value: f32) {
@@ -490,7 +494,7 @@ impl Default for RawParameters {
         RawParameters {
             volume: AtomicFloat::new(0.33),
             shape: AtomicFloat::new(0.225), // Triangle
-            pulse: AtomicFloat::new(0.5),
+            warp: AtomicFloat::new(0.5),
             vol_adsr: RawParametersEnvelope {
                 attack: AtomicFloat::new(0.1),
                 decay: AtomicFloat::new(0.2),
@@ -527,7 +531,7 @@ pub struct RawParametersEnvelope {
 pub enum ParameterType {
     MasterVolume,
     Shape,
-    Pulse,
+    Warp,
     VolAttack,
     VolDecay,
     VolSustain,
@@ -550,7 +554,7 @@ impl From<i32> for ParameterType {
         match i {
             0 => MasterVolume,
             1 => Shape,
-            2 => Pulse,
+            2 => Warp,
             3 => VolAttack,
             4 => VolDecay,
             5 => VolSustain,

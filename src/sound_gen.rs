@@ -236,31 +236,31 @@ impl NoteShape {
             // See https://www.desmos.com/calculator/dqg8kdvung for visuals
             // and https://www.desmos.com/calculator/hs8zd0sfkh for more visuals
             NoteShape::Sine => (angle * TAU).sin(),
-            NoteShape::Square(pulse) => {
-                if angle < *pulse {
+            NoteShape::Square(warp) => {
+                if angle < *warp {
                     -1.0
                 } else {
                     1.0
                 }
             }
-            NoteShape::Skewtooth(pulse) => {
-                let pulse = *pulse;
+            NoteShape::Skewtooth(warp) => {
+                let warp = *warp;
                 // Sawtooths, avoid divide by zero.
                 // Clippy lint complains about floating point compares but this
                 // is ok to do since 1.0 is exactly representible in floating
-                // point and also pulse is always in range [0.0, 1.0].
+                // point and also warp is always in range [0.0, 1.0].
                 #[allow(clippy::float_cmp)]
-                if pulse == 0.0 {
+                if warp == 0.0 {
                     return -2.0 * angle + 1.0;
-                } else if pulse == 1.0 {
+                } else if warp == 1.0 {
                     return 2.0 * angle - 1.0;
                 }
 
                 // Skew Triangles (perfect triangle at 0.5)
-                if angle < pulse {
-                    (2.0 * angle / pulse) - 1.0
+                if angle < warp {
+                    (2.0 * angle / warp) - 1.0
                 } else {
-                    -(2.0 * (angle - pulse)) / (1.0 - pulse) + 1.0
+                    -(2.0 * (angle - warp)) / (1.0 - warp) + 1.0
                 }
             }
         }
@@ -268,13 +268,13 @@ impl NoteShape {
 }
 
 impl NoteShape {
-    pub fn from_pulse(shape: f32, pulse: f32) -> Self {
+    pub fn from_warp(shape: f32, warp: f32) -> Self {
         if shape < 0.33 {
             NoteShape::Sine
         } else if shape < 0.66 {
-            NoteShape::Skewtooth(pulse)
+            NoteShape::Skewtooth(warp)
         } else {
-            NoteShape::Square(pulse)
+            NoteShape::Square(warp)
         }
     }
 }
@@ -284,19 +284,19 @@ impl std::fmt::Display for NoteShape {
         use NoteShape::*;
         let string = match self {
             Sine => "Sine",
-            Square(pulse) => {
-                if (pulse - 0.5).abs() < 0.1 {
+            Square(warp) => {
+                if (warp - 0.5).abs() < 0.1 {
                     "Square"
                 } else {
                     "Pulse"
                 }
             }
-            Skewtooth(pulse) => {
-                if (pulse - 0.0).abs() < 0.1 {
+            Skewtooth(warp) => {
+                if (warp - 0.0).abs() < 0.1 {
                     "Reverse Sawtooth"
-                } else if (pulse - 1.0).abs() < 0.1 {
+                } else if (warp - 1.0).abs() < 0.1 {
                     "Sawtooth"
-                } else if (pulse - 0.5).abs() < 0.1 {
+                } else if (warp - 0.5).abs() < 0.1 {
                     "Triangle"
                 } else {
                     "Skewed Triangle"
