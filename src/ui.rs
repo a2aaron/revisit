@@ -34,6 +34,20 @@ fn make_normal_param(param_ref: &RawParameters, param_type: ParameterType) -> No
 fn make_knob(param_ref: &RawParameters, param_type: ParameterType) -> knob::State {
     knob::State::new(make_normal_param(param_ref, param_type))
 }
+
+fn knob_row<'a>(knobs: Vec<Element<'a, Message>>, title: &str) -> Column<'a, Message> {
+    Column::new()
+        .push(iced::Text::new(title).size(12))
+        .push(
+            Row::with_children(knobs)
+                .align_items(Align::Center)
+                .spacing(20)
+                .height(Length::Fill),
+        )
+        .align_items(Align::Center)
+        .max_height(40)
+        .spacing(2)
+}
 struct RecipeStruct {
     notifier: Arc<Notify>,
 }
@@ -191,62 +205,62 @@ impl Application for UIFrontEnd {
         let fm_pitch_widget = widget!(Knob, &mut self.fm_pitch, ParameterType::FMPitchMultiplier);
         let fm_shape_widget = widget!(Knob, &mut self.fm_shape, ParameterType::FMShape);
         let content: Element<_> = Column::new()
-            .max_width(700)
-            .max_height(600)
+            .max_width(600)
+            .max_height(400)
             .spacing(20)
             .padding(20)
-            .push(
-                Row::with_children(vec![
-                    with_label(master_vol_widget, "Master Volume").into(),
-                    Column::with_children(vec![
-                        Row::with_children(vec![
-                            with_label(attack_widget, "Attack").into(),
-                            with_label(decay_widget, "Decay").into(),
-                            with_label(sustain_widget, "Sustain").into(),
-                            with_label(release_widget, "Release").into(),
-                        ])
-                        .spacing(20)
-                        .into(),
-                        Row::with_children(vec![
-                            with_label(shape_widget, "Note Shape").into(),
-                            with_label(warp_widget, "Note Warp").into(),
-                        ])
-                        .spacing(20)
-                        .into(),
-                        Row::with_children(vec![
-                            with_label(pitch_attack_widget, "Pitch Attack").into(),
-                            with_label(pitch_decay_widget, "Pitch Decay").into(),
-                            with_label(pitch_multiply_widget, "Pitch Multiply").into(),
-                            with_label(pitch_release_widget, "Pitch Release").into(),
-                        ])
-                        .spacing(20)
-                        .into(),
-                        Row::with_children(vec![
-                            with_label(low_pass_widget, "Low Pass Alpha").into()
-                        ])
-                        .spacing(20)
-                        .into(),
-                        Row::with_children(vec![
-                            with_label(fm_on_off_widget, "FM On/Off").into(),
-                            with_label(fm_vol_widget, "FM Volume").into(),
-                            with_label(fm_pitch_widget, "FM Pitch Multiplier").into(),
-                            with_label(fm_shape_widget, "FM Shape").into(),
-                        ])
-                        .spacing(20)
-                        .into(),
-                    ])
-                    .spacing(5)
+            .push(Row::with_children(vec![
+                with_label(master_vol_widget, "Master Volume").into(),
+                Column::with_children(vec![
+                    knob_row(
+                        vec![
+                            with_label(attack_widget, "A").into(),
+                            with_label(decay_widget, "D").into(),
+                            with_label(sustain_widget, "S").into(),
+                            with_label(release_widget, "R").into(),
+                        ],
+                        "Volume",
+                    )
                     .into(),
-                ])
-                .align_items(Align::Center),
-            )
+                    knob_row(
+                        vec![
+                            with_label(shape_widget, "Shape").into(),
+                            with_label(warp_widget, "Warp").into(),
+                        ],
+                        "Note Shape",
+                    )
+                    .into(),
+                    knob_row(
+                        vec![
+                            with_label(pitch_attack_widget, "A").into(),
+                            with_label(pitch_decay_widget, "D").into(),
+                            with_label(pitch_multiply_widget, "S").into(),
+                            with_label(pitch_release_widget, "R").into(),
+                        ],
+                        "Pitch",
+                    )
+                    .into(),
+                    knob_row(vec![with_label(low_pass_widget, "Alpha").into()], "Filter").into(),
+                    knob_row(
+                        vec![
+                            with_label(fm_on_off_widget, "On/Off").into(),
+                            with_label(fm_vol_widget, "Volume").into(),
+                            with_label(fm_pitch_widget, "Pitch Multiplier").into(),
+                            with_label(fm_shape_widget, "Shape").into(),
+                        ],
+                        "Frequency Modulation",
+                    )
+                    .into(),
+                ]) // End knob column
+                .align_items(Align::Center)
+                .spacing(20)
+                .into(),
+            ]))
             .into();
 
         Container::new(content)
             .width(Length::Fill)
             .height(Length::Fill)
-            .center_x()
-            .center_y()
             .into()
     }
 
