@@ -85,12 +85,14 @@ pub enum Message {
 pub struct UIFrontEnd {
     master_vol: v_slider::State,
     attack: knob::State,
+    hold: knob::State,
     decay: knob::State,
     sustain: knob::State,
     release: knob::State,
     note_shape: knob::State,
     note_warp: knob::State,
     pitch_attack: knob::State,
+    pitch_hold: knob::State,
     pitch_decay: knob::State,
     pitch_multiply: knob::State,
     pitch_release: knob::State,
@@ -118,12 +120,14 @@ impl Application for UIFrontEnd {
                 ParameterType::MasterVolume,
             )),
             attack: make_knob(param_ref, ParameterType::VolAttack),
+            hold: make_knob(param_ref, ParameterType::VolHold),
             decay: make_knob(param_ref, ParameterType::VolDecay),
             sustain: make_knob(param_ref, ParameterType::VolSustain),
             release: make_knob(param_ref, ParameterType::VolRelease),
             note_shape: make_knob(param_ref, ParameterType::Shape),
             note_warp: make_knob(param_ref, ParameterType::Warp),
             pitch_attack: make_knob(param_ref, ParameterType::PitchAttack),
+            pitch_hold: make_knob(param_ref, ParameterType::PitchHold),
             pitch_decay: make_knob(param_ref, ParameterType::PitchDecay),
             pitch_multiply: make_knob(param_ref, ParameterType::PitchMultiply),
             pitch_release: make_knob(param_ref, ParameterType::PitchRelease),
@@ -148,6 +152,8 @@ impl Application for UIFrontEnd {
                     .set(self.params.get(ParameterType::MasterVolume).into());
                 self.attack
                     .set(self.params.get(ParameterType::VolAttack).into());
+                self.hold
+                    .set(self.params.get(ParameterType::VolHold).into());
                 self.decay
                     .set(self.params.get(ParameterType::VolDecay).into());
                 self.sustain
@@ -160,6 +166,8 @@ impl Application for UIFrontEnd {
                     .set(self.params.get(ParameterType::Warp).into());
                 self.pitch_attack
                     .set(self.params.get(ParameterType::PitchAttack).into());
+                self.pitch_hold
+                    .set(self.params.get(ParameterType::PitchHold).into());
                 self.pitch_decay
                     .set(self.params.get(ParameterType::PitchDecay).into());
                 self.pitch_multiply
@@ -189,12 +197,14 @@ impl Application for UIFrontEnd {
 
         let master_vol_widget = widget!(VSlider, &mut self.master_vol, ParameterType::MasterVolume);
         let attack_widget = widget!(Knob, &mut self.attack, ParameterType::VolAttack);
+        let hold_widget = widget!(Knob, &mut self.hold, ParameterType::VolHold);
         let decay_widget = widget!(Knob, &mut self.decay, ParameterType::VolDecay);
         let sustain_widget = widget!(Knob, &mut self.sustain, ParameterType::VolSustain);
         let release_widget = widget!(Knob, &mut self.release, ParameterType::VolRelease);
         let shape_widget = widget!(Knob, &mut self.note_shape, ParameterType::Shape);
         let warp_widget = widget!(Knob, &mut self.note_warp, ParameterType::Warp);
         let pitch_attack_widget = widget!(Knob, &mut self.pitch_attack, ParameterType::PitchAttack);
+        let pitch_hold_widget = widget!(Knob, &mut self.pitch_hold, ParameterType::PitchHold);
         let pitch_decay_widget = widget!(Knob, &mut self.pitch_decay, ParameterType::PitchDecay);
         let pitch_multiply_widget =
             widget!(Knob, &mut self.pitch_multiply, ParameterType::PitchMultiply);
@@ -217,6 +227,7 @@ impl Application for UIFrontEnd {
                     knob_row(
                         vec![
                             with_label(attack_widget, "A").into(),
+                            with_label(hold_widget, "H").into(),
                             with_label(decay_widget, "D").into(),
                             with_label(sustain_widget, "S").into(),
                             with_label(release_widget, "R").into(),
@@ -235,6 +246,7 @@ impl Application for UIFrontEnd {
                     knob_row(
                         vec![
                             with_label(pitch_attack_widget, "A").into(),
+                            with_label(pitch_hold_widget, "H").into(),
                             with_label(pitch_decay_widget, "D").into(),
                             with_label(pitch_multiply_widget, "S").into(),
                             with_label(pitch_release_widget, "R").into(),
