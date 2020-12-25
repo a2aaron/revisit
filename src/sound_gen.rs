@@ -153,6 +153,8 @@ pub struct AmplitudeADSR {
     // In seconds
     pub attack: f32,
     // In seconds
+    pub hold: f32,
+    // In seconds
     pub decay: f32,
     // In percent (0.0 to 1.0)
     pub sustain: f32,
@@ -164,6 +166,8 @@ pub struct AmplitudeADSR {
 pub struct PitchADSR {
     // In seconds
     pub attack: f32,
+    // In seconds
+    pub hold: f32,
     // In seconds
     pub decay: f32,
     // In percent (-1.0 to 1.0)
@@ -183,7 +187,13 @@ pub trait ADSR {
 impl ADSR for AmplitudeADSR {
     fn get(&self, time: usize, note_state: NoteState, sample_rate: SampleRate) -> f32 {
         envelope(
-            (self.attack, self.decay, self.sustain, self.release),
+            (
+                self.attack,
+                self.hold,
+                self.decay,
+                self.sustain,
+                self.release,
+            ),
             time,
             note_state,
             sample_rate,
@@ -194,7 +204,7 @@ impl ADSR for AmplitudeADSR {
 impl ADSR for PitchADSR {
     fn get(&self, time: usize, note_state: NoteState, sample_rate: SampleRate) -> f32 {
         envelope(
-            (self.attack, self.decay, 0.0, self.release),
+            (self.attack, self.hold, self.decay, 0.0, self.release),
             time,
             note_state,
             sample_rate,
@@ -393,19 +403,20 @@ pub fn to_pitch_multiplier(normalized_pitch_bend: f32, semitones: i32) -> f32 {
 /// Released - do release envelope, going from the released velocity to zero
 /// Retrigger - do short envelope from retrigger velocity to zero
 fn envelope(
-    adsr: (f32, f32, f32, f32),
+    ahdsr: (f32, f32, f32, f32, f32),
     time: usize,
     note_state: NoteState,
     sample_rate: SampleRate,
 ) -> f32 {
-    let attack = adsr.0;
-    let decay = adsr.1;
-    let sustain = adsr.2;
-    let release = adsr.3;
+    let attack = ahdsr.0;
+    let hold = ahdsr.1;
+    let decay = ahdsr.2;
+    let sustain = ahdsr.3;
+    let release = ahdsr.4;
 
     match note_state {
         NoteState::None => 0.0,
-        NoteState::Held => ads_env(attack, decay, sustain, time as f32 / sample_rate),
+        NoteState::Held => ahds_env(attack, hold, decay, sustain, time as f32 / sample_rate),
         NoteState::Released {
             time: rel_time,
             vel,
@@ -428,13 +439,16 @@ fn envelope(
 // Attack, decay, and time are all in the same units (seconds usually)
 // Sustain is a value in range [0.0, 1.0]
 // Returned value is also in range [0.0, 1.0]
-fn ads_env(attack: f32, decay: f32, sustain: f32, time: f32) -> f32 {
+fn ahds_env(attack: f32, hold: f32, decay: f32, sustain: f32, time: f32) -> f32 {
     if time < attack {
         // Attack
         time / attack
-    } else if time < attack + decay {
+    } else if time < attack + hold {
+        // Hold
+        1.0
+    } else if time < attack + hold + decay {
         // Decay
-        let time = time - attack;
+        let time = time - attack - hold;
         lerp(1.0, sustain, time / decay)
     } else {
         // Sustain

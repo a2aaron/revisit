@@ -300,6 +300,7 @@ impl From<&RawParametersEnvelope> for AmplitudeADSR {
         // Apply exponetial scaling to input values.
         // This makes it easier to select small envelope lengths.
         let attack = ease_in_expo(params.attack.get());
+        let hold = ease_in_expo(params.hold.get());
         let decay = ease_in_expo(params.decay.get());
         let sustain = params.sustain.get();
         let release = ease_in_expo(params.release.get());
@@ -308,6 +309,7 @@ impl From<&RawParametersEnvelope> for AmplitudeADSR {
             // This avoids division by zero problems.
             // Also prevents annoying clicking which is undesirable.
             attack: (attack * 2.0).max(1.0 / 1000.0),
+            hold: hold * 5.0,
             decay: (decay * 5.0).max(1.0 / 1000.0),
             sustain,
             release: (release * 5.0).max(1.0 / 1000.0),
@@ -320,11 +322,13 @@ impl From<&RawParametersEnvelope> for PitchADSR {
         // Apply exponetial scaling to input values.
         // This makes it easier to select small envelope lengths.
         let attack = ease_in_expo(params.attack.get());
+        let hold = ease_in_expo(params.hold.get());
         let decay = ease_in_expo(params.decay.get());
         let multiply = params.sustain.get();
         let release = ease_in_expo(params.release.get());
         PitchADSR {
             attack: (attack * 2.0).max(1.0 / 10000.0),
+            hold: hold * 5.0,
             decay: (decay * 5.0).max(1.0 / 10000.0),
             multiply: (multiply - 0.5) * 2.0,
             release: (release * 5.0).max(1.0 / 10000.0),
@@ -357,10 +361,12 @@ impl RawParameters {
             Shape => self.shape.get(),
             Warp => self.warp.get(),
             VolAttack => self.vol_adsr.attack.get(),
+            VolHold => self.vol_adsr.hold.get(),
             VolDecay => self.vol_adsr.decay.get(),
             VolSustain => self.vol_adsr.sustain.get(),
             VolRelease => self.vol_adsr.release.get(),
             PitchAttack => self.pitch_adsr.attack.get(),
+            PitchHold => self.pitch_adsr.hold.get(),
             PitchDecay => self.pitch_adsr.decay.get(),
             PitchMultiply => self.pitch_adsr.sustain.get(),
             PitchRelease => self.pitch_adsr.release.get(),
@@ -393,10 +399,12 @@ impl RawParameters {
                 }
             }
             VolAttack => self.vol_adsr.attack.set(value),
+            VolHold => self.vol_adsr.hold.set(value),
             VolDecay => self.vol_adsr.decay.set(value),
             VolSustain => self.vol_adsr.sustain.set(value),
             VolRelease => self.vol_adsr.release.set(value),
             PitchAttack => self.pitch_adsr.attack.set(value),
+            PitchHold => self.pitch_adsr.hold.set(value),
             PitchDecay => self.pitch_adsr.decay.set(value),
             PitchMultiply => self.pitch_adsr.sustain.set(value),
             PitchRelease => self.pitch_adsr.release.set(value),
@@ -414,9 +422,8 @@ impl PluginParameters for RawParameters {
     fn get_parameter_label(&self, index: i32) -> String {
         use ParameterType::*;
         match index.into() {
-            VolAttack | VolDecay | VolRelease | PitchAttack | PitchDecay | PitchRelease => {
-                " sec".to_string()
-            }
+            VolAttack | VolHold | VolDecay | VolRelease | PitchAttack | PitchHold | PitchDecay
+            | PitchRelease => " sec".to_string(),
             VolSustain | PitchMultiply | MasterVolume | FMVolume => "%".to_string(),
             FMPitchMultiplier => "x".to_string(),
             Shape | Warp | LowPassAlpha | FMOnOff | FMShape => "".to_string(),
@@ -429,10 +436,12 @@ impl PluginParameters for RawParameters {
         use ParameterType::*;
         match index.into() {
             VolAttack => format!("{:.2}", params.vol_adsr.attack),
+            VolHold => format!("{:.2}", params.vol_adsr.hold),
             VolDecay => format!("{:.2}", params.vol_adsr.decay),
             VolSustain => format!("{:.2}", params.vol_adsr.sustain * 100.0),
             VolRelease => format!("{:.2}", params.vol_adsr.release),
             PitchAttack => format!("{:.2}", params.pitch_adsr.attack),
+            PitchHold => format!("{:.2}", params.pitch_adsr.hold),
             PitchDecay => format!("{:.2}", params.pitch_adsr.decay),
             PitchMultiply => format!("{:.2}", params.pitch_adsr.multiply * 100.0),
             PitchRelease => format!("{:.2}", params.pitch_adsr.release),
@@ -455,10 +464,12 @@ impl PluginParameters for RawParameters {
             Shape => "Note Shape".to_string(),
             Warp => "Note Warp".to_string(),
             VolAttack => "Attack (Volume)".to_string(),
+            VolHold => "Hold (Volume)".to_string(),
             VolDecay => "Decay (Volume)".to_string(),
             VolSustain => "Sustain (Volume)".to_string(),
             VolRelease => "Release (Volume)".to_string(),
             PitchAttack => "Attack (Pitch Bend)".to_string(),
+            PitchHold => "Hold (Pitch Bend)".to_string(),
             PitchDecay => "Decay (Pitch Bend)".to_string(),
             PitchMultiply => "Multiply (Pitch Bend)".to_string(),
             PitchRelease => "Release (Pitch Bend)".to_string(),
@@ -497,12 +508,14 @@ impl Default for RawParameters {
             warp: AtomicFloat::new(0.5),
             vol_adsr: RawParametersEnvelope {
                 attack: AtomicFloat::new(0.1),
+                hold: AtomicFloat::new(0.0),
                 decay: AtomicFloat::new(0.2),
                 sustain: AtomicFloat::new(0.5),
                 release: AtomicFloat::new(0.3),
             },
             pitch_adsr: RawParametersEnvelope {
                 attack: AtomicFloat::new(1.0 / 10000.0),
+                hold: AtomicFloat::new(0.0),
                 decay: AtomicFloat::new(0.2),
                 sustain: AtomicFloat::new(0.5),
                 release: AtomicFloat::new(1.0 / 10000.0),
@@ -521,6 +534,7 @@ impl Default for RawParameters {
 // Convience struct, represents parameters that are part of an envelope
 pub struct RawParametersEnvelope {
     attack: AtomicFloat,
+    hold: AtomicFloat,
     decay: AtomicFloat,
     sustain: AtomicFloat,
     release: AtomicFloat,
@@ -533,10 +547,12 @@ pub enum ParameterType {
     Shape,
     Warp,
     VolAttack,
+    VolHold,
     VolDecay,
     VolSustain,
     VolRelease,
     PitchAttack,
+    PitchHold,
     PitchDecay,
     PitchMultiply,
     PitchRelease,
@@ -556,18 +572,20 @@ impl From<i32> for ParameterType {
             1 => Shape,
             2 => Warp,
             3 => VolAttack,
-            4 => VolDecay,
-            5 => VolSustain,
-            6 => VolRelease,
-            7 => PitchAttack,
-            8 => PitchDecay,
-            9 => PitchMultiply,
-            10 => PitchRelease,
-            11 => LowPassAlpha,
-            12 => FMOnOff,
-            13 => FMVolume,
-            14 => FMPitchMultiplier,
-            15 => FMShape,
+            4 => VolHold,
+            5 => VolDecay,
+            6 => VolSustain,
+            7 => VolRelease,
+            8 => PitchAttack,
+            9 => PitchHold,
+            10 => PitchDecay,
+            11 => PitchMultiply,
+            12 => PitchRelease,
+            13 => LowPassAlpha,
+            14 => FMOnOff,
+            15 => FMVolume,
+            16 => FMPitchMultiplier,
+            17 => FMShape,
             _ => Error,
         }
     }
