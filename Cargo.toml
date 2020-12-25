@@ -22,5 +22,8 @@ raw-window-handle = "0.3.3"
 baseview = { git = "https://github.com/RustAudio/baseview", branch = "master" } 
 tokio = { version = "1.0.0", features = ["sync"] }
 
+[profile.release]
+incremental = true
+
 [lib]
 crate-type = ["cdylib"]

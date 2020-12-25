@@ -20,7 +20,7 @@ macro_rules! widget {
 }
 
 fn with_label<'a>(widget: impl Into<Element<'a, Message>>, title: &str) -> Column<'a, Message> {
-    Column::with_children(vec![widget.into(), iced::Text::new(title).size(10).into()])
+    Column::with_children(vec![widget.into(), iced::Text::new(title).size(15).into()])
         .align_items(Align::Center)
 }
 
@@ -37,15 +37,13 @@ fn make_knob(param_ref: &RawParameters, param_type: ParameterType) -> knob::Stat
 
 fn knob_row<'a>(knobs: Vec<Element<'a, Message>>, title: &str) -> Column<'a, Message> {
     Column::new()
-        .push(iced::Text::new(title).size(12))
+        .push(iced::Text::new(title).size(18))
         .push(
             Row::with_children(knobs)
                 .align_items(Align::Center)
-                .spacing(20)
-                .height(Length::Fill),
+                .spacing(20),
         )
-        .align_items(Align::Center)
-        .max_height(40)
+        .align_items(Align::Start)
         .spacing(2)
 }
 struct RecipeStruct {
@@ -186,6 +184,9 @@ impl Application for UIFrontEnd {
     }
 
     fn view(&mut self) -> iced::Element<'_, Self::Message> {
+        let screen = self.size();
+        let (screen_width, screen_height) = (screen.0 as u32, screen.1 as u32);
+
         let master_vol_widget = widget!(VSlider, &mut self.master_vol, ParameterType::MasterVolume);
         let attack_widget = widget!(Knob, &mut self.attack, ParameterType::VolAttack);
         let decay_widget = widget!(Knob, &mut self.decay, ParameterType::VolDecay);
@@ -204,9 +205,10 @@ impl Application for UIFrontEnd {
         let fm_vol_widget = widget!(Knob, &mut self.fm_vol, ParameterType::FMVolume);
         let fm_pitch_widget = widget!(Knob, &mut self.fm_pitch, ParameterType::FMPitchMultiplier);
         let fm_shape_widget = widget!(Knob, &mut self.fm_shape, ParameterType::FMShape);
+
         let content: Element<_> = Column::new()
-            .max_width(600)
-            .max_height(400)
+            .max_width(screen_width)
+            .max_height(screen_height)
             .spacing(20)
             .padding(20)
             .push(Row::with_children(vec![
@@ -252,7 +254,7 @@ impl Application for UIFrontEnd {
                     )
                     .into(),
                 ]) // End knob column
-                .align_items(Align::Center)
+                .align_items(Align::Start)
                 .spacing(20)
                 .into(),
             ]))
@@ -277,7 +279,7 @@ impl Application for UIFrontEnd {
 
 impl Editor for UIFrontEnd {
     fn size(&self) -> (i32, i32) {
-        (600, 400)
+        (600, 600)
     }
 
     fn position(&self) -> (i32, i32) {
