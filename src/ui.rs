@@ -406,11 +406,20 @@ fn to_keyboard_event(
     }
 }
 
-#[cfg(windows)]
+#[cfg(target_os = "windows")]
 fn to_windows_handle(parent: *mut c_void) -> RawWindowHandle {
     use raw_window_handle::windows::WindowsHandle;
     let mut handle = WindowsHandle::empty();
     handle.hwnd = parent;
     handle.hinstance = std::ptr::null_mut();
     RawWindowHandle::Windows(handle)
+}
+
+#[cfg(target_os = "macos")]
+fn to_macos_handle(parent: *mut c_void) -> RawWindowHandle {
+    use raw_window_handle::macos::MacOSHandle;
+    let mut handle = MacOSHandle::empty();
+    handle.ns_view = parent;
+    handle.ns_window = std::ptr::null_mut();
+    RawWindowHandle::MacOS(handle)
 }
