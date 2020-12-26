@@ -13,13 +13,17 @@ rand = "0.7.3"
 log = "0.4.11"
 simple-logging = "2.0.2"
 variant_count = "1.0.0"
+# for GUI
 iced = { version = "0.2", features = ["image"] }
 iced_audio = { git = "https://github.com/a2aaron/iced_audio", branch = "main" }
-iced_baseview = { git = "https://github.com/BillyDM/iced_baseview", branch = "main" }
+iced_baseview = { git = "https://github.com/a2aaron/iced_baseview", branch = "main" }
 iced_native = "0.3.0"
 iced_futures = { version = "0.2.0", features = ["async-std"] }
 raw-window-handle = "0.3.3"
-baseview = { git = "https://github.com/RustAudio/baseview", branch = "master" } 
+baseview = { git = "https://github.com/RustAudio/baseview", branch = "master" }
+# because baseview doesn't reexport this
+keyboard-types = "0.5.0"
+# for use with iced's subscriptions
 tokio = { version = "1.0.0", features = ["sync"] }
 
 [profile.release]

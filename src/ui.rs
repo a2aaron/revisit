@@ -46,11 +46,11 @@ fn knob_row<'a>(knobs: Vec<Element<'a, Message>>, title: &str) -> Column<'a, Mes
         .align_items(Align::Start)
         .spacing(2)
 }
-struct RecipeStruct {
+struct NotifyRecipe {
     notifier: Arc<Notify>,
 }
 
-impl<H, I> iced_native::subscription::Recipe<H, I> for RecipeStruct
+impl<H, I> iced_native::subscription::Recipe<H, I> for NotifyRecipe
 where
     H: std::hash::Hasher,
 {
@@ -104,6 +104,7 @@ pub struct UIFrontEnd {
     params: std::sync::Arc<RawParameters>,
     handle: Option<Handle>,
     notifier: Arc<Notify>,
+    control_key: keyboard_types::KeyState,
 }
 
 impl Application for UIFrontEnd {
@@ -139,6 +140,7 @@ impl Application for UIFrontEnd {
             params,
             handle: None,
             notifier,
+            control_key: keyboard_types::KeyState::Up,
         };
         info!("Called new!");
         (ui, Command::none())
@@ -282,7 +284,7 @@ impl Application for UIFrontEnd {
         &self,
         _window_subs: &mut WindowSubs<Self::Message>,
     ) -> Subscription<Self::Message> {
-        let recipe = RecipeStruct {
+        let recipe = NotifyRecipe {
             notifier: self.notifier.clone(),
         };
         Subscription::from_recipe(recipe)
@@ -339,6 +341,68 @@ impl Editor for UIFrontEnd {
 
     fn is_open(&mut self) -> bool {
         self.handle.is_some()
+    }
+
+    fn key_up(&mut self, keycode: vst::editor::KeyCode) -> bool {
+        if let Some(handle) = &mut self.handle {
+            match keycode.key {
+                vst::editor::Key::Control | vst::editor::Key::Shift => {
+                    if self.control_key == keyboard_types::KeyState::Down {
+                        let event = to_keyboard_event(keycode, keyboard_types::KeyState::Up);
+                        handle.send_baseview_event(baseview::Event::Keyboard(event));
+                        self.control_key = keyboard_types::KeyState::Up;
+                        info!("Sent key up!");
+                        return true;
+                    }
+                }
+                _ => (),
+            }
+        }
+        false
+    }
+
+    fn key_down(&mut self, keycode: vst::editor::KeyCode) -> bool {
+        if let Some(handle) = &mut self.handle {
+            match keycode.key {
+                vst::editor::Key::Control | vst::editor::Key::Shift => {
+                    if self.control_key == keyboard_types::KeyState::Up {
+                        let event = to_keyboard_event(keycode, keyboard_types::KeyState::Down);
+                        handle.send_baseview_event(baseview::Event::Keyboard(event));
+                        self.control_key = keyboard_types::KeyState::Down;
+                        info!("Sent key down!");
+                        return true;
+                    }
+                }
+                _ => (),
+            }
+        }
+        false
+    }
+}
+
+fn to_keyboard_event(
+    keycode: vst::editor::KeyCode,
+    state: keyboard_types::KeyState,
+) -> keyboard_types::KeyboardEvent {
+    match state {
+        keyboard_types::KeyState::Down => keyboard_types::KeyboardEvent {
+            state,
+            key: keyboard_types::Key::Control,
+            code: keyboard_types::Code::ControlLeft,
+            location: keyboard_types::Location::Standard,
+            modifiers: keyboard_types::Modifiers::CONTROL,
+            repeat: false,
+            is_composing: false,
+        },
+        keyboard_types::KeyState::Up => keyboard_types::KeyboardEvent {
+            state,
+            key: keyboard_types::Key::Control,
+            code: keyboard_types::Code::ControlLeft,
+            location: keyboard_types::Location::Standard,
+            modifiers: keyboard_types::Modifiers::empty(),
+            repeat: false,
+            is_composing: false,
+        },
     }
 }
 

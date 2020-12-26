@@ -1,12 +1,5 @@
 #[macro_use]
 extern crate vst;
-extern crate log;
-extern crate rand;
-extern crate raw_window_handle;
-extern crate simple_logging;
-extern crate tokio;
-extern crate variant_count;
-extern crate wmidi;
 
 mod neighbor_pairs;
 mod sound_gen;
