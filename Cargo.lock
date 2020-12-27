@@ -2852,8 +2852,7 @@ checksum = "b5a972e5669d67ba988ce3dc826706fb0a8b01471c088cb0b6110b805cc36aed"
 [[package]]
 name = "vst"
 version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1dfeaf21be445e1d9edf37bdedbf7ec24b43ed84ace6295cba3e0d01c1a49a27"
+source = "git+https://github.com/rustaudio/vst-rs#02847c733c7541996054df62d86bf29af1cebdfd"
 dependencies = [
  "bitflags",
  "libc",

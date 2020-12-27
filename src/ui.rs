@@ -27,7 +27,7 @@ fn with_label<'a>(widget: impl Into<Element<'a, Message>>, title: &str) -> Colum
 fn make_normal_param(param_ref: &RawParameters, param_type: ParameterType) -> NormalParam {
     NormalParam {
         value: param_ref.get(param_type).into(),
-        default: 1.0.into(),
+        default: RawParameters::get_default(param_type).into(),
     }
 }
 
@@ -250,7 +250,7 @@ impl Application for UIFrontEnd {
                             with_label(pitch_attack_widget, "A").into(),
                             with_label(pitch_hold_widget, "H").into(),
                             with_label(pitch_decay_widget, "D").into(),
-                            with_label(pitch_multiply_widget, "S").into(),
+                            with_label(pitch_multiply_widget, "M").into(),
                             with_label(pitch_release_widget, "R").into(),
                         ],
                         "Pitch",

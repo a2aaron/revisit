@@ -372,6 +372,31 @@ impl RawParameters {
         }
     }
 
+    fn get_default(parameter: ParameterType) -> f32 {
+        use ParameterType::*;
+        match parameter {
+            MasterVolume => 0.33,
+            Shape => 0.225, // Triangle
+            Warp => 0.5,
+            VolAttack => 0.1,
+            VolHold => 0.0,
+            VolDecay => 0.2,
+            VolSustain => 0.5,
+            VolRelease => 0.3,
+            PitchAttack => 1.0 / 10000.0,
+            PitchHold => 0.0,
+            PitchDecay => 0.2,
+            PitchMultiply => 0.5,
+            PitchRelease => 1.0 / 10000.0,
+            LowPassAlpha => 0.5,
+            FMOnOff => 0.0,           // Off
+            FMVolume => 0.5,          // 100%
+            FMPitchMultiplier => 0.5, // 1x
+            FMShape => 0.0,           // Sine
+            Error => 0.0,
+        }
+    }
+
     fn set(&self, value: f32, parameter: ParameterType) {
         use ParameterType::*;
         match parameter {
@@ -495,29 +520,30 @@ impl PluginParameters for RawParameters {
 
 impl Default for RawParameters {
     fn default() -> Self {
+        use ParameterType::*;
         RawParameters {
-            volume: AtomicFloat::new(0.33),
-            shape: AtomicFloat::new(0.225), // Triangle
-            warp: AtomicFloat::new(0.5),
+            volume: RawParameters::get_default(MasterVolume).into(),
+            shape: RawParameters::get_default(Shape).into(),
+            warp: RawParameters::get_default(Warp).into(),
             vol_adsr: RawParametersEnvelope {
-                attack: AtomicFloat::new(0.1),
-                hold: AtomicFloat::new(0.0),
-                decay: AtomicFloat::new(0.2),
-                sustain: AtomicFloat::new(0.5),
-                release: AtomicFloat::new(0.3),
+                attack: RawParameters::get_default(VolAttack).into(),
+                hold: RawParameters::get_default(VolHold).into(),
+                decay: RawParameters::get_default(VolDecay).into(),
+                sustain: RawParameters::get_default(VolSustain).into(),
+                release: RawParameters::get_default(VolRelease).into(),
             },
             pitch_adsr: RawParametersEnvelope {
-                attack: AtomicFloat::new(1.0 / 10000.0),
-                hold: AtomicFloat::new(0.0),
-                decay: AtomicFloat::new(0.2),
-                sustain: AtomicFloat::new(0.5),
-                release: AtomicFloat::new(1.0 / 10000.0),
+                attack: RawParameters::get_default(PitchAttack).into(),
+                hold: RawParameters::get_default(PitchHold).into(),
+                decay: RawParameters::get_default(PitchDecay).into(),
+                sustain: RawParameters::get_default(PitchMultiply).into(),
+                release: RawParameters::get_default(PitchRelease).into(),
             },
-            low_pass_alpha: AtomicFloat::new(0.5),
-            fm_on_off: AtomicFloat::new(0.0),     // Off
-            fm_vol: AtomicFloat::new(0.5),        // 100%
-            fm_pitch_mult: AtomicFloat::new(0.5), // 1x
-            fm_shape: AtomicFloat::new(0.0),      // Sine
+            low_pass_alpha: RawParameters::get_default(LowPassAlpha).into(),
+            fm_on_off: RawParameters::get_default(FMOnOff).into(),
+            fm_vol: RawParameters::get_default(FMVolume).into(),
+            fm_pitch_mult: RawParameters::get_default(FMPitchMultiplier).into(),
+            fm_shape: RawParameters::get_default(FMShape).into(),
             host: Default::default(),
             notify: Arc::new(tokio::sync::Notify::new()),
         }
