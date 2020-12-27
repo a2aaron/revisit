@@ -301,31 +301,30 @@ impl Editor for UIFrontEnd {
     }
 
     fn open(&mut self, parent: *mut c_void) -> bool {
-        #[cfg(windows)]
-        {
-            let parent = to_windows_handle(parent);
+        #[cfg(target_os = "windows")]
+        let parent = to_windows_handle(parent);
 
-            let settings = iced_baseview::Settings {
-                window: baseview::WindowOpenOptions {
-                    title: "Revisit".to_string(),
-                    size: baseview::Size::new(self.size().0 as f64, self.size().1 as f64),
-                    scale: baseview::WindowScalePolicy::SystemScaleFactor,
-                    parent: baseview::Parent::WithParent(parent),
-                },
-                flags: (self.params.clone(), self.params.notify.clone()),
-            };
-            if self.handle.is_none() {
-                let (handle, _) = iced_baseview::Runner::<UIFrontEnd>::open(settings);
-                self.handle = Some(handle);
-            }
-            info!("Opened the GUI");
-            true
-        }
+        #[cfg(target_os = "macos")]
+        let parent = to_macos_handle(parent);
 
-        #[cfg(not(windows))]
-        {
-            false
+        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+        error!("currently unsupported os!");
+
+        let settings = iced_baseview::Settings {
+            window: baseview::WindowOpenOptions {
+                title: "Revisit".to_string(),
+                size: baseview::Size::new(self.size().0 as f64, self.size().1 as f64),
+                scale: baseview::WindowScalePolicy::SystemScaleFactor,
+                parent: baseview::Parent::WithParent(parent),
+            },
+            flags: (self.params.clone(), self.params.notify.clone()),
+        };
+        if self.handle.is_none() {
+            let (handle, _) = iced_baseview::Runner::<UIFrontEnd>::open(settings);
+            self.handle = Some(handle);
         }
+        info!("Opened the GUI");
+        true
     }
 
     fn idle(&mut self) {}
