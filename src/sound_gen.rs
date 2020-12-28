@@ -13,18 +13,18 @@ pub type SampleRate = f32;
 
 #[derive(Debug)]
 pub struct Oscillator {
-    pub pitch: Note,
+    pitch: f32,
     vel: f32,
     angle: f32,
     pub time: usize,
     pub note_state: NoteState,
     low_pass_output: Option<f32>,
-    note_on: Option<i32>,
+    note_on: Option<(i32, f32)>,
     note_off: Option<i32>,
 }
 
 impl Oscillator {
-    pub fn new(pitch: Note, vel: f32) -> Oscillator {
+    pub fn new(pitch: f32, vel: f32) -> Oscillator {
         Oscillator {
             pitch,
             vel,
@@ -35,6 +35,10 @@ impl Oscillator {
             note_on: None,
             note_off: None,
         }
+    }
+
+    pub fn new_from_note(note: Note, vel: f32) -> Oscillator {
+        Oscillator::new(Note::to_freq_f32(note), vel)
     }
 
     /// Fills dest with the signal of the oscillator
@@ -55,7 +59,7 @@ impl Oscillator {
 
         // Trigger note on events
         match self.note_on {
-            Some(note_on) if note_on as usize == sample_num => {
+            Some((note_on, note_on_vel)) if note_on as usize == sample_num => {
                 self.note_state = match self.note_state {
                     NoteState::None => NoteState::Held,
                     _ => NoteState::Retrigger {
@@ -63,6 +67,7 @@ impl Oscillator {
                         vel,
                     },
                 };
+                self.vel = note_on_vel;
                 self.note_on = None;
             }
             _ => (),
@@ -99,6 +104,16 @@ impl Oscillator {
         // Apply volume envelope and note velocity
         value *= vel * self.vel;
 
+        // The pitch of the note after applying pitch multipliers
+        let pitch = self.pitch * pitch;
+
+        // Update the angle. Each sample is 1.0 / sample_rate apart for a
+        // complete waveform. We also multiply by pitch to advance the right amount
+        // We also constrain the angle between 0 and 1, as this reduces
+        // roundoff error.
+        let angle_delta = pitch / sample_rate;
+        self.angle = (self.angle + angle_delta) % 1.0;
+
         // Apply low pass filter
         if let Some(alpha) = low_pass_alpha {
             // If there is a prior low pass output (ie: this is the second sample)
@@ -111,14 +126,20 @@ impl Oscillator {
             self.low_pass_output = Some(value);
         }
 
-        // The pitch of the note after applying pitch multipliers
-        let pitch = Note::to_freq_f32(self.pitch) * pitch;
+        value
+    }
 
-        // Update the angle. Each sample is 1.0 / sample_rate apart for a
-        // complete waveform. We also multiply by pitch to advance the right amount
-        // We also constrain the angle between 0 and 1, as this reduces
-        // roundoff error.
-        let angle_delta = pitch / sample_rate;
+    // Return the next sample from the oscillator, but without applying any
+    // envelopes or filters.
+    pub fn next_sample_raw(&mut self, shape: NoteShape, sample_rate: f32) -> f32 {
+        // Get the raw signal
+        let mut value = shape.get(self.angle);
+
+        // Apply note velocity
+        value *= self.vel;
+
+        // Update the angle.
+        let angle_delta = self.pitch / sample_rate;
         self.angle = (self.angle + angle_delta) % 1.0;
 
         value
@@ -130,8 +151,8 @@ impl Oscillator {
     }
 
     /// Trigger or Retrigger the note
-    pub fn note_on(&mut self, frame_delta: i32) {
-        self.note_on = Some(frame_delta);
+    pub fn note_on(&mut self, frame_delta: i32, vel: f32) {
+        self.note_on = Some((frame_delta, vel));
     }
 
     /// Returns true if the note is "alive" (playing audio). A note is dead if
