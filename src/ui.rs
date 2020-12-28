@@ -1,10 +1,7 @@
 use std::ffi::c_void;
 use std::sync::Arc;
 
-use iced::{
-    futures, Align, Column, Command, Container, Element, HorizontalAlignment, Length, Row,
-    Subscription,
-};
+use iced::{futures, Align, Column, Command, Element, Row, Subscription};
 use iced_audio::{knob, v_slider, Knob, NormalParam, VSlider};
 use iced_baseview::{Application, Handle, WindowSubs};
 use log::info;
@@ -48,6 +45,18 @@ fn knob_row<'a>(knobs: Vec<Element<'a, Message>>, title: &str) -> Column<'a, Mes
         )
         .align_items(Align::Start)
         .spacing(2)
+}
+
+fn row(widgets: Vec<Element<'_, Message>>) -> Row<'_, Message> {
+    Row::with_children(widgets).spacing(5)
+}
+
+fn column<'a>() -> Column<'a, Message> {
+    Column::new().spacing(5).padding(20)
+}
+
+fn knob_stack(widgets: Vec<Element<'_, Message>>) -> Column<'_, Message> {
+    Column::with_children(widgets).spacing(5)
 }
 struct NotifyRecipe {
     notifier: Arc<Notify>,
@@ -221,9 +230,9 @@ impl Application for UIFrontEnd {
         let fm_pitch_widget = widget!(Knob, &mut self.fm_pitch, ParameterType::FMPitchMultiplier);
         let fm_shape_widget = widget!(Knob, &mut self.fm_shape, ParameterType::FMShape);
 
-        let osc_pane: Element<_> = Column::new()
-            .push(iced::Text::new("OSC 1").horizontal_alignment(HorizontalAlignment::Center))
-            .push(Column::with_children(vec![
+        let osc_pane: Element<_> = column()
+            .push(iced::Text::new("OSC 1"))
+            .push(knob_stack(vec![
                 knob_row(
                     vec![
                         with_label(shape_widget, "Shape").into(),
@@ -240,17 +249,15 @@ impl Application for UIFrontEnd {
                         with_label(sustain_widget, "S").into(),
                         with_label(release_widget, "R").into(),
                     ],
-                    "Env",
+                    "Envelope",
                 )
                 .into(),
             ]))
-            .spacing(20)
-            .padding(20)
             .into();
 
-        let pitch_pane: Element<_> = Column::new()
-            .push(iced::Text::new("PITCH").horizontal_alignment(HorizontalAlignment::Center))
-            .push(Column::with_children(vec![knob_row(
+        let pitch_pane: Element<_> = column()
+            .push(iced::Text::new("PITCH"))
+            .push(knob_stack(vec![knob_row(
                 vec![
                     with_label(pitch_attack_widget, "A").into(),
                     with_label(pitch_hold_widget, "H").into(),
@@ -258,46 +265,39 @@ impl Application for UIFrontEnd {
                     with_label(pitch_multiply_widget, "M").into(),
                     with_label(pitch_release_widget, "R").into(),
                 ],
-                "Env",
+                "Envelope",
             )
             .into()]))
-            .spacing(20)
-            .padding(20)
             .into();
 
-        let filter_pane: Element<_> = Column::new()
-            .push(iced::Text::new("FILTER").horizontal_alignment(HorizontalAlignment::Center))
-            .push(Column::with_children(vec![knob_row(
+        let filter_pane: Element<_> = column()
+            .push(iced::Text::new("FILTER"))
+            .push(knob_stack(vec![knob_row(
                 vec![with_label(low_pass_widget, "Alpha").into()],
                 "Low Pass",
             )
             .into()]))
-            .spacing(20)
-            .padding(20)
             .into();
 
-        let fm_pane: Element<_> = Column::new()
-            .push(iced::Text::new("FM").horizontal_alignment(HorizontalAlignment::Center))
-            .push(Row::with_children(vec![
+        let fm_pane: Element<_> = column()
+            .push(iced::Text::new("FM"))
+            .push(row(vec![
                 with_label(fm_on_off_widget, "On/Off").into(),
                 with_label(fm_vol_widget, "Volume").into(),
                 with_label(fm_pitch_widget, "Pitch Multiplier").into(),
                 with_label(fm_shape_widget, "Shape").into(),
             ]))
-            .spacing(20)
-            .padding(20)
             .into();
 
         let master_pane: Element<_> = with_label(master_vol_widget, "Master Volume").into();
 
         Row::new()
-            .push(Column::new().push(osc_pane).push(pitch_pane))
-            .push(
-                Column::new()
-                    .push(fm_pane)
-                    .push(filter_pane)
-                    .push(master_pane),
-            )
+            .push(Column::new().push(osc_pane).push(pitch_pane).spacing(20))
+            .push(Column::new().push(fm_pane).push(filter_pane).spacing(20))
+            .push(master_pane)
+            .max_width(screen_width)
+            .max_height(screen_height)
+            .spacing(20)
             .into()
     }
 
