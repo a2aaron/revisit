@@ -1,7 +1,10 @@
 use std::ffi::c_void;
 use std::sync::Arc;
 
-use iced::{futures, Align, Column, Command, Container, Element, Length, Row, Subscription};
+use iced::{
+    futures, Align, Column, Command, Container, Element, HorizontalAlignment, Length, Row,
+    Subscription,
+};
 use iced_audio::{knob, v_slider, Knob, NormalParam, VSlider};
 use iced_baseview::{Application, Handle, WindowSubs};
 use log::info;
@@ -218,65 +221,83 @@ impl Application for UIFrontEnd {
         let fm_pitch_widget = widget!(Knob, &mut self.fm_pitch, ParameterType::FMPitchMultiplier);
         let fm_shape_widget = widget!(Knob, &mut self.fm_shape, ParameterType::FMShape);
 
-        let content: Element<_> = Column::new()
-            .max_width(screen_width)
-            .max_height(screen_height)
-            .spacing(20)
-            .padding(20)
-            .push(Row::with_children(vec![
-                with_label(master_vol_widget, "Master Volume").into(),
-                Column::with_children(vec![
-                    knob_row(
-                        vec![
-                            with_label(attack_widget, "A").into(),
-                            with_label(hold_widget, "H").into(),
-                            with_label(decay_widget, "D").into(),
-                            with_label(sustain_widget, "S").into(),
-                            with_label(release_widget, "R").into(),
-                        ],
-                        "Volume",
-                    )
-                    .into(),
-                    knob_row(
-                        vec![
-                            with_label(shape_widget, "Shape").into(),
-                            with_label(warp_widget, "Warp").into(),
-                        ],
-                        "Note Shape",
-                    )
-                    .into(),
-                    knob_row(
-                        vec![
-                            with_label(pitch_attack_widget, "A").into(),
-                            with_label(pitch_hold_widget, "H").into(),
-                            with_label(pitch_decay_widget, "D").into(),
-                            with_label(pitch_multiply_widget, "M").into(),
-                            with_label(pitch_release_widget, "R").into(),
-                        ],
-                        "Pitch",
-                    )
-                    .into(),
-                    knob_row(vec![with_label(low_pass_widget, "Alpha").into()], "Filter").into(),
-                    knob_row(
-                        vec![
-                            with_label(fm_on_off_widget, "On/Off").into(),
-                            with_label(fm_vol_widget, "Volume").into(),
-                            with_label(fm_pitch_widget, "Pitch Multiplier").into(),
-                            with_label(fm_shape_widget, "Shape").into(),
-                        ],
-                        "Frequency Modulation",
-                    )
-                    .into(),
-                ]) // End knob column
-                .align_items(Align::Start)
-                .spacing(20)
+        let osc_pane: Element<_> = Column::new()
+            .push(iced::Text::new("OSC 1").horizontal_alignment(HorizontalAlignment::Center))
+            .push(Column::with_children(vec![
+                knob_row(
+                    vec![
+                        with_label(shape_widget, "Shape").into(),
+                        with_label(warp_widget, "Warp").into(),
+                    ],
+                    "Shape",
+                )
+                .into(),
+                knob_row(
+                    vec![
+                        with_label(attack_widget, "A").into(),
+                        with_label(hold_widget, "H").into(),
+                        with_label(decay_widget, "D").into(),
+                        with_label(sustain_widget, "S").into(),
+                        with_label(release_widget, "R").into(),
+                    ],
+                    "Env",
+                )
                 .into(),
             ]))
+            .spacing(20)
+            .padding(20)
             .into();
 
-        Container::new(content)
-            .width(Length::Fill)
-            .height(Length::Fill)
+        let pitch_pane: Element<_> = Column::new()
+            .push(iced::Text::new("PITCH").horizontal_alignment(HorizontalAlignment::Center))
+            .push(Column::with_children(vec![knob_row(
+                vec![
+                    with_label(pitch_attack_widget, "A").into(),
+                    with_label(pitch_hold_widget, "H").into(),
+                    with_label(pitch_decay_widget, "D").into(),
+                    with_label(pitch_multiply_widget, "M").into(),
+                    with_label(pitch_release_widget, "R").into(),
+                ],
+                "Env",
+            )
+            .into()]))
+            .spacing(20)
+            .padding(20)
+            .into();
+
+        let filter_pane: Element<_> = Column::new()
+            .push(iced::Text::new("FILTER").horizontal_alignment(HorizontalAlignment::Center))
+            .push(Column::with_children(vec![knob_row(
+                vec![with_label(low_pass_widget, "Alpha").into()],
+                "Low Pass",
+            )
+            .into()]))
+            .spacing(20)
+            .padding(20)
+            .into();
+
+        let fm_pane: Element<_> = Column::new()
+            .push(iced::Text::new("FM").horizontal_alignment(HorizontalAlignment::Center))
+            .push(Row::with_children(vec![
+                with_label(fm_on_off_widget, "On/Off").into(),
+                with_label(fm_vol_widget, "Volume").into(),
+                with_label(fm_pitch_widget, "Pitch Multiplier").into(),
+                with_label(fm_shape_widget, "Shape").into(),
+            ]))
+            .spacing(20)
+            .padding(20)
+            .into();
+
+        let master_pane: Element<_> = with_label(master_vol_widget, "Master Volume").into();
+
+        Row::new()
+            .push(Column::new().push(osc_pane).push(pitch_pane))
+            .push(
+                Column::new()
+                    .push(fm_pane)
+                    .push(filter_pane)
+                    .push(master_pane),
+            )
             .into()
     }
 
@@ -293,7 +314,7 @@ impl Application for UIFrontEnd {
 
 impl Editor for UIFrontEnd {
     fn size(&self) -> (i32, i32) {
-        (600, 600)
+        (800, 600)
     }
 
     fn position(&self) -> (i32, i32) {
