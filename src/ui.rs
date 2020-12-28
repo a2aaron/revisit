@@ -380,7 +380,7 @@ impl Editor for UIFrontEnd {
 }
 
 fn to_keyboard_event(
-    keycode: vst::editor::KeyCode,
+    _: vst::editor::KeyCode,
     state: keyboard_types::KeyState,
 ) -> keyboard_types::KeyboardEvent {
     match state {

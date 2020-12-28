@@ -47,6 +47,7 @@ impl Oscillator {
         sample_num: usize,
         sample_rate: SampleRate,
         shape: NoteShape,
+        vel_env: f32,
         vel: f32,
         pitch: f32,
         low_pass_alpha: Option<f32>,
@@ -78,7 +79,7 @@ impl Oscillator {
             Some(note_off) if note_off as usize == sample_num => {
                 self.note_state = NoteState::Released {
                     time: self.time,
-                    vel,
+                    vel: vel_env,
                 };
                 self.note_off = None;
             }
@@ -130,8 +131,9 @@ impl Oscillator {
     }
 
     // Return the next sample from the oscillator, but without applying any
-    // envelopes or filters.
-    pub fn next_sample_raw(&mut self, shape: NoteShape, sample_rate: f32) -> f32 {
+    // envelopes or filters. This also ignores the set frequency of the oscillator
+    // and just uses pitch.
+    pub fn next_sample_raw(&mut self, pitch: f32, shape: NoteShape, sample_rate: f32) -> f32 {
         // Get the raw signal
         let mut value = shape.get(self.angle);
 
@@ -139,7 +141,7 @@ impl Oscillator {
         value *= self.vel;
 
         // Update the angle.
-        let angle_delta = self.pitch / sample_rate;
+        let angle_delta = pitch / sample_rate;
         self.angle = (self.angle + angle_delta) % 1.0;
 
         value

@@ -120,17 +120,23 @@ impl Plugin for Revisit {
                 let vol_env = params
                     .vol_adsr
                     .get(osc.time, osc.note_state, self.sample_rate);
-                let vol_lfo = volume_lfo.next_sample_raw(NoteShape::Sine, self.sample_rate)
-                    * params.vol_lfo_amount;
-                let vol = vol_env + vol_lfo;
+                let vol_lfo = volume_lfo.next_sample_raw(
+                    1.0 / params.vol_lfo.period,
+                    NoteShape::Sine,
+                    self.sample_rate,
+                ) * params.vol_lfo.amplitude;
+                let vol = (vol_env * (1.0 + vol_lfo)).max(0.0);
 
                 // Compute note pitch multiplier from ADSR and envelope
                 let pitch_env = params
                     .pitch_adsr
                     .get(osc.time, osc.note_state, self.sample_rate);
                 let pitch_bend = pitch_bends[i];
-                let pitch_lfo = pitch_lfo.next_sample_raw(NoteShape::Sine, self.sample_rate)
-                    * params.pitch_lfo_amount;
+                let pitch_lfo = pitch_lfo.next_sample_raw(
+                    1.0 / params.pitch_lfo.period,
+                    NoteShape::Sine,
+                    self.sample_rate,
+                ) * params.pitch_lfo.amplitude;
                 let note_pitch = to_pitch_multiplier(pitch_env + pitch_bend + pitch_lfo, 12);
 
                 // Compute FM pitch multiplier
@@ -141,6 +147,7 @@ impl Plugin for Revisit {
                         i,
                         self.sample_rate,
                         params.fm_shape,
+                        params.fm_vol,
                         params.fm_vol,
                         pitch,
                         None,
@@ -157,6 +164,7 @@ impl Plugin for Revisit {
                     i,
                     self.sample_rate,
                     params.shape,
+                    vol_env,
                     vol,
                     pitch,
                     Some(params.low_pass_alpha),
@@ -287,11 +295,17 @@ impl Default for Revisit {
     }
 }
 
+struct LFO {
+    amplitude: f32,
+    // In seconds
+    period: f32,
+}
+
 struct Parameters {
     vol_adsr: AmplitudeADSR,
     pitch_adsr: PitchADSR,
-    vol_lfo_amount: f32,
-    pitch_lfo_amount: f32,
+    vol_lfo: LFO,
+    pitch_lfo: LFO,
     volume: f32,
     shape: NoteShape,
     low_pass_alpha: f32,
@@ -306,8 +320,14 @@ impl From<&RawParameters> for Parameters {
         Parameters {
             vol_adsr: AmplitudeADSR::from(&params.vol_adsr),
             pitch_adsr: PitchADSR::from(&params.pitch_adsr),
-            vol_lfo_amount: ease_in_expo(params.vol_lfo_amount.get()) * 0.1,
-            pitch_lfo_amount: ease_in_expo(params.pitch_lfo_amount.get()) * 0.1,
+            vol_lfo: LFO {
+                amplitude: ease_in_expo(params.vol_lfo_amplitude.get()),
+                period: (ease_in_expo(params.vol_lfo_period.get()) * 10.0).max(0.01),
+            },
+            pitch_lfo: LFO {
+                amplitude: ease_in_expo(params.pitch_lfo_amplitude.get()) * 0.1,
+                period: (ease_in_expo(params.pitch_lfo_period.get()) * 10.0).max(0.01),
+            },
             volume: params.volume.get(),
             shape: NoteShape::from_warp(params.shape.get(), params.warp.get()),
             low_pass_alpha: ease_in_poly(params.low_pass_alpha.get(), 4).clamp(0.0, 1.0),
@@ -365,8 +385,10 @@ impl From<&RawParametersEnvelope> for PitchADSR {
 pub struct RawParameters {
     vol_adsr: RawParametersEnvelope,
     pitch_adsr: RawParametersEnvelope,
-    vol_lfo_amount: AtomicFloat,
-    pitch_lfo_amount: AtomicFloat,
+    vol_lfo_amplitude: AtomicFloat,
+    vol_lfo_period: AtomicFloat,
+    pitch_lfo_amplitude: AtomicFloat,
+    pitch_lfo_period: AtomicFloat,
     volume: AtomicFloat,
     shape: AtomicFloat,
     warp: AtomicFloat,
@@ -391,13 +413,15 @@ impl RawParameters {
             VolDecay => self.vol_adsr.decay.get(),
             VolSustain => self.vol_adsr.sustain.get(),
             VolRelease => self.vol_adsr.release.get(),
-            VolLFOAmount => self.vol_lfo_amount.get(),
+            VolLFOAmplitude => self.vol_lfo_amplitude.get(),
+            VolLFOPeriod => self.vol_lfo_period.get(),
             PitchAttack => self.pitch_adsr.attack.get(),
             PitchHold => self.pitch_adsr.hold.get(),
             PitchDecay => self.pitch_adsr.decay.get(),
             PitchMultiply => self.pitch_adsr.sustain.get(),
             PitchRelease => self.pitch_adsr.release.get(),
-            PitchLFOAmount => self.pitch_lfo_amount.get(),
+            PitchLFOAmplitude => self.pitch_lfo_amplitude.get(),
+            PitchLFOPeriod => self.pitch_lfo_period.get(),
             LowPassAlpha => self.low_pass_alpha.get(),
             FMOnOff => self.fm_on_off.get(),
             FMVolume => self.fm_vol.get(),
@@ -418,13 +442,15 @@ impl RawParameters {
             VolDecay => 0.2,
             VolSustain => 0.5,
             VolRelease => 0.3,
-            VolLFOAmount => 0.0,
+            VolLFOAmplitude => 0.0,
+            VolLFOPeriod => 0.5,
             PitchAttack => 1.0 / 10000.0,
             PitchHold => 0.0,
             PitchDecay => 0.2,
             PitchMultiply => 0.5,
             PitchRelease => 1.0 / 10000.0,
-            PitchLFOAmount => 0.0,
+            PitchLFOAmplitude => 0.0,
+            PitchLFOPeriod => 0.5,
             LowPassAlpha => 1.0,
             FMOnOff => 0.0,           // Off
             FMVolume => 0.5,          // 100%
@@ -458,13 +484,15 @@ impl RawParameters {
             VolDecay => self.vol_adsr.decay.set(value),
             VolSustain => self.vol_adsr.sustain.set(value),
             VolRelease => self.vol_adsr.release.set(value),
-            VolLFOAmount => self.vol_lfo_amount.set(value),
+            VolLFOAmplitude => self.vol_lfo_amplitude.set(value),
+            VolLFOPeriod => self.vol_lfo_period.set(value),
             PitchAttack => self.pitch_adsr.attack.set(value),
             PitchHold => self.pitch_adsr.hold.set(value),
             PitchDecay => self.pitch_adsr.decay.set(value),
             PitchMultiply => self.pitch_adsr.sustain.set(value),
             PitchRelease => self.pitch_adsr.release.set(value),
-            PitchLFOAmount => self.pitch_lfo_amount.set(value),
+            PitchLFOAmplitude => self.pitch_lfo_amplitude.set(value),
+            PitchLFOPeriod => self.pitch_lfo_period.set(value),
             LowPassAlpha => self.low_pass_alpha.set(value),
             FMOnOff => self.fm_on_off.set(value),
             FMVolume => self.fm_vol.set(value),
@@ -480,9 +508,9 @@ impl PluginParameters for RawParameters {
         use ParameterType::*;
         match index.into() {
             VolAttack | VolHold | VolDecay | VolRelease | PitchAttack | PitchHold | PitchDecay
-            | PitchRelease => " sec".to_string(),
-            VolSustain | PitchMultiply | MasterVolume | FMVolume | VolLFOAmount
-            | PitchLFOAmount => "%".to_string(),
+            | PitchRelease | VolLFOPeriod | PitchLFOPeriod => " sec".to_string(),
+            VolSustain | PitchMultiply | MasterVolume | FMVolume | VolLFOAmplitude
+            | PitchLFOAmplitude => "%".to_string(),
             FMPitchMultiplier => "x".to_string(),
             Shape | Warp | LowPassAlpha | FMOnOff | FMShape => "".to_string(),
             Error => "".to_string(),
@@ -498,13 +526,15 @@ impl PluginParameters for RawParameters {
             VolDecay => format!("{:.2}", params.vol_adsr.decay),
             VolSustain => format!("{:.2}", params.vol_adsr.sustain * 100.0),
             VolRelease => format!("{:.2}", params.vol_adsr.release),
-            VolLFOAmount => format!("{:.2}", params.vol_lfo_amount * 100.0),
+            VolLFOAmplitude => format!("{:.2}", params.vol_lfo.amplitude * 100.0),
+            VolLFOPeriod => format!("{:.2}", params.vol_lfo.period),
             PitchAttack => format!("{:.2}", params.pitch_adsr.attack),
             PitchHold => format!("{:.2}", params.pitch_adsr.hold),
             PitchDecay => format!("{:.2}", params.pitch_adsr.decay),
             PitchMultiply => format!("{:.2}", params.pitch_adsr.multiply * 100.0),
             PitchRelease => format!("{:.2}", params.pitch_adsr.release),
-            PitchLFOAmount => format!("{:.2}", params.pitch_lfo_amount * 100.0),
+            PitchLFOAmplitude => format!("{:.2}", params.pitch_lfo.amplitude * 100.0),
+            PitchLFOPeriod => format!("{:.2}", params.pitch_lfo.period),
             MasterVolume => format!("{:.2}", params.volume * 100.0),
             Shape => format!("{}", params.shape),
             Warp => format!("{:.2}", self.warp.get()),
@@ -528,13 +558,15 @@ impl PluginParameters for RawParameters {
             VolDecay => "Decay (Volume)".to_string(),
             VolSustain => "Sustain (Volume)".to_string(),
             VolRelease => "Release (Volume)".to_string(),
-            VolLFOAmount => "LFO Amount (Volume)".to_string(),
+            VolLFOAmplitude => "LFO Amount (Volume)".to_string(),
+            VolLFOPeriod => "LFO Period (Volume)".to_string(),
             PitchAttack => "Attack (Pitch Bend)".to_string(),
             PitchHold => "Hold (Pitch Bend)".to_string(),
             PitchDecay => "Decay (Pitch Bend)".to_string(),
             PitchMultiply => "Multiply (Pitch Bend)".to_string(),
             PitchRelease => "Release (Pitch Bend)".to_string(),
-            PitchLFOAmount => "LFO Amount (Pitch)".to_string(),
+            PitchLFOAmplitude => "LFO Amount (Pitch)".to_string(),
+            PitchLFOPeriod => "LFO Period (Pitch)".to_string(),
             LowPassAlpha => "Low Pass Alpha".to_string(),
             FMOnOff => "FM On/Off".to_string(),
             FMVolume => "FM Volume".to_string(),
@@ -576,7 +608,8 @@ impl Default for RawParameters {
                 sustain: RawParameters::get_default(VolSustain).into(),
                 release: RawParameters::get_default(VolRelease).into(),
             },
-            vol_lfo_amount: RawParameters::get_default(VolLFOAmount).into(),
+            vol_lfo_amplitude: RawParameters::get_default(VolLFOAmplitude).into(),
+            vol_lfo_period: RawParameters::get_default(VolLFOPeriod).into(),
             pitch_adsr: RawParametersEnvelope {
                 attack: RawParameters::get_default(PitchAttack).into(),
                 hold: RawParameters::get_default(PitchHold).into(),
@@ -584,7 +617,8 @@ impl Default for RawParameters {
                 sustain: RawParameters::get_default(PitchMultiply).into(),
                 release: RawParameters::get_default(PitchRelease).into(),
             },
-            pitch_lfo_amount: RawParameters::get_default(PitchLFOAmount).into(),
+            pitch_lfo_amplitude: RawParameters::get_default(PitchLFOAmplitude).into(),
+            pitch_lfo_period: RawParameters::get_default(PitchLFOPeriod).into(),
             low_pass_alpha: RawParameters::get_default(LowPassAlpha).into(),
             fm_on_off: RawParameters::get_default(FMOnOff).into(),
             fm_vol: RawParameters::get_default(FMVolume).into(),
@@ -616,13 +650,15 @@ pub enum ParameterType {
     VolDecay,
     VolSustain,
     VolRelease,
-    VolLFOAmount,
+    VolLFOAmplitude,
+    VolLFOPeriod,
     PitchAttack,
     PitchHold,
     PitchDecay,
     PitchMultiply,
     PitchRelease,
-    PitchLFOAmount,
+    PitchLFOAmplitude,
+    PitchLFOPeriod,
     LowPassAlpha,
     FMOnOff,
     FMVolume,
@@ -643,18 +679,20 @@ impl From<i32> for ParameterType {
             5 => VolDecay,
             6 => VolSustain,
             7 => VolRelease,
-            8 => VolLFOAmount,
-            9 => PitchAttack,
-            10 => PitchHold,
-            11 => PitchDecay,
-            12 => PitchMultiply,
-            13 => PitchRelease,
-            14 => PitchLFOAmount,
-            15 => LowPassAlpha,
-            16 => FMOnOff,
-            17 => FMVolume,
-            18 => FMPitchMultiplier,
-            19 => FMShape,
+            8 => VolLFOAmplitude,
+            9 => VolLFOPeriod,
+            10 => PitchAttack,
+            11 => PitchHold,
+            12 => PitchDecay,
+            13 => PitchMultiply,
+            14 => PitchRelease,
+            15 => PitchLFOAmplitude,
+            16 => PitchLFOPeriod,
+            17 => LowPassAlpha,
+            18 => FMOnOff,
+            19 => FMVolume,
+            20 => FMPitchMultiplier,
+            21 => FMShape,
             _ => Error,
         }
     }
