@@ -301,7 +301,7 @@ struct LFO {
     period: f32,
 }
 
-struct Parameters {
+pub struct Parameters {
     vol_adsr: AmplitudeADSR,
     pitch_adsr: PitchADSR,
     vol_lfo: LFO,

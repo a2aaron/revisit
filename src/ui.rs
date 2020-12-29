@@ -1,15 +1,14 @@
 use std::ffi::c_void;
 use std::sync::Arc;
 
-use iced::{futures, Align, Column, Command, Element, Row, Subscription};
+use iced::{futures, Align, Checkbox, Column, Command, Element, Row, Subscription};
 use iced_audio::{knob, v_slider, Knob, NormalParam, VSlider};
 use iced_baseview::{Application, Handle, WindowSubs};
-use log::info;
 use raw_window_handle::RawWindowHandle;
 use tokio::sync::Notify;
 use vst::{editor::Editor, host::Host};
 
-use crate::{ParameterType, RawParameters};
+use crate::{ParameterType, Parameters, RawParameters};
 
 // Create a widget (actually a column) that:
 // 1. Uses `$state` as the widget's `$widget::State` struct
@@ -62,10 +61,6 @@ fn row(widgets: Vec<Element<'_, Message>>) -> Element<'_, Message> {
 
 fn column<'a>() -> Column<'a, Message> {
     Column::new().spacing(5).padding(20)
-}
-
-fn knob_stack(widgets: Vec<Element<'_, Message>>) -> Element<'_, Message> {
-    Column::with_children(widgets).spacing(5).into()
 }
 
 fn make_pane<'a>(
@@ -134,7 +129,7 @@ pub struct UIFrontEnd {
     pitch_lfo_amplitude: knob::State,
     pitch_lfo_period: knob::State,
     low_pass: knob::State,
-    fm_on_off: knob::State,
+    fm_on_off: bool,
     fm_vol: knob::State,
     fm_pitch: knob::State,
     fm_shape: knob::State,
@@ -152,6 +147,7 @@ impl Application for UIFrontEnd {
     fn new(flags: Self::Flags) -> (Self, Command<Self::Message>) {
         let (params, notifier) = flags;
         let param_ref = params.as_ref();
+        let params_real = Parameters::from(param_ref);
         let ui = UIFrontEnd {
             master_vol: v_slider::State::new(make_normal_param(
                 param_ref,
@@ -174,7 +170,7 @@ impl Application for UIFrontEnd {
             pitch_lfo_amplitude: make_knob(param_ref, ParameterType::PitchLFOAmplitude),
             pitch_lfo_period: make_knob(param_ref, ParameterType::PitchLFOPeriod),
             low_pass: make_knob(param_ref, ParameterType::LowPassAlpha),
-            fm_on_off: make_knob(param_ref, ParameterType::FMOnOff),
+            fm_on_off: params_real.fm_on_off,
             fm_vol: make_knob(param_ref, ParameterType::FMVolume),
             fm_pitch: make_knob(param_ref, ParameterType::FMPitchMultiplier),
             fm_shape: make_knob(param_ref, ParameterType::FMShape),
@@ -183,13 +179,18 @@ impl Application for UIFrontEnd {
             notifier,
             control_key: keyboard_types::KeyState::Up,
         };
-        info!("Called new!");
         (ui, Command::none())
     }
 
     fn update(&mut self, message: Self::Message) -> Command<Self::Message> {
         match message {
-            Message::ParameterChanged(value, param) => self.params.set(value, param),
+            Message::ParameterChanged(value, ParameterType::FMOnOff) => {
+                self.params.set(value, ParameterType::FMOnOff);
+                self.fm_on_off = value > 0.5;
+            }
+            Message::ParameterChanged(value, param) => {
+                self.params.set(value, param);
+            }
             Message::ForceRedraw => {
                 self.master_vol
                     .set(self.params.get(ParameterType::MasterVolume).into());
@@ -227,8 +228,8 @@ impl Application for UIFrontEnd {
                     .set(self.params.get(ParameterType::PitchLFOPeriod).into());
                 self.low_pass
                     .set(self.params.get(ParameterType::LowPassAlpha).into());
-                self.fm_on_off
-                    .set(self.params.get(ParameterType::FMOnOff).into());
+                // TODO : Don't use a RawParameters for this
+                self.fm_on_off = self.params.get(ParameterType::FMOnOff) > 0.5;
                 self.fm_vol
                     .set(self.params.get(ParameterType::FMVolume).into());
                 self.fm_pitch
@@ -285,8 +286,12 @@ impl Application for UIFrontEnd {
         );
 
         let low_pass_widget = widget!(Knob, &mut self.low_pass, ParameterType::LowPassAlpha);
-
-        let fm_on_off_widget = widget!(Knob, &mut self.fm_on_off, ParameterType::FMOnOff);
+        // TODO: Consider a smarter way for messages that doesn't involve always casting to f32
+        let fm_on_off_widget = Checkbox::new(self.fm_on_off, "ON/OFF", |on_off| {
+            let normal = if on_off { 1.0 } else { 0.0 };
+            Message::ParameterChanged(normal, ParameterType::FMOnOff)
+        })
+        .into();
         let fm_vol_widget = widget!(Knob, &mut self.fm_vol, ParameterType::FMVolume);
         let fm_pitch_widget = widget!(Knob, &mut self.fm_pitch, ParameterType::FMPitchMultiplier);
         let fm_shape_widget = widget!(Knob, &mut self.fm_shape, ParameterType::FMShape);
@@ -393,15 +398,12 @@ impl Editor for UIFrontEnd {
             let (handle, _) = iced_baseview::Runner::<UIFrontEnd>::open(settings);
             self.handle = Some(handle);
         }
-        info!("Opened the GUI");
         true
     }
 
     fn idle(&mut self) {}
 
     fn close(&mut self) {
-        info!("Closed the GUI");
-
         if let Some(handle) = &mut self.handle {
             handle.request_window_close()
         };
@@ -420,7 +422,6 @@ impl Editor for UIFrontEnd {
                         let event = to_keyboard_event(keycode, keyboard_types::KeyState::Up);
                         handle.send_baseview_event(baseview::Event::Keyboard(event));
                         self.control_key = keyboard_types::KeyState::Up;
-                        info!("Sent key up!");
                         return true;
                     }
                 }
@@ -438,7 +439,6 @@ impl Editor for UIFrontEnd {
                         let event = to_keyboard_event(keycode, keyboard_types::KeyState::Down);
                         handle.send_baseview_event(baseview::Event::Keyboard(event));
                         self.control_key = keyboard_types::KeyState::Down;
-                        info!("Sent key down!");
                         return true;
                     }
                 }
