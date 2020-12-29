@@ -58,6 +58,18 @@ fn column<'a>() -> Column<'a, Message> {
 fn knob_stack(widgets: Vec<Element<'_, Message>>) -> Column<'_, Message> {
     Column::with_children(widgets).spacing(5)
 }
+
+fn make_pane<'a>(
+    widgets: Vec<(Vec<Element<'a, Message>>, &str)>,
+    title: &str,
+) -> Column<'a, Message> {
+    let mut pane = column().push(iced::Text::new(title));
+    for (knobs, title) in widgets.into_iter() {
+        pane = pane.push(knob_row(knobs, title));
+    }
+    pane
+}
+
 struct NotifyRecipe {
     notifier: Arc<Notify>,
 }
@@ -101,6 +113,8 @@ pub struct UIFrontEnd {
     decay: knob::State,
     sustain: knob::State,
     release: knob::State,
+    vol_lfo_amplitude: knob::State,
+    vol_lfo_period: knob::State,
     note_shape: knob::State,
     note_warp: knob::State,
     pitch_attack: knob::State,
@@ -108,6 +122,8 @@ pub struct UIFrontEnd {
     pitch_decay: knob::State,
     pitch_multiply: knob::State,
     pitch_release: knob::State,
+    pitch_lfo_amplitude: knob::State,
+    pitch_lfo_period: knob::State,
     low_pass: knob::State,
     fm_on_off: knob::State,
     fm_vol: knob::State,
@@ -137,6 +153,8 @@ impl Application for UIFrontEnd {
             decay: make_knob(param_ref, ParameterType::VolDecay),
             sustain: make_knob(param_ref, ParameterType::VolSustain),
             release: make_knob(param_ref, ParameterType::VolRelease),
+            vol_lfo_amplitude: make_knob(param_ref, ParameterType::VolLFOAmplitude),
+            vol_lfo_period: make_knob(param_ref, ParameterType::VolLFOPeriod),
             note_shape: make_knob(param_ref, ParameterType::Shape),
             note_warp: make_knob(param_ref, ParameterType::Warp),
             pitch_attack: make_knob(param_ref, ParameterType::PitchAttack),
@@ -144,6 +162,8 @@ impl Application for UIFrontEnd {
             pitch_decay: make_knob(param_ref, ParameterType::PitchDecay),
             pitch_multiply: make_knob(param_ref, ParameterType::PitchMultiply),
             pitch_release: make_knob(param_ref, ParameterType::PitchRelease),
+            pitch_lfo_amplitude: make_knob(param_ref, ParameterType::PitchLFOAmplitude),
+            pitch_lfo_period: make_knob(param_ref, ParameterType::PitchLFOPeriod),
             low_pass: make_knob(param_ref, ParameterType::LowPassAlpha),
             fm_on_off: make_knob(param_ref, ParameterType::FMOnOff),
             fm_vol: make_knob(param_ref, ParameterType::FMVolume),
@@ -174,6 +194,10 @@ impl Application for UIFrontEnd {
                     .set(self.params.get(ParameterType::VolSustain).into());
                 self.release
                     .set(self.params.get(ParameterType::VolRelease).into());
+                self.vol_lfo_amplitude
+                    .set(self.params.get(ParameterType::VolLFOAmplitude).into());
+                self.vol_lfo_period
+                    .set(self.params.get(ParameterType::VolLFOPeriod).into());
                 self.note_shape
                     .set(self.params.get(ParameterType::Shape).into());
                 self.note_warp
@@ -188,6 +212,10 @@ impl Application for UIFrontEnd {
                     .set(self.params.get(ParameterType::PitchMultiply).into());
                 self.pitch_release
                     .set(self.params.get(ParameterType::PitchRelease).into());
+                self.pitch_lfo_amplitude
+                    .set(self.params.get(ParameterType::PitchLFOAmplitude).into());
+                self.pitch_lfo_period
+                    .set(self.params.get(ParameterType::PitchLFOPeriod).into());
                 self.low_pass
                     .set(self.params.get(ParameterType::LowPassAlpha).into());
                 self.fm_on_off
@@ -210,13 +238,24 @@ impl Application for UIFrontEnd {
         let (screen_width, screen_height) = (screen.0 as u32, screen.1 as u32);
 
         let master_vol_widget = widget!(VSlider, &mut self.master_vol, ParameterType::MasterVolume);
+
+        let shape_widget = widget!(Knob, &mut self.note_shape, ParameterType::Shape);
+        let warp_widget = widget!(Knob, &mut self.note_warp, ParameterType::Warp);
+
         let attack_widget = widget!(Knob, &mut self.attack, ParameterType::VolAttack);
         let hold_widget = widget!(Knob, &mut self.hold, ParameterType::VolHold);
         let decay_widget = widget!(Knob, &mut self.decay, ParameterType::VolDecay);
         let sustain_widget = widget!(Knob, &mut self.sustain, ParameterType::VolSustain);
         let release_widget = widget!(Knob, &mut self.release, ParameterType::VolRelease);
-        let shape_widget = widget!(Knob, &mut self.note_shape, ParameterType::Shape);
-        let warp_widget = widget!(Knob, &mut self.note_warp, ParameterType::Warp);
+
+        let vol_lfo_amplitude_widget = widget!(
+            Knob,
+            &mut self.vol_lfo_amplitude,
+            ParameterType::VolLFOAmplitude
+        );
+        let vol_lfo_period_widget =
+            widget!(Knob, &mut self.vol_lfo_period, ParameterType::VolLFOPeriod);
+
         let pitch_attack_widget = widget!(Knob, &mut self.pitch_attack, ParameterType::PitchAttack);
         let pitch_hold_widget = widget!(Knob, &mut self.pitch_hold, ParameterType::PitchHold);
         let pitch_decay_widget = widget!(Knob, &mut self.pitch_decay, ParameterType::PitchDecay);
@@ -224,24 +263,35 @@ impl Application for UIFrontEnd {
             widget!(Knob, &mut self.pitch_multiply, ParameterType::PitchMultiply);
         let pitch_release_widget =
             widget!(Knob, &mut self.pitch_release, ParameterType::PitchRelease);
+
+        let pitch_lfo_amplitude_widget = widget!(
+            Knob,
+            &mut self.pitch_lfo_amplitude,
+            ParameterType::PitchLFOAmplitude
+        );
+        let pitch_lfo_period_widget = widget!(
+            Knob,
+            &mut self.pitch_lfo_period,
+            ParameterType::PitchLFOPeriod
+        );
+
         let low_pass_widget = widget!(Knob, &mut self.low_pass, ParameterType::LowPassAlpha);
+
         let fm_on_off_widget = widget!(Knob, &mut self.fm_on_off, ParameterType::FMOnOff);
         let fm_vol_widget = widget!(Knob, &mut self.fm_vol, ParameterType::FMVolume);
         let fm_pitch_widget = widget!(Knob, &mut self.fm_pitch, ParameterType::FMPitchMultiplier);
         let fm_shape_widget = widget!(Knob, &mut self.fm_shape, ParameterType::FMShape);
 
-        let osc_pane: Element<_> = column()
-            .push(iced::Text::new("OSC 1"))
-            .push(knob_stack(vec![
-                knob_row(
+        let osc_pane: Element<_> = make_pane(
+            vec![
+                (
                     vec![
                         with_label(shape_widget, "Shape").into(),
                         with_label(warp_widget, "Warp").into(),
                     ],
                     "Shape",
-                )
-                .into(),
-                knob_row(
+                ),
+                (
                     vec![
                         with_label(attack_widget, "A").into(),
                         with_label(hold_widget, "H").into(),
@@ -250,24 +300,42 @@ impl Application for UIFrontEnd {
                         with_label(release_widget, "R").into(),
                     ],
                     "Envelope",
-                )
-                .into(),
-            ]))
-            .into();
+                ),
+                (
+                    vec![
+                        with_label(vol_lfo_amplitude_widget, "Amplitude").into(),
+                        with_label(vol_lfo_period_widget, "Period").into(),
+                    ],
+                    "LFO",
+                ),
+            ],
+            "OSC 1",
+        )
+        .into();
 
         let pitch_pane: Element<_> = column()
             .push(iced::Text::new("PITCH"))
-            .push(knob_stack(vec![knob_row(
-                vec![
-                    with_label(pitch_attack_widget, "A").into(),
-                    with_label(pitch_hold_widget, "H").into(),
-                    with_label(pitch_decay_widget, "D").into(),
-                    with_label(pitch_multiply_widget, "M").into(),
-                    with_label(pitch_release_widget, "R").into(),
-                ],
-                "Envelope",
-            )
-            .into()]))
+            .push(knob_stack(vec![
+                knob_row(
+                    vec![
+                        with_label(pitch_attack_widget, "A").into(),
+                        with_label(pitch_hold_widget, "H").into(),
+                        with_label(pitch_decay_widget, "D").into(),
+                        with_label(pitch_multiply_widget, "M").into(),
+                        with_label(pitch_release_widget, "R").into(),
+                    ],
+                    "Envelope",
+                )
+                .into(),
+                knob_row(
+                    vec![
+                        with_label(pitch_lfo_amplitude_widget, "Amplitude").into(),
+                        with_label(pitch_lfo_period_widget, "Period").into(),
+                    ],
+                    "LFO",
+                )
+                .into(),
+            ]))
             .into();
 
         let filter_pane: Element<_> = column()
