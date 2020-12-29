@@ -69,8 +69,8 @@ fn knob_stack(widgets: Vec<Element<'_, Message>>) -> Element<'_, Message> {
 }
 
 fn make_pane<'a>(
-    widgets: Vec<(Vec<Element<'a, Message>>, &str)>,
     title: &str,
+    widgets: Vec<(Vec<Element<'a, Message>>, &str)>,
 ) -> Column<'a, Message> {
     let mut pane = column().push(iced::Text::new(title));
     for (knobs, title) in widgets.into_iter() {
@@ -292,6 +292,7 @@ impl Application for UIFrontEnd {
         let fm_shape_widget = widget!(Knob, &mut self.fm_shape, ParameterType::FMShape);
 
         let osc_pane = make_pane(
+            "OSC 1",
             vec![
                 (vec![shape_widget, warp_widget], "Shape"),
                 (
@@ -306,13 +307,12 @@ impl Application for UIFrontEnd {
                 ),
                 (vec![vol_lfo_amplitude_widget, vol_lfo_period_widget], "LFO"),
             ],
-            "OSC 1",
         );
 
-        let pitch_pane = column()
-            .push(iced::Text::new("PITCH"))
-            .push(knob_stack(vec![
-                knob_row(
+        let pitch_pane = make_pane(
+            "PITCH",
+            vec![
+                (
                     vec![
                         pitch_attack_widget,
                         pitch_hold_widget,
@@ -322,18 +322,14 @@ impl Application for UIFrontEnd {
                     ],
                     "Envelope",
                 ),
-                knob_row(
+                (
                     vec![pitch_lfo_amplitude_widget, pitch_lfo_period_widget],
                     "LFO",
                 ),
-            ]));
+            ],
+        );
 
-        let filter_pane = column()
-            .push(iced::Text::new("FILTER"))
-            .push(knob_stack(vec![knob_row(
-                vec![low_pass_widget],
-                "Low Pass",
-            )]));
+        let filter_pane = make_pane("FILTER", vec![(vec![low_pass_widget], "Low Pass")]);
 
         let fm_pane = column().push(iced::Text::new("FM")).push(row(vec![
             fm_on_off_widget,
