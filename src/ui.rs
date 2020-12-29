@@ -291,6 +291,7 @@ impl Application for UIFrontEnd {
             let normal = if on_off { 1.0 } else { 0.0 };
             Message::ParameterChanged(normal, ParameterType::FMOnOff)
         })
+        .text_size(0)
         .into();
         let fm_vol_widget = widget!(Knob, &mut self.fm_vol, ParameterType::FMVolume);
         let fm_pitch_widget = widget!(Knob, &mut self.fm_pitch, ParameterType::FMPitchMultiplier);
@@ -336,12 +337,9 @@ impl Application for UIFrontEnd {
 
         let filter_pane = make_pane("FILTER", vec![(vec![low_pass_widget], "Low Pass")]);
 
-        let fm_pane = column().push(iced::Text::new("FM")).push(row(vec![
-            fm_on_off_widget,
-            fm_vol_widget,
-            fm_pitch_widget,
-            fm_shape_widget,
-        ]));
+        let fm_pane = column()
+            .push(row(vec![iced::Text::new("FM").into(), fm_on_off_widget]))
+            .push(row(vec![fm_vol_widget, fm_pitch_widget, fm_shape_widget]));
 
         let master_pane = master_vol_widget;
 
