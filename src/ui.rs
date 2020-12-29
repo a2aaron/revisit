@@ -11,17 +11,25 @@ use vst::{editor::Editor, host::Host};
 
 use crate::{ParameterType, RawParameters};
 
+// Create a widget (actually a column) that:
+// 1. Uses `$state` as the widget's `$widget::State` struct
+// 2. Sends the message ParameterChanged(normal, $parameter)
+// 3. Has the title `widget_name($parameter)`
 macro_rules! widget {
     ($widget:ident, $state:expr, $parameter:expr) => {
-        $widget::new($state, |normal| {
-            Message::ParameterChanged(normal.as_f32(), $parameter)
-        });
+        with_label(
+            $widget::new($state, |normal| {
+                Message::ParameterChanged(normal.as_f32(), $parameter)
+            }),
+            &widget_name($parameter),
+        );
     };
 }
 
-fn with_label<'a>(widget: impl Into<Element<'a, Message>>, title: &str) -> Column<'a, Message> {
+fn with_label<'a>(widget: impl Into<Element<'a, Message>>, title: &str) -> Element<'a, Message> {
     Column::with_children(vec![widget.into(), iced::Text::new(title).size(15).into()])
         .align_items(Align::Center)
+        .into()
 }
 
 fn make_normal_param(param_ref: &RawParameters, param_type: ParameterType) -> NormalParam {
@@ -35,7 +43,7 @@ fn make_knob(param_ref: &RawParameters, param_type: ParameterType) -> knob::Stat
     knob::State::new(make_normal_param(param_ref, param_type))
 }
 
-fn knob_row<'a>(knobs: Vec<Element<'a, Message>>, title: &str) -> Column<'a, Message> {
+fn knob_row<'a>(knobs: Vec<Element<'a, Message>>, title: &str) -> Element<'a, Message> {
     Column::new()
         .push(iced::Text::new(title).size(18))
         .push(
@@ -45,18 +53,19 @@ fn knob_row<'a>(knobs: Vec<Element<'a, Message>>, title: &str) -> Column<'a, Mes
         )
         .align_items(Align::Start)
         .spacing(2)
+        .into()
 }
 
-fn row(widgets: Vec<Element<'_, Message>>) -> Row<'_, Message> {
-    Row::with_children(widgets).spacing(5)
+fn row(widgets: Vec<Element<'_, Message>>) -> Element<'_, Message> {
+    Row::with_children(widgets).spacing(5).into()
 }
 
 fn column<'a>() -> Column<'a, Message> {
     Column::new().spacing(5).padding(20)
 }
 
-fn knob_stack(widgets: Vec<Element<'_, Message>>) -> Column<'_, Message> {
-    Column::with_children(widgets).spacing(5)
+fn knob_stack(widgets: Vec<Element<'_, Message>>) -> Element<'_, Message> {
+    Column::with_children(widgets).spacing(5).into()
 }
 
 fn make_pane<'a>(
@@ -282,82 +291,58 @@ impl Application for UIFrontEnd {
         let fm_pitch_widget = widget!(Knob, &mut self.fm_pitch, ParameterType::FMPitchMultiplier);
         let fm_shape_widget = widget!(Knob, &mut self.fm_shape, ParameterType::FMShape);
 
-        let osc_pane: Element<_> = make_pane(
+        let osc_pane = make_pane(
             vec![
+                (vec![shape_widget, warp_widget], "Shape"),
                 (
                     vec![
-                        with_label(shape_widget, "Shape").into(),
-                        with_label(warp_widget, "Warp").into(),
-                    ],
-                    "Shape",
-                ),
-                (
-                    vec![
-                        with_label(attack_widget, "A").into(),
-                        with_label(hold_widget, "H").into(),
-                        with_label(decay_widget, "D").into(),
-                        with_label(sustain_widget, "S").into(),
-                        with_label(release_widget, "R").into(),
+                        attack_widget,
+                        hold_widget,
+                        decay_widget,
+                        sustain_widget,
+                        release_widget,
                     ],
                     "Envelope",
                 ),
-                (
-                    vec![
-                        with_label(vol_lfo_amplitude_widget, "Amplitude").into(),
-                        with_label(vol_lfo_period_widget, "Period").into(),
-                    ],
-                    "LFO",
-                ),
+                (vec![vol_lfo_amplitude_widget, vol_lfo_period_widget], "LFO"),
             ],
             "OSC 1",
-        )
-        .into();
+        );
 
-        let pitch_pane: Element<_> = column()
+        let pitch_pane = column()
             .push(iced::Text::new("PITCH"))
             .push(knob_stack(vec![
                 knob_row(
                     vec![
-                        with_label(pitch_attack_widget, "A").into(),
-                        with_label(pitch_hold_widget, "H").into(),
-                        with_label(pitch_decay_widget, "D").into(),
-                        with_label(pitch_multiply_widget, "M").into(),
-                        with_label(pitch_release_widget, "R").into(),
+                        pitch_attack_widget,
+                        pitch_hold_widget,
+                        pitch_decay_widget,
+                        pitch_multiply_widget,
+                        pitch_release_widget,
                     ],
                     "Envelope",
-                )
-                .into(),
+                ),
                 knob_row(
-                    vec![
-                        with_label(pitch_lfo_amplitude_widget, "Amplitude").into(),
-                        with_label(pitch_lfo_period_widget, "Period").into(),
-                    ],
+                    vec![pitch_lfo_amplitude_widget, pitch_lfo_period_widget],
                     "LFO",
-                )
-                .into(),
-            ]))
-            .into();
+                ),
+            ]));
 
-        let filter_pane: Element<_> = column()
+        let filter_pane = column()
             .push(iced::Text::new("FILTER"))
             .push(knob_stack(vec![knob_row(
-                vec![with_label(low_pass_widget, "Alpha").into()],
+                vec![low_pass_widget],
                 "Low Pass",
-            )
-            .into()]))
-            .into();
+            )]));
 
-        let fm_pane: Element<_> = column()
-            .push(iced::Text::new("FM"))
-            .push(row(vec![
-                with_label(fm_on_off_widget, "On/Off").into(),
-                with_label(fm_vol_widget, "Volume").into(),
-                with_label(fm_pitch_widget, "Pitch Multiplier").into(),
-                with_label(fm_shape_widget, "Shape").into(),
-            ]))
-            .into();
+        let fm_pane = column().push(iced::Text::new("FM")).push(row(vec![
+            fm_on_off_widget,
+            fm_vol_widget,
+            fm_pitch_widget,
+            fm_shape_widget,
+        ]));
 
-        let master_pane: Element<_> = with_label(master_vol_widget, "Master Volume").into();
+        let master_pane = master_vol_widget;
 
         Row::new()
             .push(Column::new().push(osc_pane).push(pitch_pane).spacing(20))
@@ -465,6 +450,34 @@ impl Editor for UIFrontEnd {
             }
         }
         false
+    }
+}
+
+fn widget_name(param: ParameterType) -> String {
+    match param {
+        ParameterType::MasterVolume => "Master Volume".to_string(),
+        ParameterType::Shape => "Shape".to_string(),
+        ParameterType::Warp => "Warp".to_string(),
+        ParameterType::VolAttack => "A".to_string(),
+        ParameterType::VolHold => "H".to_string(),
+        ParameterType::VolDecay => "D".to_string(),
+        ParameterType::VolSustain => "S".to_string(),
+        ParameterType::VolRelease => "R".to_string(),
+        ParameterType::VolLFOAmplitude => "Amplitude".to_string(),
+        ParameterType::VolLFOPeriod => "Period".to_string(),
+        ParameterType::PitchAttack => "A".to_string(),
+        ParameterType::PitchHold => "H".to_string(),
+        ParameterType::PitchDecay => "D".to_string(),
+        ParameterType::PitchMultiply => "M".to_string(),
+        ParameterType::PitchRelease => "R".to_string(),
+        ParameterType::PitchLFOAmplitude => "Amplitude".to_string(),
+        ParameterType::PitchLFOPeriod => "Period".to_string(),
+        ParameterType::LowPassAlpha => "Alpha".to_string(),
+        ParameterType::FMOnOff => "ON/OFF".to_string(),
+        ParameterType::FMVolume => "Amount".to_string(),
+        ParameterType::FMPitchMultiplier => "Pitch Multiplier".to_string(),
+        ParameterType::FMShape => "Shape".to_string(),
+        ParameterType::Error => "Bepis".to_string(),
     }
 }
 
