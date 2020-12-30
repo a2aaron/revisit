@@ -69,6 +69,8 @@ impl OSCGroup {
             NoteShape::Sine,
             sample_rate,
         ) * params.pitch_lfo.amplitude;
+        let pitch_coarse = to_pitch_multiplier(1.0, params.coarse_tune);
+        let pitch_fine = to_pitch_multiplier(params.fine_tune, 1);
         let note_pitch = to_pitch_multiplier(pitch_env + pitch_bend + pitch_lfo, 12);
 
         let fm_pitch = if let Some(modifier) = with_mod {
@@ -77,7 +79,7 @@ impl OSCGroup {
             1.0
         };
         // The final pitch multiplier, post-FM
-        let pitch = note_pitch * fm_pitch;
+        let pitch = note_pitch * pitch_coarse * pitch_fine * fm_pitch;
 
         // Get next sample and write it to the output buffer
         self.osc.next_sample(
