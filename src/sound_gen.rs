@@ -170,69 +170,12 @@ impl Oscillator {
     }
 }
 
-/// An ADSR envelope.
-#[derive(Debug, Clone, Copy)]
-pub struct AmplitudeADSR {
-    // In seconds
-    pub attack: f32,
-    // In seconds
-    pub hold: f32,
-    // In seconds
-    pub decay: f32,
-    // In percent (0.0 to 1.0)
-    pub sustain: f32,
-    // In seconds
-    pub release: f32,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct PitchADSR {
-    // In seconds
-    pub attack: f32,
-    // In seconds
-    pub hold: f32,
-    // In seconds
-    pub decay: f32,
-    // In percent (-1.0 to 1.0)
-    pub multiply: f32,
-    // In seconds
-    pub release: f32,
-}
-
 pub trait ADSR {
     // Get the current envelope value.
     // time is how many samples since the start of the note
     // note_state is what state the note is in
     // sample rate is in hz/second
     fn get(&self, time: usize, note_state: NoteState, sample_rate: SampleRate) -> f32;
-}
-
-impl ADSR for AmplitudeADSR {
-    fn get(&self, time: usize, note_state: NoteState, sample_rate: SampleRate) -> f32 {
-        envelope(
-            (
-                self.attack,
-                self.hold,
-                self.decay,
-                self.sustain,
-                self.release,
-            ),
-            time,
-            note_state,
-            sample_rate,
-        )
-    }
-}
-
-impl ADSR for PitchADSR {
-    fn get(&self, time: usize, note_state: NoteState, sample_rate: SampleRate) -> f32 {
-        envelope(
-            (self.attack, self.hold, self.decay, 0.0, self.release),
-            time,
-            note_state,
-            sample_rate,
-        ) * self.multiply
-    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -425,7 +368,7 @@ pub fn to_pitch_multiplier(normalized_pitch_bend: f32, semitones: i32) -> f32 {
 /// Held - do normal attack/decay/sustain envelope
 /// Released - do release envelope, going from the released velocity to zero
 /// Retrigger - do short envelope from retrigger velocity to zero
-fn envelope(
+pub fn envelope(
     ahdsr: (f32, f32, f32, f32, f32),
     time: usize,
     note_state: NoteState,

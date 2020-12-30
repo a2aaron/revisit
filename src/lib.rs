@@ -2,36 +2,94 @@
 extern crate vst;
 
 mod neighbor_pairs;
+mod params;
 mod sound_gen;
 mod ui;
 
 use std::{convert::TryFrom, sync::Arc};
 
 use iced_baseview::Application;
+use params::{
+    AmplitudeADSR, OSCParameterType, OSCParams, ParameterType, Parameters, RawParameters,
+};
 use sound_gen::{
-    ease_in_expo, ease_in_poly, normalize_U7, normalize_pitch_bend, to_pitch_envelope,
-    to_pitch_multiplier, AmplitudeADSR, NoteShape, Oscillator, PitchADSR, SampleRate, ADSR,
+    normalize_U7, normalize_pitch_bend, to_pitch_envelope, to_pitch_multiplier, NoteShape,
+    Oscillator, SampleRate, ADSR,
 };
 
 use log::{info, LevelFilter};
 use ui::UIFrontEnd;
-use variant_count::VariantCount;
+
 use vst::{
     api::{Events, Supported},
     buffer::AudioBuffer,
     editor::Editor,
-    host::Host,
     plugin::{CanDo, Category, HostCallback, Info, Plugin, PluginParameters},
-    util::AtomicFloat,
 };
 use wmidi::MidiMessage;
 
 struct SoundGenerator {
+    osc_1: OSCGroup,
+    osc_2: OSCGroup,
+    note: wmidi::Note,
+}
+
+struct OSCGroup {
     osc: Oscillator,
-    fm: Oscillator,
     volume_lfo: Oscillator,
     pitch_lfo: Oscillator,
-    note: wmidi::Note,
+}
+
+impl OSCGroup {
+    fn next_sample(
+        &mut self,
+        params: &OSCParams,
+        sample_rate: f32,
+        i: usize,
+        pitch_bend: f32,
+        with_mod: Option<f32>,
+    ) -> f32 {
+        // Compute volume from ADSR and envelope
+        let vol_env = params
+            .vol_adsr
+            .get(self.osc.time, self.osc.note_state, sample_rate);
+        let vol_lfo = self.volume_lfo.next_sample_raw(
+            1.0 / params.vol_lfo.period,
+            NoteShape::Sine,
+            sample_rate,
+        ) * params.vol_lfo.amplitude;
+        let vol = (vol_env * (1.0 + vol_lfo)).max(0.0);
+
+        // Compute note pitch multiplier from ADSR and envelope
+        let pitch_env = params
+            .pitch_adsr
+            .get(self.osc.time, self.osc.note_state, sample_rate);
+        let pitch_lfo = self.pitch_lfo.next_sample_raw(
+            1.0 / params.pitch_lfo.period,
+            NoteShape::Sine,
+            sample_rate,
+        ) * params.pitch_lfo.amplitude;
+        let note_pitch = to_pitch_multiplier(pitch_env + pitch_bend + pitch_lfo, 12);
+
+        let fm_pitch = if let Some(modifier) = with_mod {
+            to_pitch_multiplier(modifier, 24)
+        } else {
+            1.0
+        };
+        // The final pitch multiplier, post-FM
+        let pitch = note_pitch * fm_pitch;
+
+        // Get next sample and write it to the output buffer
+        self.osc.next_sample(
+            i,
+            sample_rate,
+            params.shape,
+            vol_env,
+            vol,
+            pitch,
+            Some(params.low_pass_alpha),
+        ) * params.volume
+    }
 }
 
 struct Revisit {
@@ -73,7 +131,8 @@ impl Plugin for Revisit {
             version: 1,
             category: Category::Synth,
             // Subtract one here due to "error" type
-            parameters: (ParameterType::VARIANT_COUNT - 1) as i32,
+            parameters: (ParameterType::VARIANT_COUNT - 2 + OSCParameterType::VARIANT_COUNT * 2)
+                as i32,
             // No audio inputs
             inputs: 0,
             // Two channel audio!
@@ -109,81 +168,37 @@ impl Plugin for Revisit {
         let mut output = vec![0.0; num_samples];
         for gen in &mut self.notes {
             for i in 0..num_samples {
-                let (osc, fm, volume_lfo, pitch_lfo) = (
-                    &mut gen.osc,
-                    &mut gen.fm,
-                    &mut gen.volume_lfo,
-                    &mut gen.pitch_lfo,
-                );
+                let (osc_1, osc_2) = (&mut gen.osc_1, &mut gen.osc_2);
 
-                // Compute volume from ADSR and envelope
-                let vol_env = params
-                    .vol_adsr
-                    .get(osc.time, osc.note_state, self.sample_rate);
-                let vol_lfo = volume_lfo.next_sample_raw(
-                    1.0 / params.vol_lfo.period,
-                    NoteShape::Sine,
-                    self.sample_rate,
-                ) * params.vol_lfo.amplitude;
-                let vol = (vol_env * (1.0 + vol_lfo)).max(0.0);
-
-                // Compute note pitch multiplier from ADSR and envelope
-                let pitch_env = params
-                    .pitch_adsr
-                    .get(osc.time, osc.note_state, self.sample_rate);
-                let pitch_bend = pitch_bends[i];
-                let pitch_lfo = pitch_lfo.next_sample_raw(
-                    1.0 / params.pitch_lfo.period,
-                    NoteShape::Sine,
-                    self.sample_rate,
-                ) * params.pitch_lfo.amplitude;
-                let note_pitch = to_pitch_multiplier(pitch_env + pitch_bend + pitch_lfo, 12);
-
-                // Compute FM pitch multiplier
-                let fm_pitch = if params.fm_on_off {
-                    // The pitch of the FM modulator is some multiple of the actual note pitch
-                    let pitch = note_pitch * params.fm_pitch_mult;
-                    fm.next_sample(
-                        i,
+                let with_mod = if params.osc_2_on_off {
+                    Some(osc_2.next_sample(
+                        &params.osc_2,
                         self.sample_rate,
-                        params.fm_shape,
-                        params.fm_vol,
-                        params.fm_vol,
-                        pitch,
+                        i,
+                        pitch_bends[i],
                         None,
-                    )
+                    ))
                 } else {
-                    0.0
+                    None
                 };
 
-                // The final pitch multiplier, post-FM
-                let pitch = note_pitch * to_pitch_multiplier(fm_pitch, 24);
+                let osc_1 =
+                    osc_1.next_sample(&params.osc_1, self.sample_rate, i, pitch_bends[i], with_mod);
 
-                // Get next sample and write it to the output buffer
-                let sample = osc.next_sample(
-                    i,
-                    self.sample_rate,
-                    params.shape,
-                    vol_env,
-                    vol,
-                    pitch,
-                    Some(params.low_pass_alpha),
-                );
-
-                output[i] += sample;
+                output[i] += osc_1;
             }
         }
 
         // Write sound
         for channel in output_buffer.into_iter() {
             for (i, sample) in channel.iter_mut().enumerate() {
-                *sample = output[i] * params.volume;
+                *sample = output[i] * params.master_vol;
             }
         }
     }
 
     fn process_events(&mut self, events: &Events) {
-        let envelope = AmplitudeADSR::from(&self.params.vol_adsr);
+        let envelope = AmplitudeADSR::from(&self.params.osc_1.vol_adsr);
         let sample_rate = self.sample_rate;
         // remove "dead" notes
         // we do this in process_events _before_ processing any midi messages
@@ -196,7 +211,7 @@ impl Plugin for Revisit {
         // - frame 1 - user is confused to why note does not play despite holding
         //             down key (the KeyOn event was "eaten" by the dead note!)
         self.notes
-            .retain(|gen| gen.osc.is_alive(sample_rate, envelope.release));
+            .retain(|gen| gen.osc_1.osc.is_alive(sample_rate, envelope.release));
 
         // Clear pitch bend to get new messages
         self.pitch_bend.clear();
@@ -214,30 +229,33 @@ impl Plugin for Revisit {
                                 {
                                     osc
                                 } else {
-                                    let fm = Oscillator::new_from_note(note, 1.0);
-                                    let osc = Oscillator::new_from_note(note, vel);
-                                    let volume_lfo = Oscillator::new(1.0, 1.0);
-                                    let pitch_lfo = Oscillator::new(1.0, 1.0);
                                     self.notes.push(SoundGenerator {
-                                        osc,
-                                        fm,
-                                        volume_lfo,
-                                        pitch_lfo,
+                                        osc_1: OSCGroup {
+                                            osc: Oscillator::new_from_note(note, vel),
+                                            volume_lfo: Oscillator::new(1.0, 1.0),
+                                            pitch_lfo: Oscillator::new(1.0, 1.0),
+                                        },
+                                        osc_2: OSCGroup {
+                                            osc: Oscillator::new_from_note(note, vel),
+                                            volume_lfo: Oscillator::new(1.0, 1.0),
+                                            pitch_lfo: Oscillator::new(1.0, 1.0),
+                                        },
+
                                         note,
                                     });
                                     self.notes.last_mut().unwrap()
                                 };
 
-                                gen.osc.note_on(event.delta_frames, vel);
-                                gen.fm.note_on(event.delta_frames, 1.0);
+                                gen.osc_1.osc.note_on(event.delta_frames, vel);
+                                gen.osc_2.osc.note_on(event.delta_frames, 1.0);
                             }
                             MidiMessage::NoteOff(_, note, _) => {
                                 // On note off, send note off
                                 if let Some(i) = self.notes.iter().position(|gen| gen.note == note)
                                 {
                                     let gen = &mut self.notes[i];
-                                    gen.osc.note_off(event.delta_frames);
-                                    gen.fm.note_off(event.delta_frames);
+                                    gen.osc_1.osc.note_off(event.delta_frames);
+                                    gen.osc_2.osc.note_off(event.delta_frames);
                                 }
                             }
                             MidiMessage::PitchBendChange(_, pitch_bend) => {
@@ -291,409 +309,6 @@ impl Default for Revisit {
             pitch_bend: Vec::with_capacity(16),
             last_pitch_bend: 0.0,
             gui_initialized: false,
-        }
-    }
-}
-
-struct LFO {
-    amplitude: f32,
-    // In seconds
-    period: f32,
-}
-
-pub struct Parameters {
-    vol_adsr: AmplitudeADSR,
-    pitch_adsr: PitchADSR,
-    vol_lfo: LFO,
-    pitch_lfo: LFO,
-    volume: f32,
-    shape: NoteShape,
-    low_pass_alpha: f32,
-    fm_on_off: bool,
-    fm_vol: f32,
-    fm_pitch_mult: f32,
-    fm_shape: NoteShape,
-}
-
-impl From<&RawParameters> for Parameters {
-    fn from(params: &RawParameters) -> Self {
-        Parameters {
-            vol_adsr: AmplitudeADSR::from(&params.vol_adsr),
-            pitch_adsr: PitchADSR::from(&params.pitch_adsr),
-            vol_lfo: LFO {
-                amplitude: ease_in_expo(params.vol_lfo_amplitude.get()),
-                period: (ease_in_expo(params.vol_lfo_period.get()) * 10.0).max(0.01),
-            },
-            pitch_lfo: LFO {
-                amplitude: ease_in_expo(params.pitch_lfo_amplitude.get()) * 0.1,
-                period: (ease_in_expo(params.pitch_lfo_period.get()) * 10.0).max(0.01),
-            },
-            volume: params.volume.get(),
-            shape: NoteShape::from_warp(params.shape.get(), params.warp.get()),
-            low_pass_alpha: ease_in_poly(params.low_pass_alpha.get(), 4).clamp(0.0, 1.0),
-            fm_on_off: params.fm_on_off.get() > 0.5,
-            fm_vol: params.fm_vol.get() * 2.0,
-            fm_pitch_mult: to_pitch_multiplier((params.fm_pitch_mult.get() - 0.5) * 2.0, 24),
-            fm_shape: NoteShape::from_warp(params.fm_shape.get(), 0.5),
-        }
-    }
-}
-
-impl From<&RawParametersEnvelope> for AmplitudeADSR {
-    fn from(params: &RawParametersEnvelope) -> Self {
-        // Apply exponetial scaling to input values.
-        // This makes it easier to select small envelope lengths.
-        let attack = ease_in_expo(params.attack.get());
-        let hold = ease_in_expo(params.hold.get());
-        let decay = ease_in_expo(params.decay.get());
-        let sustain = params.sustain.get();
-        let release = ease_in_expo(params.release.get());
-        AmplitudeADSR {
-            // Clamp values to around 1 ms minimum.
-            // This avoids division by zero problems.
-            // Also prevents annoying clicking which is undesirable.
-            attack: (attack * 2.0).max(1.0 / 1000.0),
-            hold: hold * 5.0,
-            decay: (decay * 5.0).max(1.0 / 1000.0),
-            sustain,
-            release: (release * 5.0).max(1.0 / 1000.0),
-        }
-    }
-}
-
-impl From<&RawParametersEnvelope> for PitchADSR {
-    fn from(params: &RawParametersEnvelope) -> Self {
-        // Apply exponetial scaling to input values.
-        // This makes it easier to select small envelope lengths.
-        let attack = ease_in_expo(params.attack.get());
-        let hold = ease_in_expo(params.hold.get());
-        let decay = ease_in_expo(params.decay.get());
-        let multiply = params.sustain.get();
-        let release = ease_in_expo(params.release.get());
-        PitchADSR {
-            attack: (attack * 2.0).max(1.0 / 10000.0),
-            hold: hold * 5.0,
-            decay: (decay * 5.0).max(1.0 / 10000.0),
-            multiply: (multiply - 0.5) * 2.0,
-            release: (release * 5.0).max(1.0 / 10000.0),
-        }
-    }
-}
-
-/// The raw parameter values that a host DAW will set and modify.
-/// These are unscaled and are always in the [0.0, 1.0] range
-pub struct RawParameters {
-    vol_adsr: RawParametersEnvelope,
-    pitch_adsr: RawParametersEnvelope,
-    vol_lfo_amplitude: AtomicFloat,
-    vol_lfo_period: AtomicFloat,
-    pitch_lfo_amplitude: AtomicFloat,
-    pitch_lfo_period: AtomicFloat,
-    volume: AtomicFloat,
-    shape: AtomicFloat,
-    warp: AtomicFloat,
-    low_pass_alpha: AtomicFloat,
-    fm_on_off: AtomicFloat,
-    fm_vol: AtomicFloat,
-    fm_pitch_mult: AtomicFloat,
-    fm_shape: AtomicFloat,
-    host: HostCallback,
-    notify: Arc<tokio::sync::Notify>,
-}
-
-impl RawParameters {
-    fn get(&self, parameter: ParameterType) -> f32 {
-        use ParameterType::*;
-        match parameter {
-            MasterVolume => self.volume.get(),
-            Shape => self.shape.get(),
-            Warp => self.warp.get(),
-            VolAttack => self.vol_adsr.attack.get(),
-            VolHold => self.vol_adsr.hold.get(),
-            VolDecay => self.vol_adsr.decay.get(),
-            VolSustain => self.vol_adsr.sustain.get(),
-            VolRelease => self.vol_adsr.release.get(),
-            VolLFOAmplitude => self.vol_lfo_amplitude.get(),
-            VolLFOPeriod => self.vol_lfo_period.get(),
-            PitchAttack => self.pitch_adsr.attack.get(),
-            PitchHold => self.pitch_adsr.hold.get(),
-            PitchDecay => self.pitch_adsr.decay.get(),
-            PitchMultiply => self.pitch_adsr.sustain.get(),
-            PitchRelease => self.pitch_adsr.release.get(),
-            PitchLFOAmplitude => self.pitch_lfo_amplitude.get(),
-            PitchLFOPeriod => self.pitch_lfo_period.get(),
-            LowPassAlpha => self.low_pass_alpha.get(),
-            FMOnOff => self.fm_on_off.get(),
-            FMVolume => self.fm_vol.get(),
-            FMPitchMultiplier => self.fm_pitch_mult.get(),
-            FMShape => self.fm_shape.get(),
-            Error => 0.0,
-        }
-    }
-
-    fn get_default(parameter: ParameterType) -> f32 {
-        use ParameterType::*;
-        match parameter {
-            MasterVolume => 0.33,
-            Shape => 0.225, // Triangle
-            Warp => 0.5,
-            VolAttack => 0.1,
-            VolHold => 0.0,
-            VolDecay => 0.2,
-            VolSustain => 0.5,
-            VolRelease => 0.3,
-            VolLFOAmplitude => 0.0,
-            VolLFOPeriod => 0.5,
-            PitchAttack => 1.0 / 10000.0,
-            PitchHold => 0.0,
-            PitchDecay => 0.2,
-            PitchMultiply => 0.5,
-            PitchRelease => 1.0 / 10000.0,
-            PitchLFOAmplitude => 0.0,
-            PitchLFOPeriod => 0.5,
-            LowPassAlpha => 1.0,
-            FMOnOff => 0.0,           // Off
-            FMVolume => 0.5,          // 100%
-            FMPitchMultiplier => 0.5, // 1x
-            FMShape => 0.0,           // Sine
-            Error => 0.0,
-        }
-    }
-
-    fn set(&self, value: f32, parameter: ParameterType) {
-        use ParameterType::*;
-        match parameter {
-            MasterVolume => self.volume.set(value),
-            Shape => self.shape.set(value),
-            Warp => {
-                // TODO: this is stupid
-                let old_value = format!(
-                    "{}",
-                    NoteShape::from_warp(self.shape.get(), self.warp.get())
-                );
-                let new_value = format!("{}", NoteShape::from_warp(self.shape.get(), value));
-
-                self.warp.set(value);
-
-                if old_value != new_value {
-                    self.host.update_display();
-                }
-            }
-            VolAttack => self.vol_adsr.attack.set(value),
-            VolHold => self.vol_adsr.hold.set(value),
-            VolDecay => self.vol_adsr.decay.set(value),
-            VolSustain => self.vol_adsr.sustain.set(value),
-            VolRelease => self.vol_adsr.release.set(value),
-            VolLFOAmplitude => self.vol_lfo_amplitude.set(value),
-            VolLFOPeriod => self.vol_lfo_period.set(value),
-            PitchAttack => self.pitch_adsr.attack.set(value),
-            PitchHold => self.pitch_adsr.hold.set(value),
-            PitchDecay => self.pitch_adsr.decay.set(value),
-            PitchMultiply => self.pitch_adsr.sustain.set(value),
-            PitchRelease => self.pitch_adsr.release.set(value),
-            PitchLFOAmplitude => self.pitch_lfo_amplitude.set(value),
-            PitchLFOPeriod => self.pitch_lfo_period.set(value),
-            LowPassAlpha => self.low_pass_alpha.set(value),
-            FMOnOff => self.fm_on_off.set(value),
-            FMVolume => self.fm_vol.set(value),
-            FMPitchMultiplier => self.fm_pitch_mult.set(value),
-            FMShape => self.fm_shape.set(value),
-            Error => (),
-        }
-    }
-}
-
-impl PluginParameters for RawParameters {
-    fn get_parameter_label(&self, index: i32) -> String {
-        use ParameterType::*;
-        match index.into() {
-            VolAttack | VolHold | VolDecay | VolRelease | PitchAttack | PitchHold | PitchDecay
-            | PitchRelease | VolLFOPeriod | PitchLFOPeriod => " sec".to_string(),
-            VolSustain | PitchMultiply | MasterVolume | FMVolume | VolLFOAmplitude
-            | PitchLFOAmplitude => "%".to_string(),
-            FMPitchMultiplier => "x".to_string(),
-            Shape | Warp | LowPassAlpha | FMOnOff | FMShape => "".to_string(),
-            Error => "".to_string(),
-        }
-    }
-
-    fn get_parameter_text(&self, index: i32) -> String {
-        let params = Parameters::from(self);
-        use ParameterType::*;
-        match index.into() {
-            VolAttack => format!("{:.2}", params.vol_adsr.attack),
-            VolHold => format!("{:.2}", params.vol_adsr.hold),
-            VolDecay => format!("{:.2}", params.vol_adsr.decay),
-            VolSustain => format!("{:.2}", params.vol_adsr.sustain * 100.0),
-            VolRelease => format!("{:.2}", params.vol_adsr.release),
-            VolLFOAmplitude => format!("{:.2}", params.vol_lfo.amplitude * 100.0),
-            VolLFOPeriod => format!("{:.2}", params.vol_lfo.period),
-            PitchAttack => format!("{:.2}", params.pitch_adsr.attack),
-            PitchHold => format!("{:.2}", params.pitch_adsr.hold),
-            PitchDecay => format!("{:.2}", params.pitch_adsr.decay),
-            PitchMultiply => format!("{:.2}", params.pitch_adsr.multiply * 100.0),
-            PitchRelease => format!("{:.2}", params.pitch_adsr.release),
-            PitchLFOAmplitude => format!("{:.2}", params.pitch_lfo.amplitude * 100.0),
-            PitchLFOPeriod => format!("{:.2}", params.pitch_lfo.period),
-            MasterVolume => format!("{:.2}", params.volume * 100.0),
-            Shape => format!("{}", params.shape),
-            Warp => format!("{:.2}", self.warp.get()),
-            LowPassAlpha => format!("{:.5}", params.low_pass_alpha),
-            FMOnOff => if params.fm_on_off { "On" } else { "Off" }.to_string(),
-            FMVolume => format!("{:.2}", params.fm_vol * 100.0),
-            FMPitchMultiplier => format!("{:.2}", params.fm_pitch_mult),
-            FMShape => format!("{}", params.fm_shape),
-            Error => "".to_string(),
-        }
-    }
-
-    fn get_parameter_name(&self, index: i32) -> String {
-        use ParameterType::*;
-        match index.into() {
-            MasterVolume => "Master Volume".to_string(),
-            Shape => "Note Shape".to_string(),
-            Warp => "Note Warp".to_string(),
-            VolAttack => "Attack (Volume)".to_string(),
-            VolHold => "Hold (Volume)".to_string(),
-            VolDecay => "Decay (Volume)".to_string(),
-            VolSustain => "Sustain (Volume)".to_string(),
-            VolRelease => "Release (Volume)".to_string(),
-            VolLFOAmplitude => "LFO Amount (Volume)".to_string(),
-            VolLFOPeriod => "LFO Period (Volume)".to_string(),
-            PitchAttack => "Attack (Pitch Bend)".to_string(),
-            PitchHold => "Hold (Pitch Bend)".to_string(),
-            PitchDecay => "Decay (Pitch Bend)".to_string(),
-            PitchMultiply => "Multiply (Pitch Bend)".to_string(),
-            PitchRelease => "Release (Pitch Bend)".to_string(),
-            PitchLFOAmplitude => "LFO Amount (Pitch)".to_string(),
-            PitchLFOPeriod => "LFO Period (Pitch)".to_string(),
-            LowPassAlpha => "Low Pass Alpha".to_string(),
-            FMOnOff => "FM On/Off".to_string(),
-            FMVolume => "FM Volume".to_string(),
-            FMPitchMultiplier => "FM Pitch Multiplier".to_string(),
-            FMShape => "FM Note Shape".to_string(),
-            Error => "".to_string(),
-        }
-    }
-
-    fn get_parameter(&self, index: i32) -> f32 {
-        self.get(index.into())
-    }
-
-    fn set_parameter(&self, index: i32, value: f32) {
-        self.set(value, index.into());
-        self.notify.as_ref().notify_one();
-    }
-
-    fn can_be_automated(&self, index: i32) -> bool {
-        ParameterType::from(index) != ParameterType::Error
-    }
-
-    fn string_to_parameter(&self, _index: i32, _text: String) -> bool {
-        false
-    }
-}
-
-impl Default for RawParameters {
-    fn default() -> Self {
-        use ParameterType::*;
-        RawParameters {
-            volume: RawParameters::get_default(MasterVolume).into(),
-            shape: RawParameters::get_default(Shape).into(),
-            warp: RawParameters::get_default(Warp).into(),
-            vol_adsr: RawParametersEnvelope {
-                attack: RawParameters::get_default(VolAttack).into(),
-                hold: RawParameters::get_default(VolHold).into(),
-                decay: RawParameters::get_default(VolDecay).into(),
-                sustain: RawParameters::get_default(VolSustain).into(),
-                release: RawParameters::get_default(VolRelease).into(),
-            },
-            vol_lfo_amplitude: RawParameters::get_default(VolLFOAmplitude).into(),
-            vol_lfo_period: RawParameters::get_default(VolLFOPeriod).into(),
-            pitch_adsr: RawParametersEnvelope {
-                attack: RawParameters::get_default(PitchAttack).into(),
-                hold: RawParameters::get_default(PitchHold).into(),
-                decay: RawParameters::get_default(PitchDecay).into(),
-                sustain: RawParameters::get_default(PitchMultiply).into(),
-                release: RawParameters::get_default(PitchRelease).into(),
-            },
-            pitch_lfo_amplitude: RawParameters::get_default(PitchLFOAmplitude).into(),
-            pitch_lfo_period: RawParameters::get_default(PitchLFOPeriod).into(),
-            low_pass_alpha: RawParameters::get_default(LowPassAlpha).into(),
-            fm_on_off: RawParameters::get_default(FMOnOff).into(),
-            fm_vol: RawParameters::get_default(FMVolume).into(),
-            fm_pitch_mult: RawParameters::get_default(FMPitchMultiplier).into(),
-            fm_shape: RawParameters::get_default(FMShape).into(),
-            host: Default::default(),
-            notify: Arc::new(tokio::sync::Notify::new()),
-        }
-    }
-}
-
-// Convience struct, represents parameters that are part of an envelope
-pub struct RawParametersEnvelope {
-    attack: AtomicFloat,
-    hold: AtomicFloat,
-    decay: AtomicFloat,
-    sustain: AtomicFloat,
-    release: AtomicFloat,
-}
-
-/// The type of parameter. "Error" is included as a convience type.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, VariantCount)]
-pub enum ParameterType {
-    MasterVolume,
-    Shape,
-    Warp,
-    VolAttack,
-    VolHold,
-    VolDecay,
-    VolSustain,
-    VolRelease,
-    VolLFOAmplitude,
-    VolLFOPeriod,
-    PitchAttack,
-    PitchHold,
-    PitchDecay,
-    PitchMultiply,
-    PitchRelease,
-    PitchLFOAmplitude,
-    PitchLFOPeriod,
-    LowPassAlpha,
-    FMOnOff,
-    FMVolume,
-    FMPitchMultiplier,
-    FMShape,
-    Error,
-}
-
-impl From<i32> for ParameterType {
-    fn from(i: i32) -> Self {
-        use ParameterType::*;
-        match i {
-            0 => MasterVolume,
-            1 => Shape,
-            2 => Warp,
-            3 => VolAttack,
-            4 => VolHold,
-            5 => VolDecay,
-            6 => VolSustain,
-            7 => VolRelease,
-            8 => VolLFOAmplitude,
-            9 => VolLFOPeriod,
-            10 => PitchAttack,
-            11 => PitchHold,
-            12 => PitchDecay,
-            13 => PitchMultiply,
-            14 => PitchRelease,
-            15 => PitchLFOAmplitude,
-            16 => PitchLFOPeriod,
-            17 => LowPassAlpha,
-            18 => FMOnOff,
-            19 => FMVolume,
-            20 => FMPitchMultiplier,
-            21 => FMShape,
-            _ => Error,
         }
     }
 }
