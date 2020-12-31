@@ -8,7 +8,7 @@ use raw_window_handle::RawWindowHandle;
 use tokio::sync::Notify;
 use vst::{editor::Editor, host::Host};
 
-use crate::params::{OSCParameterType, ParameterType, Parameters, RawParameters};
+use crate::params::{OSCParameterType, OSCType, ParameterType, Parameters, RawOSC, RawParameters};
 
 // Create a widget (actually a column) that:
 // 1. Uses `$state` as the widget's `$widget::State` struct
@@ -17,7 +17,7 @@ use crate::params::{OSCParameterType, ParameterType, Parameters, RawParameters};
 macro_rules! widget {
     ($widget:ident, $state:expr, $parameter:expr) => {
         with_label(
-            $widget::new($state, |normal| {
+            $widget::new($state, move |normal| {
                 Message::ParameterChanged(normal.as_f32(), $parameter)
             }),
             &widget_name($parameter),
@@ -60,7 +60,7 @@ fn row(widgets: Vec<Element<'_, Message>>) -> Element<'_, Message> {
 }
 
 fn column<'a>() -> Column<'a, Message> {
-    Column::new().spacing(5).padding(20)
+    Column::new().spacing(5)
 }
 
 fn make_pane<'a>(
@@ -110,8 +110,10 @@ pub enum Message {
     ForceRedraw,
 }
 
-pub struct UIFrontEnd {
-    master_vol: v_slider::State,
+pub struct OSCKnobs {
+    volume: knob::State,
+    coarse_tune: knob::State,
+    fine_tune: knob::State,
     attack: knob::State,
     hold: knob::State,
     decay: knob::State,
@@ -129,10 +131,144 @@ pub struct UIFrontEnd {
     pitch_lfo_amplitude: knob::State,
     pitch_lfo_period: knob::State,
     low_pass: knob::State,
-    fm_on_off: bool,
-    fm_vol: knob::State,
-    fm_pitch: knob::State,
-    fm_shape: knob::State,
+}
+
+impl OSCKnobs {
+    fn new(param_ref: &RawParameters, osc: OSCType) -> OSCKnobs {
+        use OSCParameterType::*;
+        OSCKnobs {
+            volume: make_knob(param_ref, (Volume, osc).into()),
+            coarse_tune: make_knob(param_ref, (CoarseTune, osc).into()),
+            fine_tune: make_knob(param_ref, (FineTune, osc).into()),
+            attack: make_knob(param_ref, (VolAttack, osc).into()),
+            hold: make_knob(param_ref, (VolHold, osc).into()),
+            decay: make_knob(param_ref, (VolDecay, osc).into()),
+            sustain: make_knob(param_ref, (VolSustain, osc).into()),
+            release: make_knob(param_ref, (VolRelease, osc).into()),
+            vol_lfo_amplitude: make_knob(param_ref, (VolLFOAmplitude, osc).into()),
+            vol_lfo_period: make_knob(param_ref, (VolLFOPeriod, osc).into()),
+            note_shape: make_knob(param_ref, (Shape, osc).into()),
+            note_warp: make_knob(param_ref, (Warp, osc).into()),
+            pitch_attack: make_knob(param_ref, (PitchAttack, osc).into()),
+            pitch_hold: make_knob(param_ref, (PitchHold, osc).into()),
+            pitch_decay: make_knob(param_ref, (PitchDecay, osc).into()),
+            pitch_multiply: make_knob(param_ref, (PitchMultiply, osc).into()),
+            pitch_release: make_knob(param_ref, (PitchRelease, osc).into()),
+            pitch_lfo_amplitude: make_knob(param_ref, (PitchLFOAmplitude, osc).into()),
+            pitch_lfo_period: make_knob(param_ref, (PitchLFOPeriod, osc).into()),
+            low_pass: make_knob(param_ref, (LowPassAlpha, osc).into()),
+        }
+    }
+
+    fn update(&mut self, osc: &RawOSC) {
+        use OSCParameterType::*;
+        self.volume.set(osc.get(Volume).into());
+        self.coarse_tune.set(osc.get(CoarseTune).into());
+        self.fine_tune.set(osc.get(FineTune).into());
+        self.attack.set(osc.get(VolAttack).into());
+        self.hold.set(osc.get(VolHold).into());
+        self.decay.set(osc.get(VolDecay).into());
+        self.sustain.set(osc.get(VolSustain).into());
+        self.release.set(osc.get(VolRelease).into());
+        self.vol_lfo_amplitude.set(osc.get(VolLFOAmplitude).into());
+        self.vol_lfo_period.set(osc.get(VolLFOPeriod).into());
+        self.note_shape.set(osc.get(Shape).into());
+        self.note_warp.set(osc.get(Warp).into());
+        self.pitch_attack.set(osc.get(PitchAttack).into());
+        self.pitch_hold.set(osc.get(PitchHold).into());
+        self.pitch_decay.set(osc.get(PitchDecay).into());
+        self.pitch_multiply.set(osc.get(PitchMultiply).into());
+        self.pitch_release.set(osc.get(PitchRelease).into());
+        self.pitch_lfo_amplitude
+            .set(osc.get(PitchLFOAmplitude).into());
+        self.pitch_lfo_period.set(osc.get(PitchLFOPeriod).into());
+        self.low_pass.set(osc.get(LowPassAlpha).into());
+    }
+
+    fn make_widget<'a>(
+        &'a mut self,
+        osc: OSCType,
+        on_off: Option<Element<'a, Message>>,
+    ) -> Element<'a, Message> {
+        use OSCParameterType::*;
+        let shape = widget!(Knob, &mut self.note_shape, (Shape, osc).into());
+        let warp = widget!(Knob, &mut self.note_warp, (Warp, osc).into());
+
+        let attack = widget!(Knob, &mut self.attack, (VolAttack, osc).into());
+        let hold = widget!(Knob, &mut self.hold, (VolHold, osc).into());
+        let decay = widget!(Knob, &mut self.decay, (VolDecay, osc).into());
+        let sustain = widget!(Knob, &mut self.sustain, (VolSustain, osc).into());
+        let release = widget!(Knob, &mut self.release, (VolRelease, osc).into());
+
+        let vol_lfo_amplitude = widget!(
+            Knob,
+            &mut self.vol_lfo_amplitude,
+            (VolLFOAmplitude, osc).into()
+        );
+        let vol_lfo_period = widget!(Knob, &mut self.vol_lfo_period, (VolLFOPeriod, osc).into());
+
+        let pitch_attack = widget!(Knob, &mut self.pitch_attack, (PitchAttack, osc).into());
+        let pitch_hold = widget!(Knob, &mut self.pitch_hold, (PitchHold, osc).into());
+        let pitch_decay = widget!(Knob, &mut self.pitch_decay, (PitchDecay, osc).into());
+        let pitch_multiply = widget!(Knob, &mut self.pitch_multiply, (PitchMultiply, osc).into());
+        let pitch_release = widget!(Knob, &mut self.pitch_release, (PitchRelease, osc).into());
+
+        let pitch_lfo_amplitude = widget!(
+            Knob,
+            &mut self.pitch_lfo_amplitude,
+            (PitchLFOAmplitude, osc).into()
+        );
+        let pitch_lfo_period = widget!(
+            Knob,
+            &mut self.pitch_lfo_period,
+            (PitchLFOPeriod, osc).into()
+        );
+
+        let low_pass = widget!(Knob, &mut self.low_pass, (LowPassAlpha, osc).into());
+
+        let on_off = on_off.unwrap_or_else(|| {
+            iced::widget::Space::new(iced::Length::Shrink, iced::Length::Shrink).into()
+        });
+        let osc_pane = make_pane(
+            "OSC",
+            vec![
+                (vec![on_off], "ON/OFF"),
+                (vec![shape, warp], "Shape"),
+                (vec![attack, hold, decay, sustain, release], "Envelope"),
+                (vec![vol_lfo_amplitude, vol_lfo_period], "LFO"),
+            ],
+        );
+
+        let pitch_pane = make_pane(
+            "PITCH",
+            vec![
+                (
+                    vec![
+                        pitch_attack,
+                        pitch_hold,
+                        pitch_decay,
+                        pitch_multiply,
+                        pitch_release,
+                    ],
+                    "Envelope",
+                ),
+                (vec![pitch_lfo_amplitude, pitch_lfo_period], "LFO"),
+            ],
+        );
+
+        let filter_pane = make_pane("FILTER", vec![(vec![low_pass], "Low Pass")]);
+        Column::with_children(vec![osc_pane.into(), pitch_pane.into(), filter_pane.into()])
+            .padding(20)
+            .spacing(20)
+            .into()
+    }
+}
+
+pub struct UIFrontEnd {
+    master_vol: v_slider::State,
+    osc_1: OSCKnobs,
+    osc_2: OSCKnobs,
+    osc_2_on_off: bool,
     params: std::sync::Arc<RawParameters>,
     handle: Option<Handle>,
     notifier: Arc<Notify>,
@@ -148,34 +284,14 @@ impl Application for UIFrontEnd {
         let (params, notifier) = flags;
         let param_ref = params.as_ref();
         let params_real = Parameters::from(param_ref);
-        use OSCParameterType::*;
-        use ParameterType::{OSC1, OSC2};
         let ui = UIFrontEnd {
             master_vol: v_slider::State::new(make_normal_param(
                 param_ref,
                 ParameterType::MasterVolume,
             )),
-            attack: make_knob(param_ref, OSC1(VolAttack)),
-            hold: make_knob(param_ref, OSC1(VolHold)),
-            decay: make_knob(param_ref, OSC1(VolDecay)),
-            sustain: make_knob(param_ref, OSC1(VolSustain)),
-            release: make_knob(param_ref, OSC1(VolRelease)),
-            vol_lfo_amplitude: make_knob(param_ref, OSC1(VolLFOAmplitude)),
-            vol_lfo_period: make_knob(param_ref, OSC1(VolLFOPeriod)),
-            note_shape: make_knob(param_ref, OSC1(Shape)),
-            note_warp: make_knob(param_ref, OSC1(Warp)),
-            pitch_attack: make_knob(param_ref, OSC1(PitchAttack)),
-            pitch_hold: make_knob(param_ref, OSC1(PitchHold)),
-            pitch_decay: make_knob(param_ref, OSC1(PitchDecay)),
-            pitch_multiply: make_knob(param_ref, OSC1(PitchMultiply)),
-            pitch_release: make_knob(param_ref, OSC1(PitchRelease)),
-            pitch_lfo_amplitude: make_knob(param_ref, OSC1(PitchLFOAmplitude)),
-            pitch_lfo_period: make_knob(param_ref, OSC1(PitchLFOPeriod)),
-            low_pass: make_knob(param_ref, OSC1(LowPassAlpha)),
-            fm_on_off: params_real.osc_2_on_off,
-            fm_vol: make_knob(param_ref, OSC2(Volume)),
-            fm_pitch: make_knob(param_ref, OSC2(Warp)), // TODO!!
-            fm_shape: make_knob(param_ref, OSC2(Shape)),
+            osc_1: OSCKnobs::new(param_ref, OSCType::OSC1),
+            osc_2: OSCKnobs::new(param_ref, OSCType::OSC1),
+            osc_2_on_off: params_real.osc_2_on_off,
             params,
             handle: None,
             notifier,
@@ -188,47 +304,18 @@ impl Application for UIFrontEnd {
         match message {
             Message::ParameterChanged(value, ParameterType::OSC2OnOff) => {
                 self.params.set(value, ParameterType::OSC2OnOff);
-                self.fm_on_off = value > 0.5;
+                self.osc_2_on_off = value > 0.5;
             }
             Message::ParameterChanged(value, param) => {
                 self.params.set(value, param);
             }
             Message::ForceRedraw => {
-                use OSCParameterType::*;
-                use ParameterType::{OSC1, OSC2};
                 self.master_vol
                     .set(self.params.get(ParameterType::MasterVolume).into());
-                self.attack.set(self.params.get(OSC1(VolAttack)).into());
-                self.hold.set(self.params.get(OSC1(VolHold)).into());
-                self.decay.set(self.params.get(OSC1(VolDecay)).into());
-                self.sustain.set(self.params.get(OSC1(VolSustain)).into());
-                self.release.set(self.params.get(OSC1(VolRelease)).into());
-                self.vol_lfo_amplitude
-                    .set(self.params.get(OSC1(VolLFOAmplitude)).into());
-                self.vol_lfo_period
-                    .set(self.params.get(OSC1(VolLFOPeriod)).into());
-                self.note_shape.set(self.params.get(OSC1(Shape)).into());
-                self.note_warp.set(self.params.get(OSC1(Warp)).into());
-                self.pitch_attack
-                    .set(self.params.get(OSC1(PitchAttack)).into());
-                self.pitch_hold.set(self.params.get(OSC1(PitchHold)).into());
-                self.pitch_decay
-                    .set(self.params.get(OSC1(PitchDecay)).into());
-                self.pitch_multiply
-                    .set(self.params.get(OSC1(PitchMultiply)).into());
-                self.pitch_release
-                    .set(self.params.get(OSC1(PitchRelease)).into());
-                self.pitch_lfo_amplitude
-                    .set(self.params.get(OSC1(PitchLFOAmplitude)).into());
-                self.pitch_lfo_period
-                    .set(self.params.get(OSC1(PitchLFOPeriod)).into());
-                self.low_pass
-                    .set(self.params.get(OSC1(LowPassAlpha)).into());
+                self.osc_1.update(&self.params.osc_1);
+                self.osc_2.update(&self.params.osc_2);
                 // TODO : Don't use a RawParameters for this
-                self.fm_on_off = self.params.get(ParameterType::OSC2OnOff) > 0.5;
-                self.fm_vol.set(self.params.get(OSC2(Volume)).into());
-                self.fm_pitch.set(self.params.get(OSC2(Warp)).into()); // TODO
-                self.fm_shape.set(self.params.get(OSC2(Shape)).into());
+                self.osc_2_on_off = self.params.get(ParameterType::OSC2OnOff) > 0.5;
             }
         }
         // Make the host DAW update its own parameter display
@@ -237,98 +324,26 @@ impl Application for UIFrontEnd {
     }
 
     fn view(&mut self) -> iced::Element<'_, Self::Message> {
-        use OSCParameterType::*;
-        use ParameterType::{OSC1, OSC2};
         let screen = self.size();
         let (screen_width, screen_height) = (screen.0 as u32, screen.1 as u32);
 
         let master_vol_widget = widget!(VSlider, &mut self.master_vol, ParameterType::MasterVolume);
 
-        let shape_widget = widget!(Knob, &mut self.note_shape, OSC1(Shape));
-        let warp_widget = widget!(Knob, &mut self.note_warp, OSC1(Warp));
-
-        let attack_widget = widget!(Knob, &mut self.attack, OSC1(VolAttack));
-        let hold_widget = widget!(Knob, &mut self.hold, OSC1(VolHold));
-        let decay_widget = widget!(Knob, &mut self.decay, OSC1(VolDecay));
-        let sustain_widget = widget!(Knob, &mut self.sustain, OSC1(VolSustain));
-        let release_widget = widget!(Knob, &mut self.release, OSC1(VolRelease));
-
-        let vol_lfo_amplitude_widget =
-            widget!(Knob, &mut self.vol_lfo_amplitude, OSC1(VolLFOAmplitude));
-        let vol_lfo_period_widget = widget!(Knob, &mut self.vol_lfo_period, OSC1(VolLFOPeriod));
-
-        let pitch_attack_widget = widget!(Knob, &mut self.pitch_attack, OSC1(PitchAttack));
-        let pitch_hold_widget = widget!(Knob, &mut self.pitch_hold, OSC1(PitchHold));
-        let pitch_decay_widget = widget!(Knob, &mut self.pitch_decay, OSC1(PitchDecay));
-        let pitch_multiply_widget = widget!(Knob, &mut self.pitch_multiply, OSC1(PitchMultiply));
-        let pitch_release_widget = widget!(Knob, &mut self.pitch_release, OSC1(PitchRelease));
-
-        let pitch_lfo_amplitude_widget =
-            widget!(Knob, &mut self.pitch_lfo_amplitude, OSC1(PitchLFOAmplitude));
-        let pitch_lfo_period_widget =
-            widget!(Knob, &mut self.pitch_lfo_period, OSC1(PitchLFOPeriod));
-
-        let low_pass_widget = widget!(Knob, &mut self.low_pass, OSC1(LowPassAlpha));
         // TODO: Consider a smarter way for messages that doesn't involve always casting to f32
-        let fm_on_off_widget = Checkbox::new(self.fm_on_off, "ON/OFF", |on_off| {
+        let osc_2_on_off = Checkbox::new(self.osc_2_on_off, "ON/OFF", |on_off| {
             let normal = if on_off { 1.0 } else { 0.0 };
             Message::ParameterChanged(normal, ParameterType::OSC2OnOff)
         })
         .text_size(0) // Hide label text.
         .into();
-        let fm_vol_widget = widget!(Knob, &mut self.fm_vol, OSC2(Volume));
-        let fm_pitch_widget = widget!(Knob, &mut self.fm_pitch, OSC2(Warp)); // TODO
-        let fm_shape_widget = widget!(Knob, &mut self.fm_shape, OSC2(Shape));
-
-        let osc_pane = make_pane(
-            "OSC 1",
-            vec![
-                (vec![shape_widget, warp_widget], "Shape"),
-                (
-                    vec![
-                        attack_widget,
-                        hold_widget,
-                        decay_widget,
-                        sustain_widget,
-                        release_widget,
-                    ],
-                    "Envelope",
-                ),
-                (vec![vol_lfo_amplitude_widget, vol_lfo_period_widget], "LFO"),
-            ],
-        );
-
-        let pitch_pane = make_pane(
-            "PITCH",
-            vec![
-                (
-                    vec![
-                        pitch_attack_widget,
-                        pitch_hold_widget,
-                        pitch_decay_widget,
-                        pitch_multiply_widget,
-                        pitch_release_widget,
-                    ],
-                    "Envelope",
-                ),
-                (
-                    vec![pitch_lfo_amplitude_widget, pitch_lfo_period_widget],
-                    "LFO",
-                ),
-            ],
-        );
-
-        let filter_pane = make_pane("FILTER", vec![(vec![low_pass_widget], "Low Pass")]);
-
-        let fm_pane = column()
-            .push(row(vec![iced::Text::new("FM").into(), fm_on_off_widget]))
-            .push(row(vec![fm_vol_widget, fm_pitch_widget, fm_shape_widget]));
 
         let master_pane = master_vol_widget;
+        let osc_1 = OSCKnobs::make_widget(&mut self.osc_1, OSCType::OSC1, None);
+        let osc_2 = OSCKnobs::make_widget(&mut self.osc_2, OSCType::OSC2, Some(osc_2_on_off));
 
         Row::new()
-            .push(Column::new().push(osc_pane).push(pitch_pane).spacing(20))
-            .push(Column::new().push(fm_pane).push(filter_pane).spacing(20))
+            .push(osc_1)
+            .push(osc_2)
             .push(master_pane)
             .max_width(screen_width)
             .max_height(screen_height)

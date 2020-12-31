@@ -415,71 +415,11 @@ impl PluginParameters for RawParameters {
 
 impl Default for RawParameters {
     fn default() -> Self {
-        use OSCParameterType::*;
-        use ParameterType::*;
         RawParameters {
-            osc_1: RawOSC {
-                volume: RawParameters::get_default(OSC1(Volume)).into(),
-                shape: RawParameters::get_default(OSC1(Shape)).into(),
-                warp: RawParameters::get_default(OSC1(Warp)).into(),
-                coarse_tune: RawParameters::get_default(OSC1(CoarseTune)).into(),
-                fine_tune: RawParameters::get_default(OSC1(FineTune)).into(),
-                vol_adsr: RawEnvelope {
-                    attack: RawParameters::get_default(OSC1(VolAttack)).into(),
-                    hold: RawParameters::get_default(OSC1(VolHold)).into(),
-                    decay: RawParameters::get_default(OSC1(VolDecay)).into(),
-                    sustain: RawParameters::get_default(OSC1(VolSustain)).into(),
-                    release: RawParameters::get_default(OSC1(VolRelease)).into(),
-                },
-                vol_lfo: RawLFO {
-                    period: RawParameters::get_default(OSC1(VolLFOPeriod)).into(),
-                    amount: RawParameters::get_default(OSC1(VolLFOAmplitude)).into(),
-                },
-                pitch_adsr: RawEnvelope {
-                    attack: RawParameters::get_default(OSC1(PitchAttack)).into(),
-                    hold: RawParameters::get_default(OSC1(PitchHold)).into(),
-                    decay: RawParameters::get_default(OSC1(PitchDecay)).into(),
-                    sustain: RawParameters::get_default(OSC1(PitchMultiply)).into(),
-                    release: RawParameters::get_default(OSC1(PitchRelease)).into(),
-                },
-                pitch_lfo: RawLFO {
-                    period: RawParameters::get_default(OSC1(PitchLFOPeriod)).into(),
-                    amount: RawParameters::get_default(OSC1(PitchLFOAmplitude)).into(),
-                },
-                low_pass_alpha: RawParameters::get_default(OSC1(LowPassAlpha)).into(),
-            },
-            osc_2: RawOSC {
-                volume: RawParameters::get_default(OSC2(Volume)).into(),
-                shape: RawParameters::get_default(OSC2(Shape)).into(),
-                warp: RawParameters::get_default(OSC2(Warp)).into(),
-                coarse_tune: RawParameters::get_default(OSC2(CoarseTune)).into(),
-                fine_tune: RawParameters::get_default(OSC2(FineTune)).into(),
-                vol_adsr: RawEnvelope {
-                    attack: RawParameters::get_default(OSC2(VolAttack)).into(),
-                    hold: RawParameters::get_default(OSC2(VolHold)).into(),
-                    decay: RawParameters::get_default(OSC2(VolDecay)).into(),
-                    sustain: RawParameters::get_default(OSC2(VolSustain)).into(),
-                    release: RawParameters::get_default(OSC2(VolRelease)).into(),
-                },
-                vol_lfo: RawLFO {
-                    period: RawParameters::get_default(OSC2(VolLFOPeriod)).into(),
-                    amount: RawParameters::get_default(OSC2(VolLFOAmplitude)).into(),
-                },
-                pitch_adsr: RawEnvelope {
-                    attack: RawParameters::get_default(OSC2(PitchAttack)).into(),
-                    hold: RawParameters::get_default(OSC2(PitchHold)).into(),
-                    decay: RawParameters::get_default(OSC2(PitchDecay)).into(),
-                    sustain: RawParameters::get_default(OSC2(PitchMultiply)).into(),
-                    release: RawParameters::get_default(OSC2(PitchRelease)).into(),
-                },
-                pitch_lfo: RawLFO {
-                    period: RawParameters::get_default(OSC2(PitchLFOPeriod)).into(),
-                    amount: RawParameters::get_default(OSC2(PitchLFOAmplitude)).into(),
-                },
-                low_pass_alpha: RawParameters::get_default(OSC2(LowPassAlpha)).into(),
-            },
-            master_vol: RawParameters::get_default(MasterVolume).into(),
-            osc_2_on_off: RawParameters::get_default(OSC2OnOff).into(),
+            osc_1: RawOSC::default(OSCType::OSC1),
+            osc_2: RawOSC::default(OSCType::OSC2),
+            master_vol: RawParameters::get_default(ParameterType::MasterVolume).into(),
+            osc_2_on_off: RawParameters::get_default(ParameterType::OSC2OnOff).into(),
             host: Default::default(),
             notify: Arc::new(tokio::sync::Notify::new()),
         }
@@ -497,6 +437,100 @@ pub struct RawOSC {
     pub pitch_adsr: RawEnvelope,
     pub pitch_lfo: RawLFO,
     pub low_pass_alpha: AtomicFloat,
+}
+
+impl RawOSC {
+    pub fn get(&self, param: OSCParameterType) -> f32 {
+        use OSCParameterType::*;
+        match param {
+            Volume => self.volume.get(),
+            Shape => self.shape.get(),
+            Warp => self.warp.get(),
+            CoarseTune => self.coarse_tune.get(),
+            FineTune => self.fine_tune.get(),
+            VolAttack => self.vol_adsr.attack.get(),
+            VolHold => self.vol_adsr.hold.get(),
+            VolDecay => self.vol_adsr.decay.get(),
+            VolSustain => self.vol_adsr.sustain.get(),
+            VolRelease => self.vol_adsr.release.get(),
+            VolLFOAmplitude => self.vol_lfo.amount.get(),
+            VolLFOPeriod => self.vol_lfo.period.get(),
+            PitchAttack => self.pitch_adsr.attack.get(),
+            PitchHold => self.pitch_adsr.hold.get(),
+            PitchDecay => self.pitch_adsr.decay.get(),
+            PitchMultiply => self.pitch_adsr.sustain.get(),
+            PitchRelease => self.pitch_adsr.release.get(),
+            PitchLFOAmplitude => self.pitch_lfo.amount.get(),
+            PitchLFOPeriod => self.pitch_lfo.period.get(),
+            LowPassAlpha => self.low_pass_alpha.get(),
+        }
+    }
+
+    fn get_default(param: OSCParameterType, osc: OSCType) -> f32 {
+        use OSCParameterType::*;
+        match param {
+            Volume => 0.5,  // 100%
+            Shape => 0.225, // Triangle
+            Warp => 0.5,
+            CoarseTune => 0.5, // 0 semitones
+            FineTune => 0.5,   // 0 cents
+            VolAttack => 0.1,
+            VolHold => 0.0,
+            VolDecay => 0.2,
+            VolSustain => match osc {
+                OSCType::OSC1 => 0.5,
+                OSCType::OSC2 => 1.0,
+            },
+            VolRelease => match osc {
+                OSCType::OSC1 => 0.3,
+                OSCType::OSC2 => 1.0 / 10000.0,
+            },
+            VolLFOAmplitude => 0.0,
+            VolLFOPeriod => 0.5,
+            PitchAttack => 1.0 / 10000.0,
+            PitchHold => 0.0,
+            PitchDecay => 0.2,
+            PitchMultiply => 0.5, // 0%
+            PitchRelease => 1.0 / 10000.0,
+            PitchLFOAmplitude => 0.0,
+            PitchLFOPeriod => 0.5,
+            LowPassAlpha => 1.0,
+        }
+    }
+
+    fn default(osc: OSCType) -> RawOSC {
+        use OSCParameterType::*;
+        RawOSC {
+            volume: RawOSC::get_default(Volume, osc).into(),
+            shape: RawOSC::get_default(Shape, osc).into(),
+            warp: RawOSC::get_default(Warp, osc).into(),
+            coarse_tune: RawOSC::get_default(CoarseTune, osc).into(),
+            fine_tune: RawOSC::get_default(FineTune, osc).into(),
+            vol_adsr: RawEnvelope {
+                attack: RawOSC::get_default(VolAttack, osc).into(),
+                hold: RawOSC::get_default(VolHold, osc).into(),
+                decay: RawOSC::get_default(VolDecay, osc).into(),
+                sustain: RawOSC::get_default(VolSustain, osc).into(),
+                release: RawOSC::get_default(VolRelease, osc).into(),
+            },
+            vol_lfo: RawLFO {
+                period: RawOSC::get_default(VolLFOPeriod, osc).into(),
+                amount: RawOSC::get_default(VolLFOAmplitude, osc).into(),
+            },
+            pitch_adsr: RawEnvelope {
+                attack: RawOSC::get_default(PitchAttack, osc).into(),
+                hold: RawOSC::get_default(PitchHold, osc).into(),
+                decay: RawOSC::get_default(PitchDecay, osc).into(),
+                sustain: RawOSC::get_default(PitchMultiply, osc).into(),
+                release: RawOSC::get_default(PitchRelease, osc).into(),
+            },
+            pitch_lfo: RawLFO {
+                period: RawOSC::get_default(PitchLFOPeriod, osc).into(),
+                amount: RawOSC::get_default(PitchLFOAmplitude, osc).into(),
+            },
+            low_pass_alpha: RawOSC::get_default(LowPassAlpha, osc).into(),
+        }
+    }
 }
 
 // Convience struct, represents parameters that are part of an envelope
@@ -565,6 +599,12 @@ impl std::fmt::Display for OSCParameterType {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OSCType {
+    OSC1,
+    OSC2,
+}
+
 /// The type of parameter. "Error" is included as a convience type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, VariantCount)]
 pub enum ParameterType {
@@ -624,6 +664,15 @@ impl TryFrom<i32> for ParameterType {
             40 => Ok(OSC2(PitchLFOPeriod)),
             41 => Ok(OSC2(LowPassAlpha)),
             _ => Err(()),
+        }
+    }
+}
+
+impl From<(OSCParameterType, OSCType)> for ParameterType {
+    fn from((param, osc): (OSCParameterType, OSCType)) -> Self {
+        match osc {
+            OSCType::OSC1 => ParameterType::OSC1(param),
+            OSCType::OSC2 => ParameterType::OSC2(param),
         }
     }
 }
