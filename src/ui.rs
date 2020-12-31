@@ -67,7 +67,18 @@ fn make_pane<'a>(
     title: &str,
     widgets: Vec<(Vec<Element<'a, Message>>, &str)>,
 ) -> Column<'a, Message> {
-    let mut pane = column().push(iced::Text::new(title));
+    make_pane_with_checkbox(title, None, widgets)
+}
+
+fn make_pane_with_checkbox<'a>(
+    title: &str,
+    on_off: Option<Element<'a, Message>>,
+    widgets: Vec<(Vec<Element<'a, Message>>, &str)>,
+) -> Column<'a, Message> {
+    let on_off = on_off.unwrap_or_else(|| {
+        iced::widget::Space::new(iced::Length::Shrink, iced::Length::Shrink).into()
+    });
+    let mut pane = column().push(row(vec![iced::Text::new(title).into(), on_off]));
     for (knobs, title) in widgets.into_iter() {
         pane = pane.push(knob_row(knobs, title));
     }
@@ -226,13 +237,10 @@ impl OSCKnobs {
 
         let low_pass = widget!(Knob, &mut self.low_pass, (LowPassAlpha, osc).into());
 
-        let on_off = on_off.unwrap_or_else(|| {
-            iced::widget::Space::new(iced::Length::Shrink, iced::Length::Shrink).into()
-        });
-        let osc_pane = make_pane(
+        let osc_pane = make_pane_with_checkbox(
             "OSC",
+            on_off,
             vec![
-                (vec![on_off], "ON/OFF"),
                 (vec![shape, warp], "Shape"),
                 (vec![attack, hold, decay, sustain, release], "Envelope"),
                 (vec![vol_lfo_amplitude, vol_lfo_period], "LFO"),
