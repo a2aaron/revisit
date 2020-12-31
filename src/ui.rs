@@ -202,6 +202,9 @@ impl OSCKnobs {
         on_off: Option<Element<'a, Message>>,
     ) -> Element<'a, Message> {
         use OSCParameterType::*;
+        let volume = widget!(Knob, &mut self.volume, (Volume, osc).into());
+        let fine_tune = widget!(Knob, &mut self.fine_tune, (FineTune, osc).into());
+        let coarse_tune = widget!(Knob, &mut self.coarse_tune, (CoarseTune, osc).into());
         let shape = widget!(Knob, &mut self.note_shape, (Shape, osc).into());
         let warp = widget!(Knob, &mut self.note_warp, (Warp, osc).into());
 
@@ -241,7 +244,7 @@ impl OSCKnobs {
             "OSC",
             on_off,
             vec![
-                (vec![shape, warp], "Shape"),
+                (vec![volume, fine_tune, coarse_tune, shape, warp], "Sound"),
                 (vec![attack, hold, decay, sustain, release], "Envelope"),
                 (vec![vol_lfo_amplitude, vol_lfo_period], "LFO"),
             ],
@@ -457,28 +460,29 @@ fn widget_name(param: ParameterType) -> String {
     use OSCParameterType::*;
     match param {
         ParameterType::MasterVolume => "Master Volume".to_string(),
-        ParameterType::OSC1(Shape) => "Shape".to_string(),
-        ParameterType::OSC1(Warp) => "Warp".to_string(),
-        ParameterType::OSC1(VolAttack) => "A".to_string(),
-        ParameterType::OSC1(VolHold) => "H".to_string(),
-        ParameterType::OSC1(VolDecay) => "D".to_string(),
-        ParameterType::OSC1(VolSustain) => "S".to_string(),
-        ParameterType::OSC1(VolRelease) => "R".to_string(),
-        ParameterType::OSC1(VolLFOAmplitude) => "Amplitude".to_string(),
-        ParameterType::OSC1(VolLFOPeriod) => "Period".to_string(),
-        ParameterType::OSC1(PitchAttack) => "A".to_string(),
-        ParameterType::OSC1(PitchHold) => "H".to_string(),
-        ParameterType::OSC1(PitchDecay) => "D".to_string(),
-        ParameterType::OSC1(PitchMultiply) => "M".to_string(),
-        ParameterType::OSC1(PitchRelease) => "R".to_string(),
-        ParameterType::OSC1(PitchLFOAmplitude) => "Amplitude".to_string(),
-        ParameterType::OSC1(PitchLFOPeriod) => "Period".to_string(),
-        ParameterType::OSC1(LowPassAlpha) => "Alpha".to_string(),
+        ParameterType::OSC1(param) | ParameterType::OSC2(param) => match param {
+            Volume => "Volume".to_string(),
+            FineTune => "Fine Tune".to_string(),
+            CoarseTune => "Coarse Tune".to_string(),
+            Shape => "Shape".to_string(),
+            Warp => "Warp".to_string(),
+            VolAttack => "A".to_string(),
+            VolHold => "H".to_string(),
+            VolDecay => "D".to_string(),
+            VolSustain => "S".to_string(),
+            VolRelease => "R".to_string(),
+            VolLFOAmplitude => "Amplitude".to_string(),
+            VolLFOPeriod => "Period".to_string(),
+            PitchAttack => "A".to_string(),
+            PitchHold => "H".to_string(),
+            PitchDecay => "D".to_string(),
+            PitchMultiply => "M".to_string(),
+            PitchRelease => "R".to_string(),
+            PitchLFOAmplitude => "Amplitude".to_string(),
+            PitchLFOPeriod => "Period".to_string(),
+            LowPassAlpha => "Alpha".to_string(),
+        },
         ParameterType::OSC2OnOff => "ON/OFF".to_string(),
-        ParameterType::OSC2(Volume) => "Amount".to_string(),
-        ParameterType::OSC2(Warp) => "Pitch Multiplier".to_string(), // TODO
-        ParameterType::OSC2(Shape) => "Shape".to_string(),
-        _ => "TODO".to_string(),
     }
 }
 
