@@ -213,7 +213,7 @@ impl NoteShape {
             // and https://www.desmos.com/calculator/hs8zd0sfkh for more visuals
             NoteShape::Sine => (angle * TAU).sin(),
             NoteShape::Square(warp) => {
-                if angle < *warp {
+                if angle < (*warp).clamp(0.001, 0.999) {
                     -1.0
                 } else {
                     1.0
@@ -251,6 +251,15 @@ impl NoteShape {
             NoteShape::Skewtooth(warp)
         } else {
             NoteShape::Square(warp)
+        }
+    }
+
+    pub fn add(&self, modulate: f32) -> Self {
+        use NoteShape::*;
+        match self {
+            Sine => Sine,
+            Square(warp) => Square((warp + modulate).clamp(0.0, 1.0)),
+            Skewtooth(warp) => Skewtooth((warp + modulate).clamp(0.0, 1.0)),
         }
     }
 }

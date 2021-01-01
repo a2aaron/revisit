@@ -10,7 +10,8 @@ use std::{convert::TryFrom, sync::Arc};
 
 use iced_baseview::Application;
 use params::{
-    AmplitudeADSR, OSCParameterType, OSCParams, ParameterType, Parameters, RawParameters,
+    AmplitudeADSR, ModulationType, OSCParameterType, OSCParams, ParameterType, Parameters,
+    RawParameters,
 };
 use sound_gen::{
     normalize_U7, normalize_pitch_bend, to_pitch_envelope, to_pitch_multiplier, NoteShape,
@@ -47,7 +48,8 @@ impl OSCGroup {
         sample_rate: f32,
         i: usize,
         pitch_bend: f32,
-        with_mod: Option<f32>,
+        modulation: f32,
+        mod_type: ModulationType,
     ) -> f32 {
         // Compute volume from ADSR and envelope
         let vol_env = params
@@ -58,6 +60,7 @@ impl OSCGroup {
             NoteShape::Sine,
             sample_rate,
         ) * params.vol_lfo.amplitude;
+
         let vol = (vol_env * (1.0 + vol_lfo)).max(0.0);
 
         // Compute note pitch multiplier from ADSR and envelope
@@ -73,24 +76,38 @@ impl OSCGroup {
         let pitch_fine = to_pitch_multiplier(params.fine_tune, 1);
         let note_pitch = to_pitch_multiplier(pitch_env + pitch_bend + pitch_lfo, 12);
 
-        let fm_pitch = if let Some(modifier) = with_mod {
-            to_pitch_multiplier(modifier, 24)
+        let fm_mod = if mod_type == ModulationType::FreqMod {
+            to_pitch_multiplier(modulation, 24)
         } else {
             1.0
         };
-        // The final pitch multiplier, post-FM
-        let pitch = note_pitch * pitch_coarse * pitch_fine * fm_pitch;
 
-        // Get next sample and write it to the output buffer
+        // The final pitch multiplier, post-FM
+        let pitch = note_pitch * pitch_coarse * pitch_fine * fm_mod;
+
+        let vol_mod = if mod_type == ModulationType::AmpMod {
+            modulation
+        } else {
+            0.0
+        };
+
+        let warp_mod = if mod_type == ModulationType::WarpMod {
+            modulation
+        } else {
+            0.0
+        };
+
+        // Get next sample
         self.osc.next_sample(
             i,
             sample_rate,
-            params.shape,
+            params.shape.add(warp_mod),
             vol_env,
             vol,
             pitch,
             Some(params.low_pass_alpha),
         ) * params.volume
+            * (1.0 + vol_mod)
     }
 }
 
@@ -172,22 +189,29 @@ impl Plugin for Revisit {
             for i in 0..num_samples {
                 let (osc_1, osc_2) = (&mut gen.osc_1, &mut gen.osc_2);
 
-                let with_mod = if params.osc_2_on_off {
-                    Some(osc_2.next_sample(
-                        &params.osc_2,
-                        self.sample_rate,
-                        i,
-                        pitch_bends[i],
-                        None,
-                    ))
+                let osc_2 = osc_2.next_sample(
+                    &params.osc_2,
+                    self.sample_rate,
+                    i,
+                    pitch_bends[i],
+                    0.0,
+                    ModulationType::Mix,
+                );
+
+                let osc_1 = osc_1.next_sample(
+                    &params.osc_1,
+                    self.sample_rate,
+                    i,
+                    pitch_bends[i],
+                    osc_2,
+                    params.osc_2_mod,
+                );
+
+                if params.osc_2_mod == ModulationType::Mix {
+                    output[i] += osc_1 + osc_2;
                 } else {
-                    None
-                };
-
-                let osc_1 =
-                    osc_1.next_sample(&params.osc_1, self.sample_rate, i, pitch_bends[i], with_mod);
-
-                output[i] += osc_1;
+                    output[i] += osc_1;
+                }
             }
         }
 

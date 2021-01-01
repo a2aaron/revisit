@@ -15,7 +15,7 @@ pub struct Parameters {
     pub osc_1: OSCParams,
     pub osc_2: OSCParams,
     pub master_vol: f32,
-    pub osc_2_on_off: bool,
+    pub osc_2_mod: ModulationType,
 }
 
 impl From<&RawParameters> for Parameters {
@@ -24,7 +24,7 @@ impl From<&RawParameters> for Parameters {
             osc_1: OSCParams::from(&params.osc_1),
             osc_2: OSCParams::from(&params.osc_2),
             master_vol: params.master_vol.get(),
-            osc_2_on_off: params.osc_2_on_off.get() > 0.5,
+            osc_2_mod: params.osc_2_mod.get().into(),
         }
     }
 }
@@ -176,7 +176,7 @@ pub struct RawParameters {
     pub osc_1: RawOSC,
     pub osc_2: RawOSC,
     pub master_vol: AtomicFloat,
-    pub osc_2_on_off: AtomicFloat,
+    pub osc_2_mod: AtomicFloat,
     pub host: HostCallback,
     pub notify: Arc<tokio::sync::Notify>,
 }
@@ -207,7 +207,7 @@ impl RawParameters {
             OSC1(PitchLFOAmplitude) => &self.osc_1.pitch_lfo.amount,
             OSC1(PitchLFOPeriod) => &self.osc_1.pitch_lfo.period,
             OSC1(LowPassAlpha) => &self.osc_1.low_pass_alpha,
-            OSC2OnOff => &self.osc_2_on_off,
+            OSC2Mod => &self.osc_2_mod,
             OSC2(Volume) => &self.osc_2.volume,
             OSC2(Shape) => &self.osc_2.shape,
             OSC2(Warp) => &self.osc_2.warp,
@@ -256,7 +256,7 @@ impl RawParameters {
             OSC1(PitchLFOAmplitude) => 0.0,
             OSC1(PitchLFOPeriod) => 0.5,
             OSC1(LowPassAlpha) => 1.0,
-            OSC2OnOff => 0.0, // Off
+            OSC2Mod => 0.0, // Off
             OSC2(Volume) => 0.5,
             OSC2(Shape) => 0.0, // Sine
             OSC2(Warp) => 0.5,
@@ -325,7 +325,7 @@ impl PluginParameters for RawParameters {
                     CoarseTune => " semis".to_string(),
                     FineTune => " cents".to_string(),
                 },
-                ParameterType::OSC2OnOff => "".to_string(),
+                ParameterType::OSC2Mod => "".to_string(),
             }
         } else {
             "".to_string()
@@ -367,9 +367,7 @@ impl PluginParameters for RawParameters {
                         LowPassAlpha => format!("{:.2}", osc.low_pass_alpha),
                     }
                 }
-                ParameterType::OSC2OnOff => {
-                    if params.osc_2_on_off { "On" } else { "Off" }.to_string()
-                }
+                ParameterType::OSC2Mod => format!("{}", params.osc_2_mod),
             }
         } else {
             "".to_string()
@@ -382,7 +380,7 @@ impl PluginParameters for RawParameters {
                 ParameterType::MasterVolume => "Master Volume".to_string(),
                 ParameterType::OSC1(param) => format!("OSC 1 {}", param),
                 ParameterType::OSC2(param) => format!("OSC 2 {}", param),
-                ParameterType::OSC2OnOff => "OSC 2 ON/OFF".to_string(),
+                ParameterType::OSC2Mod => "OSC 2 ON/OFF".to_string(),
             }
         } else {
             "".to_string()
@@ -419,7 +417,7 @@ impl Default for RawParameters {
             osc_1: RawOSC::default(OSCType::OSC1),
             osc_2: RawOSC::default(OSCType::OSC2),
             master_vol: RawParameters::get_default(ParameterType::MasterVolume).into(),
-            osc_2_on_off: RawParameters::get_default(ParameterType::OSC2OnOff).into(),
+            osc_2_mod: RawParameters::get_default(ParameterType::OSC2Mod).into(),
             host: Default::default(),
             notify: Arc::new(tokio::sync::Notify::new()),
         }
@@ -605,12 +603,51 @@ pub enum OSCType {
     OSC2,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModulationType {
+    Mix,
+    AmpMod,
+    FreqMod,
+    PhaseMod,
+    WarpMod,
+}
+
+impl From<f32> for ModulationType {
+    fn from(x: f32) -> Self {
+        use ModulationType::*;
+        if x < 1.0 / 5.0 {
+            Mix
+        } else if x < 2.0 / 5.0 {
+            AmpMod
+        } else if x < 3.0 / 5.0 {
+            FreqMod
+        } else if x < 4.0 / 5.0 {
+            PhaseMod
+        } else {
+            WarpMod
+        }
+    }
+}
+
+impl std::fmt::Display for ModulationType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use ModulationType::*;
+        match self {
+            Mix => write!(f, "Mix"),
+            AmpMod => write!(f, "Amplitude Modulation"),
+            FreqMod => write!(f, "Frequency Modulation"),
+            PhaseMod => write!(f, "Phase Modulation"),
+            WarpMod => write!(f, "Warp Modulation"),
+        }
+    }
+}
+
 /// The type of parameter. "Error" is included as a convience type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, VariantCount)]
 pub enum ParameterType {
     MasterVolume,
     OSC1(OSCParameterType),
-    OSC2OnOff,
+    OSC2Mod,
     OSC2(OSCParameterType),
 }
 
@@ -642,7 +679,7 @@ impl TryFrom<i32> for ParameterType {
             18 => Ok(OSC1(PitchLFOAmplitude)),
             19 => Ok(OSC1(PitchLFOPeriod)),
             20 => Ok(OSC1(LowPassAlpha)),
-            21 => Ok(OSC2OnOff),
+            21 => Ok(OSC2Mod),
             22 => Ok(OSC2(Volume)),
             23 => Ok(OSC2(Shape)),
             24 => Ok(OSC2(Warp)),

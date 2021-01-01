@@ -279,7 +279,7 @@ pub struct UIFrontEnd {
     master_vol: v_slider::State,
     osc_1: OSCKnobs,
     osc_2: OSCKnobs,
-    osc_2_on_off: bool,
+    osc_2_mod: knob::State,
     params: std::sync::Arc<RawParameters>,
     handle: Option<Handle>,
     notifier: Arc<Notify>,
@@ -302,7 +302,7 @@ impl Application for UIFrontEnd {
             )),
             osc_1: OSCKnobs::new(param_ref, OSCType::OSC1),
             osc_2: OSCKnobs::new(param_ref, OSCType::OSC1),
-            osc_2_on_off: params_real.osc_2_on_off,
+            osc_2_mod: make_knob(param_ref, ParameterType::OSC2Mod),
             params,
             handle: None,
             notifier,
@@ -313,10 +313,6 @@ impl Application for UIFrontEnd {
 
     fn update(&mut self, message: Self::Message) -> Command<Self::Message> {
         match message {
-            Message::ParameterChanged(value, ParameterType::OSC2OnOff) => {
-                self.params.set(value, ParameterType::OSC2OnOff);
-                self.osc_2_on_off = value > 0.5;
-            }
             Message::ParameterChanged(value, param) => {
                 self.params.set(value, param);
             }
@@ -326,7 +322,8 @@ impl Application for UIFrontEnd {
                 self.osc_1.update(&self.params.osc_1);
                 self.osc_2.update(&self.params.osc_2);
                 // TODO : Don't use a RawParameters for this
-                self.osc_2_on_off = self.params.get(ParameterType::OSC2OnOff) > 0.5;
+                self.osc_2_mod
+                    .set(self.params.get(ParameterType::OSC2Mod).into());
             }
         }
         // Make the host DAW update its own parameter display
@@ -341,16 +338,11 @@ impl Application for UIFrontEnd {
         let master_vol_widget = widget!(VSlider, &mut self.master_vol, ParameterType::MasterVolume);
 
         // TODO: Consider a smarter way for messages that doesn't involve always casting to f32
-        let osc_2_on_off = Checkbox::new(self.osc_2_on_off, "ON/OFF", |on_off| {
-            let normal = if on_off { 1.0 } else { 0.0 };
-            Message::ParameterChanged(normal, ParameterType::OSC2OnOff)
-        })
-        .text_size(0) // Hide label text.
-        .into();
+        let osc_2_mod = widget!(Knob, &mut self.osc_2_mod, ParameterType::OSC2Mod);
 
         let master_pane = master_vol_widget;
         let osc_1 = OSCKnobs::make_widget(&mut self.osc_1, OSCType::OSC1, None);
-        let osc_2 = OSCKnobs::make_widget(&mut self.osc_2, OSCType::OSC2, Some(osc_2_on_off));
+        let osc_2 = OSCKnobs::make_widget(&mut self.osc_2, OSCType::OSC2, Some(osc_2_mod));
 
         Row::new()
             .push(osc_1)
@@ -358,7 +350,7 @@ impl Application for UIFrontEnd {
             .push(master_pane)
             .max_width(screen_width)
             .max_height(screen_height)
-            .spacing(20)
+            .spacing(10)
             .into()
     }
 
@@ -462,8 +454,8 @@ fn widget_name(param: ParameterType) -> String {
         ParameterType::MasterVolume => "Master Volume".to_string(),
         ParameterType::OSC1(param) | ParameterType::OSC2(param) => match param {
             Volume => "Volume".to_string(),
-            FineTune => "Fine Tune".to_string(),
-            CoarseTune => "Coarse Tune".to_string(),
+            FineTune => "Fine".to_string(),
+            CoarseTune => "Coarse".to_string(),
             Shape => "Shape".to_string(),
             Warp => "Warp".to_string(),
             VolAttack => "A".to_string(),
@@ -482,7 +474,7 @@ fn widget_name(param: ParameterType) -> String {
             PitchLFOPeriod => "Period".to_string(),
             LowPassAlpha => "Alpha".to_string(),
         },
-        ParameterType::OSC2OnOff => "ON/OFF".to_string(),
+        ParameterType::OSC2Mod => "OSC 2 Mod".to_string(),
     }
 }
 
