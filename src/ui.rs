@@ -1,7 +1,7 @@
 use std::ffi::c_void;
 use std::sync::Arc;
 
-use iced::{futures, Align, Checkbox, Column, Command, Element, Row, Subscription};
+use iced::{futures, Align, Column, Command, Element, Row, Subscription};
 use iced_audio::{knob, v_slider, Knob, NormalParam, VSlider};
 use iced_baseview::{Application, Handle, WindowSubs};
 use raw_window_handle::RawWindowHandle;
@@ -294,7 +294,6 @@ impl Application for UIFrontEnd {
     fn new(flags: Self::Flags) -> (Self, Command<Self::Message>) {
         let (params, notifier) = flags;
         let param_ref = params.as_ref();
-        let params_real = Parameters::from(param_ref);
         let ui = UIFrontEnd {
             master_vol: v_slider::State::new(make_normal_param(
                 param_ref,

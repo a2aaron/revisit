@@ -6,21 +6,26 @@ const TAU: f32 = std::f32::consts::TAU;
 
 const RETRIGGER_TIME: usize = 88; // 88 samples is about 2 miliseconds.
 
+/// An offset, in samples, from the start of the frame.
+pub type FrameDelta = i32;
 /// A value in range [0.0, 1.0] which denotes the position wihtin a wave cycle.
 pub type Angle = f32;
 /// The sample rate in Hz/seconds.
 pub type SampleRate = f32;
+/// A pitchbend value in [-1.0, +1.0] range, where +1.0 means "max upward bend"
+/// and -1.0 means "max downward bend"
+pub type NormalizedPitchbend = f32;
 
 #[derive(Debug)]
 pub struct Oscillator {
     pitch: f32,
     vel: f32,
-    angle: f32,
+    angle: Angle,
     pub time: usize,
     pub note_state: NoteState,
     low_pass_output: Option<f32>,
-    note_on: Option<(i32, f32)>,
-    note_off: Option<i32>,
+    note_on: Option<(FrameDelta, f32)>,
+    note_off: Option<FrameDelta>,
 }
 
 impl Oscillator {
@@ -170,49 +175,63 @@ impl Oscillator {
     }
 }
 
+/// An envelope trait.
 pub trait ADSR {
-    // Get the current envelope value.
-    // time is how many samples since the start of the note
-    // note_state is what state the note is in
-    // sample rate is in hz/second
+    /// Get the current envelope value. `time` is how many samples it has been
+    /// since the start of the note
     fn get(&self, time: usize, note_state: NoteState, sample_rate: SampleRate) -> f32;
 }
 
+/// The state of a note, along with the time and velocity that note has, if
+/// relevant. The typical life cycle of a note is as follows:
+/// None -> Held -> Released -> [removed] or Retrigger -> Held
+/// Notes start at None, then become Held. When they are released, they become
+/// Released, and are either removed if the release time on the note expires or
+/// become Retrigger if the note is retriggered during the release time.
+/// Retriggered notes become Held after a few samples automatically.
 #[derive(Debug, Clone, Copy)]
 pub enum NoteState {
-    // The note is not being held down, but no previous NoteOn or NoteOff exists
-    // for the note.
+    /// The note is not being held down, but no previous NoteOn or NoteOff exists
+    /// for the note. This state indicates that a note was triggered this frame
+    /// but the sample for when the note was triggered has not yet been reached.
     None,
-    // The note is being held down
+    /// The note is being held down
     Held,
-    // The note has just been released. Time is in seconds and denotes how many
-    // seconds since the oscillator has started. Vel is the velocity that the
-    // note was at (will go down to zero)
+    /// The note has just been released. Time is in seconds and denotes how many
+    /// samples since the oscillator has started. Vel is the velocity that the
+    /// note was at when it was released (used for envelope purposes).
     Released { time: usize, vel: f32 },
-    // The note has just be retriggered during a release. Time is in samples
-    // and denotes how many simples it has been since the oscillator has started.
-    // Vel is the velocity that the note was (will go down to zero over 10 samples)
-    // Notes exit this state after 10 samples.
+    /// The note has just be retriggered during a release. Time is in samples
+    /// since the oscillator has retriggered. Vel is the velocity that the
+    /// note was at when it was retriggered (used for envelope purposes).
     Retrigger { time: usize, vel: f32 },
 }
 
+/// The shape of a note. The associated f32 indicates the "warp" of the note.
+/// The warp is a value between 0.0 and 1.0.
 #[derive(Debug, Clone, Copy)]
 pub enum NoteShape {
+    /// A sine wave
     Sine,
+    /// A duty-cycle wave. The note is a square wave when the warp is 0.5.
+    /// The warp for this NoteShape is clamped between 0.001 and 0.999.
     Square(f32),
-    // Sawtooth = 0.0 and 1.0
-    // Triangle = 0.5
+    /// A NoteShape which warps between a sawtooth and triangle wave.
+    /// Sawtooths: 0.0 and 1.0
+    /// Triangle: 0.5
     Skewtooth(f32),
 }
 
 impl NoteShape {
-    // Return the raw waveform using the given angle
+    /// Return the raw waveform using the given angle
     fn get(&self, angle: Angle) -> f32 {
         match self {
             // See https://www.desmos.com/calculator/dqg8kdvung for visuals
             // and https://www.desmos.com/calculator/hs8zd0sfkh for more visuals
             NoteShape::Sine => (angle * TAU).sin(),
             NoteShape::Square(warp) => {
+                // This clamp is used to prevent the note from being completely
+                // silent, which would occur at 0.0 and 1.0.
                 if angle < (*warp).clamp(0.001, 0.999) {
                     -1.0
                 } else {
@@ -221,7 +240,8 @@ impl NoteShape {
             }
             NoteShape::Skewtooth(warp) => {
                 let warp = *warp;
-                // Sawtooths, avoid divide by zero.
+                // Check if the warp makes the note a sawtooth and directly calculate
+                // it. This avoids potential divide by zero issues.
                 // Clippy lint complains about floating point compares but this
                 // is ok to do since 1.0 is exactly representible in floating
                 // point and also warp is always in range [0.0, 1.0].
@@ -232,7 +252,7 @@ impl NoteShape {
                     return 2.0 * angle - 1.0;
                 }
 
-                // Skew Triangles (perfect triangle at 0.5)
+                // Otherwise, compute a triangle/skewed triangle shape.
                 if angle < warp {
                     (2.0 * angle / warp) - 1.0
                 } else {
@@ -244,6 +264,8 @@ impl NoteShape {
 }
 
 impl NoteShape {
+    /// Create a NoteShape using the given shape and warp. This is used for
+    /// RawParameters mainly.
     pub fn from_warp(shape: f32, warp: f32) -> Self {
         if shape < 0.33 {
             NoteShape::Sine
@@ -254,6 +276,8 @@ impl NoteShape {
         }
     }
 
+    /// Add the warp of the given NoteShape with the modulation parameter. This
+    /// is used for note shape modulation.
     pub fn add(&self, modulate: f32) -> Self {
         use NoteShape::*;
         match self {
@@ -293,10 +317,10 @@ impl std::fmt::Display for NoteShape {
     }
 }
 
-// Returns an iterator of size num_samples which linearly interpolates between the
-// points specified by pitch_bend. last_pitch_bend is assumed to be the "-1th"
-// value and is used as the starting point.
-// Thank you to Cassie for this code!
+/// Returns an iterator of size num_samples which linearly interpolates between the
+/// points specified by pitch_bend. last_pitch_bend is assumed to be the "-1th"
+/// value and is used as the starting point.
+/// Thank you to Cassie for this code!
 pub fn to_pitch_envelope(
     pitch_bend: &[(f32, i32)],
     prev_pitch_bend: f32,
@@ -341,6 +365,7 @@ pub fn to_pitch_envelope(
 // rustc doesn't think "U7" is good snake case style, but its also the name of
 // the type, so oh well.
 #[allow(non_snake_case)]
+/// Convert a U7 value into a normalized [0.0, 1.0] float.
 pub fn normalize_U7(num: U7) -> f32 {
     // A U7 in is in range [0, 127]
     let num = U7::data_to_bytes(&[num])[0];
@@ -348,7 +373,8 @@ pub fn normalize_U7(num: U7) -> f32 {
     num as f32 / 127.0
 }
 
-pub fn normalize_pitch_bend(pitch_bend: PitchBend) -> f32 {
+/// Convert a PitchBend U14 value into a normalized [-1.0, 1.0] float
+pub fn normalize_pitch_bend(pitch_bend: PitchBend) -> NormalizedPitchbend {
     // A pitchbend is a U14 in range [0, 0x3FFF] with 0x2000 meaning "no bend",
     // 0x0 meaning "max down bend" and 0x3FFF meaning "max up bend".
     // convert to u16 - range [0, 0x3FFF]
@@ -359,15 +385,16 @@ pub fn normalize_pitch_bend(pitch_bend: PitchBend) -> f32 {
     pitch_bend as f32 * (1.0 / 0x2000 as f32)
 }
 
-// Converts a normalized pitch bend (range [-1.0, 1.0]) to the appropriate pitch
-// multiplier.
-pub fn to_pitch_multiplier(normalized_pitch_bend: f32, semitones: i32) -> f32 {
+/// Convert a NormalizedPitchbend into a pitch multiplier. The multiplier is such
+/// that a `pitch_bend` of +1.0 will bend up by `semitones` semitones and a value
+/// of -1.0 will bend down by `semitones` semitones.
+pub fn to_pitch_multiplier(pitch_bend: NormalizedPitchbend, semitones: i32) -> f32 {
     // Given any note, the note a single semitone away is 2^1/12 times the original note
     // So (2^1/12)^n is n semitones away
     let exponent = 2.0f32.powf(semitones as f32 / 12.0);
     // We take an exponential here because frequency is exponential with respect
     // to note value
-    exponent.powf(normalized_pitch_bend)
+    exponent.powf(pitch_bend)
 }
 
 /// Return the envelope value that the given ADSR would have at `time`.

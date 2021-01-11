@@ -8,19 +8,18 @@ mod ui;
 
 use std::{convert::TryFrom, sync::Arc};
 
-use iced_baseview::Application;
 use params::{
     AmplitudeADSR, ModulationType, OSCParameterType, OSCParams, ParameterType, Parameters,
     RawParameters,
 };
 use sound_gen::{
-    normalize_U7, normalize_pitch_bend, to_pitch_envelope, to_pitch_multiplier, NoteShape,
-    Oscillator, SampleRate, ADSR,
+    normalize_U7, normalize_pitch_bend, to_pitch_envelope, to_pitch_multiplier,
+    NormalizedPitchbend, NoteShape, Oscillator, SampleRate, ADSR,
 };
-
-use log::{info, LevelFilter};
 use ui::UIFrontEnd;
 
+use iced_baseview::Application;
+use log::{info, LevelFilter};
 use vst::{
     api::{Events, Supported},
     buffer::AudioBuffer,
@@ -111,13 +110,22 @@ impl OSCGroup {
     }
 }
 
+/// The main plugin struct.
 struct Revisit {
+    /// All the notes to be played.
     notes: Vec<SoundGenerator>,
+    /// The sample rate in Hz/sec (usually 44,100)
     sample_rate: SampleRate,
+    /// The parameters which are shared with the VST host
     params: Arc<RawParameters>,
-    // (normalized pitchbend value, frame delta)
-    pitch_bend: Vec<(f32, i32)>,
-    last_pitch_bend: f32,
+    /// Pitchbend messages. Format is (value, frame_delta) where
+    /// value is a normalized f32 and frame_delta is the offset into the current
+    /// frame for which the pitchbend value occurs
+    pitch_bend: Vec<(NormalizedPitchbend, i32)>,
+    /// The last pitch bend value from the previous frame.
+    last_pitch_bend: NormalizedPitchbend,
+    /// If true, then the GUI has been initalized and `get_editor()` will return
+    /// None.
     gui_initialized: bool,
 }
 
