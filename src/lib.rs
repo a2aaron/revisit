@@ -34,6 +34,28 @@ struct SoundGenerator {
     note: wmidi::Note,
 }
 
+impl SoundGenerator {
+    fn is_alive(&self, sample_rate: SampleRate, params: &Parameters) -> bool {
+        match params.osc_2_mod {
+            // If we mix together the two sounds then we should only kill the note
+            // after both oscillators have died.
+            ModulationType::Mix => {
+                self.osc_1
+                    .osc
+                    .is_alive(sample_rate, params.osc_1.vol_adsr.release)
+                    || self
+                        .osc_2
+                        .osc
+                        .is_alive(sample_rate, params.osc_2.vol_adsr.release)
+            }
+            _ => self
+                .osc_1
+                .osc
+                .is_alive(sample_rate, params.osc_1.vol_adsr.release),
+        }
+    }
+}
+
 struct OSCGroup {
     osc: Oscillator,
     volume_lfo: Oscillator,
@@ -232,7 +254,6 @@ impl Plugin for Revisit {
     }
 
     fn process_events(&mut self, events: &Events) {
-        let envelope = AmplitudeADSR::from(&self.params.osc_1.vol_adsr);
         let sample_rate = self.sample_rate;
         // remove "dead" notes
         // we do this in process_events _before_ processing any midi messages
@@ -244,8 +265,8 @@ impl Plugin for Revisit {
         // - frame 1 - process removes dead note
         // - frame 1 - user is confused to why note does not play despite holding
         //             down key (the KeyOn event was "eaten" by the dead note!)
-        self.notes
-            .retain(|gen| gen.osc_1.osc.is_alive(sample_rate, envelope.release));
+        let params = Parameters::from(self.params.as_ref());
+        self.notes.retain(|gen| gen.is_alive(sample_rate, &params));
 
         // Clear pitch bend to get new messages
         self.pitch_bend.clear();
