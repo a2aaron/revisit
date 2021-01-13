@@ -18,13 +18,23 @@ pub type NormalizedPitchbend = f32;
 
 #[derive(Debug)]
 pub struct Oscillator {
+    // The base pitch of the oscillator, in Hz
     pitch: f32,
+    // The velocity of the oscillator
     vel: f32,
+    // The current angle of the oscillator. This should be updated every sample
     angle: Angle,
+    // The time, in samples, that this oscillator has run since the last note on
+    // event
     pub time: usize,
+    // The current state of the oscillator (held, released, etc)
     pub note_state: NoteState,
+    // If Some(val), then the previous sample's low pass output was `val`
     low_pass_output: Option<f32>,
+    // If Some(frame_delta, vel), then a note on event occurs at `frame_delta`
+    // with note velocity `vel`
     note_on: Option<(FrameDelta, f32)>,
+    // If Some(frame_delta), then a note off event occurs at `frame_delta`
     note_off: Option<FrameDelta>,
 }
 
@@ -46,14 +56,31 @@ impl Oscillator {
         Oscillator::new(Note::to_freq_f32(note), vel)
     }
 
-    /// Fills dest with the signal of the oscillator
+    /// Return the next sample from the oscillator
+    /// sample_num - which sample within the frame it is. This is used to do
+    ///              proper sub-frame handling of note events.
+    /// sample_rate - the sample rate of the note. This is used to ensure that
+    ///               the pitch of a note stays the same across sample rates
+    /// shape - what noteshape to use for the signal
+    /// vol_env - the raw volume of the ADSR envelope. This is used so that
+    ///           notes properly transition to and from release states (ex: if
+    ///           the volume ADSR was previous at +0.5 volume, the release
+    ///           state should carry the note from +0.5 to 0.0 volume. This
+    ///           value is NOT used for the overal volume modifier. This value is
+    ///           needed because of how it interacts with the note state to allow
+    ///           for continious ADSR.
+    ///             
+    ///           The actual volume multiplier, should be seperated out because
+    ///           the volume multiplier includes more than just the vol ADSR.
+    ///           EX: amplitude LFO, amplitude modulation, etc, but these
+    ///           values should not be included in the note state. Note that
+    ///           the real multiplier is mainly applied in SoundGenerator
     pub fn next_sample(
         &mut self,
         sample_num: usize,
         sample_rate: SampleRate,
         shape: NoteShape,
-        vel_env: f32,
-        vel: f32,
+        vol_env: f32,
         pitch: f32,
         low_pass_alpha: Option<f32>,
     ) -> f32 {
@@ -63,14 +90,18 @@ impl Oscillator {
             _ => self.time += 1,
         }
 
-        // Trigger note on events
+        // Handle note on event. If the note was previously not triggered (aka:
+        // this is the first time the note has been triggered), then the note
+        // transitions to the hold state. If this is a retrigger, then the note
+        // transitions to the retrigger state, with volume `vol`.
+        // Also, we set the note velocity to the appropriate new note velocity.
         match self.note_on {
             Some((note_on, note_on_vel)) if note_on as usize == sample_num => {
                 self.note_state = match self.note_state {
                     NoteState::None => NoteState::Held,
                     _ => NoteState::Retrigger {
                         time: self.time,
-                        vel,
+                        vol: vol_env,
                     },
                 };
                 self.vel = note_on_vel;
@@ -84,7 +115,7 @@ impl Oscillator {
             Some(note_off) if note_off as usize == sample_num => {
                 self.note_state = NoteState::Released {
                     time: self.time,
-                    vel: vel_env,
+                    vol: vol_env,
                 };
                 self.note_off = None;
             }
@@ -95,7 +126,7 @@ impl Oscillator {
         // the held state. This also resets the time.
         if let NoteState::Retrigger {
             time: retrigger_time,
-            vel: _,
+            vol: _,
         } = self.note_state
         {
             if self.time - retrigger_time > RETRIGGER_TIME {
@@ -108,7 +139,7 @@ impl Oscillator {
         let mut value = shape.get(self.angle);
 
         // Apply volume envelope and note velocity
-        value *= vel * self.vel;
+        value *= self.vel;
 
         // The pitch of the note after applying pitch multipliers
         let pitch = self.pitch * pitch;
@@ -166,10 +197,10 @@ impl Oscillator {
     /// it is in the release state and it is after the total release time.
     pub fn is_alive(&self, sample_rate: SampleRate, release: f32) -> bool {
         match self.note_state {
-            NoteState::None | NoteState::Held | NoteState::Retrigger { time: _, vel: _ } => true,
+            NoteState::None | NoteState::Held | NoteState::Retrigger { time: _, vol: _ } => true,
             NoteState::Released {
                 time: release_time,
-                vel: _,
+                vol: _,
             } => (self.time - release_time) as f32 / sample_rate < release,
         }
     }
@@ -198,13 +229,13 @@ pub enum NoteState {
     /// The note is being held down
     Held,
     /// The note has just been released. Time is in seconds and denotes how many
-    /// samples since the oscillator has started. Vel is the velocity that the
+    /// samples since the oscillator has started. Vol is the volume that the
     /// note was at when it was released (used for envelope purposes).
-    Released { time: usize, vel: f32 },
+    Released { time: usize, vol: f32 },
     /// The note has just be retriggered during a release. Time is in samples
-    /// since the oscillator has retriggered. Vel is the velocity that the
+    /// since the oscillator has retriggered. Vol is the volume that the
     /// note was at when it was retriggered (used for envelope purposes).
-    Retrigger { time: usize, vel: f32 },
+    Retrigger { time: usize, vol: f32 },
 }
 
 /// The shape of a note. The associated f32 indicates the "warp" of the note.
@@ -421,18 +452,18 @@ pub fn envelope(
         NoteState::Held => ahds_env(attack, hold, decay, sustain, time as f32 / sample_rate),
         NoteState::Released {
             time: rel_time,
-            vel,
+            vol,
         } => {
             let time = (time - rel_time) as f32 / sample_rate;
-            lerp(vel, 0.0, time / release)
+            lerp(vol, 0.0, time / release)
         }
         NoteState::Retrigger {
             time: retrig_time,
-            vel,
+            vol,
         } => {
             // Forcibly decay over RETRIGGER_TIME.
             let time = (time - retrig_time) as f32 / RETRIGGER_TIME as f32;
-            lerp(vel, 0.0, time)
+            lerp(vol, 0.0, time)
         }
     }
 }

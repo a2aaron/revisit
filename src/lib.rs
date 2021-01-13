@@ -9,8 +9,7 @@ mod ui;
 use std::{convert::TryFrom, sync::Arc};
 
 use params::{
-    AmplitudeADSR, ModulationType, OSCParameterType, OSCParams, ParameterType, Parameters,
-    RawParameters,
+    ModulationType, OSCParameterType, OSCParams, ParameterType, Parameters, RawParameters,
 };
 use sound_gen::{
     normalize_U7, normalize_pitch_bend, to_pitch_envelope, to_pitch_multiplier,
@@ -72,17 +71,29 @@ impl OSCGroup {
         modulation: f32,
         mod_type: ModulationType,
     ) -> f32 {
-        // Compute volume from ADSR and envelope
+        // Compute volume from parameters, ADSR, LFO, and AmpMod
         let vol_env = params
             .vol_adsr
             .get(self.osc.time, self.osc.note_state, sample_rate);
+
         let vol_lfo = self.volume_lfo.next_sample_raw(
             1.0 / params.vol_lfo.period,
             NoteShape::Sine,
             sample_rate,
         ) * params.vol_lfo.amplitude;
 
-        let vol = (vol_env * (1.0 + vol_lfo)).max(0.0);
+        let vol_mod = if mod_type == ModulationType::AmpMod {
+            modulation
+        } else {
+            0.0
+        };
+
+        // Apply parameter, ADSR, LFO, and AmpMod for total volume
+        // We clamp the LFO to positive values because negative values cause the
+        // signal to be inverted, which isn't what we want (instead it should
+        // just have zero volume). We don't do this for the AmpMod because inverting
+        // the signal allows for more interesting audio.
+        let total_volume = params.volume * vol_env * (1.0 + vol_lfo).max(0.0) * (1.0 + vol_mod);
 
         // Compute note pitch multiplier from ADSR and envelope
         let pitch_env = params
@@ -104,13 +115,11 @@ impl OSCGroup {
         };
 
         // The final pitch multiplier, post-FM
+        // Note pitch consists of the applied pitch bend, pitch ADSR, and pitch
+        // LFOs applied to it, with a max range of 12 semis.
+        // Fine and course pitchbend come from the parameters.
+        // And the FM Mod comes from the modulation value.
         let pitch = note_pitch * pitch_coarse * pitch_fine * fm_mod;
-
-        let vol_mod = if mod_type == ModulationType::AmpMod {
-            modulation
-        } else {
-            0.0
-        };
 
         let warp_mod = if mod_type == ModulationType::WarpMod {
             modulation
@@ -124,11 +133,9 @@ impl OSCGroup {
             sample_rate,
             params.shape.add(warp_mod),
             vol_env,
-            vol,
             pitch,
             Some(params.low_pass_alpha),
-        ) * params.volume
-            * (1.0 + vol_mod)
+        ) * total_volume
     }
 }
 
