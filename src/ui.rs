@@ -8,7 +8,7 @@ use raw_window_handle::RawWindowHandle;
 use tokio::sync::Notify;
 use vst::{editor::Editor, host::Host};
 
-use crate::params::{OSCParameterType, OSCType, ParameterType, Parameters, RawOSC, RawParameters};
+use crate::params::{OSCParameterType, OSCType, ParameterType, RawOSC, RawParameters};
 
 // Create a widget (actually a column) that:
 // 1. Uses `$state` as the widget's `$widget::State` struct
@@ -141,7 +141,9 @@ pub struct OSCKnobs {
     pitch_release: knob::State,
     pitch_lfo_amplitude: knob::State,
     pitch_lfo_period: knob::State,
-    low_pass: knob::State,
+    filter_type: knob::State,
+    filter_freq: knob::State,
+    filter_q: knob::State,
 }
 
 impl OSCKnobs {
@@ -167,7 +169,9 @@ impl OSCKnobs {
             pitch_release: make_knob(param_ref, (PitchRelease, osc).into()),
             pitch_lfo_amplitude: make_knob(param_ref, (PitchLFOAmplitude, osc).into()),
             pitch_lfo_period: make_knob(param_ref, (PitchLFOPeriod, osc).into()),
-            low_pass: make_knob(param_ref, (LowPassAlpha, osc).into()),
+            filter_type: make_knob(param_ref, (FilterType, osc).into()),
+            filter_freq: make_knob(param_ref, (FilterFreq, osc).into()),
+            filter_q: make_knob(param_ref, (FilterQ, osc).into()),
         }
     }
 
@@ -193,7 +197,9 @@ impl OSCKnobs {
         self.pitch_lfo_amplitude
             .set(osc.get(PitchLFOAmplitude).into());
         self.pitch_lfo_period.set(osc.get(PitchLFOPeriod).into());
-        self.low_pass.set(osc.get(LowPassAlpha).into());
+        self.filter_type.set(osc.get(FilterType).into());
+        self.filter_freq.set(osc.get(FilterFreq).into());
+        self.filter_q.set(osc.get(FilterQ).into());
     }
 
     fn make_widget<'a>(
@@ -238,7 +244,9 @@ impl OSCKnobs {
             (PitchLFOPeriod, osc).into()
         );
 
-        let low_pass = widget!(Knob, &mut self.low_pass, (LowPassAlpha, osc).into());
+        let filter_type = widget!(Knob, &mut self.filter_type, (FilterType, osc).into());
+        let filter_freq = widget!(Knob, &mut self.filter_freq, (FilterFreq, osc).into());
+        let filter_q = widget!(Knob, &mut self.filter_q, (FilterQ, osc).into());
 
         let osc_pane = make_pane_with_checkbox(
             "OSC",
@@ -267,7 +275,10 @@ impl OSCKnobs {
             ],
         );
 
-        let filter_pane = make_pane("FILTER", vec![(vec![low_pass], "Low Pass")]);
+        let filter_pane = make_pane(
+            "FILTER",
+            vec![(vec![filter_type, filter_freq, filter_q], "")],
+        );
         Column::with_children(vec![osc_pane.into(), pitch_pane.into(), filter_pane.into()])
             .padding(20)
             .spacing(20)
@@ -471,7 +482,9 @@ fn widget_name(param: ParameterType) -> String {
             PitchRelease => "R".to_string(),
             PitchLFOAmplitude => "Amplitude".to_string(),
             PitchLFOPeriod => "Period".to_string(),
-            LowPassAlpha => "Alpha".to_string(),
+            FilterType => "Filter Type".to_string(),
+            FilterFreq => "Freq.".to_string(),
+            FilterQ => "Q".to_string(),
         },
         ParameterType::OSC2Mod => "OSC 2 Mod".to_string(),
     }

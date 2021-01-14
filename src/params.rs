@@ -1,7 +1,7 @@
 use std::{convert::TryFrom, sync::Arc};
 
 use crate::sound_gen::{
-    ease_in_expo, ease_in_poly, envelope, NoteShape, NoteState, SampleRate, ADSR,
+    ease_in_expo, ease_in_poly, envelope, FilterParams, NoteShape, NoteState, SampleRate, ADSR,
 };
 
 use variant_count::VariantCount;
@@ -40,7 +40,7 @@ pub struct OSCParams {
     pub vol_lfo: LFO,
     pub pitch_adsr: PitchADSR,
     pub pitch_lfo: LFO,
-    pub low_pass_alpha: f32,
+    pub filter_params: FilterParams,
 }
 
 impl From<&RawOSC> for OSCParams {
@@ -62,7 +62,11 @@ impl From<&RawOSC> for OSCParams {
                 amplitude: ease_in_expo(params.pitch_lfo.amount.get()) * 0.1,
                 period: (ease_in_expo(params.pitch_lfo.period.get()) * 10.0).max(0.001),
             },
-            low_pass_alpha: ease_in_poly(params.low_pass_alpha.get(), 4).clamp(0.0, 1.0),
+            filter_params: FilterParams {
+                filter: to_filter_type(params.filter_type.get()),
+                q_value: params.filter_q.get().max(0.01) * 10.0,
+                freq: ease_in_poly(params.filter_freq.get(), 4).clamp(0.0, 1.0) * 22100.0,
+            },
         }
     }
 }
@@ -206,7 +210,9 @@ impl RawParameters {
             OSC1(PitchRelease) => &self.osc_1.pitch_adsr.release,
             OSC1(PitchLFOAmplitude) => &self.osc_1.pitch_lfo.amount,
             OSC1(PitchLFOPeriod) => &self.osc_1.pitch_lfo.period,
-            OSC1(LowPassAlpha) => &self.osc_1.low_pass_alpha,
+            OSC1(FilterType) => &self.osc_1.filter_type,
+            OSC1(FilterFreq) => &self.osc_1.filter_freq,
+            OSC1(FilterQ) => &self.osc_1.filter_q,
             OSC2Mod => &self.osc_2_mod,
             OSC2(Volume) => &self.osc_2.volume,
             OSC2(Shape) => &self.osc_2.shape,
@@ -227,7 +233,9 @@ impl RawParameters {
             OSC2(PitchRelease) => &self.osc_2.pitch_adsr.release,
             OSC2(PitchLFOAmplitude) => &self.osc_2.pitch_lfo.amount,
             OSC2(PitchLFOPeriod) => &self.osc_2.pitch_lfo.period,
-            OSC2(LowPassAlpha) => &self.osc_2.low_pass_alpha,
+            OSC2(FilterType) => &self.osc_2.filter_type,
+            OSC2(FilterFreq) => &self.osc_2.filter_freq,
+            OSC2(FilterQ) => &self.osc_2.filter_q,
         }
     }
 
@@ -255,7 +263,9 @@ impl RawParameters {
             OSC1(PitchRelease) => 1.0 / 10000.0,
             OSC1(PitchLFOAmplitude) => 0.0,
             OSC1(PitchLFOPeriod) => 0.5,
-            OSC1(LowPassAlpha) => 1.0,
+            OSC1(FilterType) => 0.0,
+            OSC1(FilterFreq) => 0.99,
+            OSC1(FilterQ) => 0.5,
             OSC2Mod => 0.0, // Off
             OSC2(Volume) => 0.5,
             OSC2(Shape) => 0.0, // Sine
@@ -276,7 +286,9 @@ impl RawParameters {
             OSC2(PitchRelease) => 1.0 / 10000.0,
             OSC2(PitchLFOAmplitude) => 0.0,
             OSC2(PitchLFOPeriod) => 0.5,
-            OSC2(LowPassAlpha) => 1.0,
+            OSC2(FilterType) => 0.0,
+            OSC2(FilterFreq) => 0.99,
+            OSC2(FilterQ) => 0.5,
         }
     }
 
@@ -321,9 +333,11 @@ impl PluginParameters for RawParameters {
                     VolSustain | PitchMultiply => "%".to_string(),
                     VolLFOAmplitude | PitchLFOAmplitude => "%".to_string(),
                     VolLFOPeriod | PitchLFOPeriod => " sec".to_string(),
-                    LowPassAlpha => "".to_string(),
                     CoarseTune => " semis".to_string(),
                     FineTune => " cents".to_string(),
+                    FilterType => "".to_string(),
+                    FilterFreq => " Hz".to_string(),
+                    FilterQ => "".to_string(),
                 },
                 ParameterType::OSC2Mod => "".to_string(),
             }
@@ -364,7 +378,9 @@ impl PluginParameters for RawParameters {
                         PitchRelease => format!("{:.2}", osc.pitch_adsr.release),
                         PitchLFOAmplitude => format!("{:.2}", osc.pitch_lfo.amplitude * 100.0),
                         PitchLFOPeriod => format!("{:.2}", osc.pitch_lfo.period),
-                        LowPassAlpha => format!("{:.2}", osc.low_pass_alpha),
+                        FilterType => to_string(osc.filter_params.filter),
+                        FilterFreq => format!("{:.2}", osc.filter_params.freq),
+                        FilterQ => format!("{:.2}", osc.filter_params.q_value),
                     }
                 }
                 ParameterType::OSC2Mod => format!("{}", params.osc_2_mod),
@@ -434,7 +450,9 @@ pub struct RawOSC {
     pub vol_lfo: RawLFO,
     pub pitch_adsr: RawEnvelope,
     pub pitch_lfo: RawLFO,
-    pub low_pass_alpha: AtomicFloat,
+    pub filter_type: AtomicFloat,
+    pub filter_freq: AtomicFloat,
+    pub filter_q: AtomicFloat,
 }
 
 impl RawOSC {
@@ -460,7 +478,9 @@ impl RawOSC {
             PitchRelease => self.pitch_adsr.release.get(),
             PitchLFOAmplitude => self.pitch_lfo.amount.get(),
             PitchLFOPeriod => self.pitch_lfo.period.get(),
-            LowPassAlpha => self.low_pass_alpha.get(),
+            FilterType => self.filter_type.get(),
+            FilterFreq => self.filter_freq.get(),
+            FilterQ => self.filter_q.get(),
         }
     }
 
@@ -492,7 +512,9 @@ impl RawOSC {
             PitchRelease => 1.0 / 10000.0,
             PitchLFOAmplitude => 0.0,
             PitchLFOPeriod => 0.5,
-            LowPassAlpha => 1.0,
+            FilterType => 0.0, // Low Pass
+            FilterFreq => 1.0,
+            FilterQ => 0.5,
         }
     }
 
@@ -526,7 +548,9 @@ impl RawOSC {
                 period: RawOSC::get_default(PitchLFOPeriod, osc).into(),
                 amount: RawOSC::get_default(PitchLFOAmplitude, osc).into(),
             },
-            low_pass_alpha: RawOSC::get_default(LowPassAlpha, osc).into(),
+            filter_type: RawOSC::get_default(FilterType, osc).into(),
+            filter_freq: RawOSC::get_default(FilterFreq, osc).into(),
+            filter_q: RawOSC::get_default(FilterQ, osc).into(),
         }
     }
 }
@@ -566,7 +590,9 @@ pub enum OSCParameterType {
     PitchRelease,
     PitchLFOAmplitude,
     PitchLFOPeriod,
-    LowPassAlpha,
+    FilterType,
+    FilterFreq,
+    FilterQ,
 }
 
 impl std::fmt::Display for OSCParameterType {
@@ -592,7 +618,9 @@ impl std::fmt::Display for OSCParameterType {
             PitchRelease => write!(f, "Release (Pitch)"),
             PitchLFOAmplitude => write!(f, "LFO Amplitude (Pitch)"),
             PitchLFOPeriod => write!(f, "LFO Period (Pitch)"),
-            LowPassAlpha => write!(f, "Low Pass Alpha"),
+            FilterType => write!(f, "Filter Type"),
+            FilterFreq => write!(f, "Filter Frequency"),
+            FilterQ => write!(f, "Q-Factor"),
         }
     }
 }
@@ -678,28 +706,32 @@ impl TryFrom<i32> for ParameterType {
             17 => Ok(OSC1(PitchRelease)),
             18 => Ok(OSC1(PitchLFOAmplitude)),
             19 => Ok(OSC1(PitchLFOPeriod)),
-            20 => Ok(OSC1(LowPassAlpha)),
-            21 => Ok(OSC2Mod),
-            22 => Ok(OSC2(Volume)),
-            23 => Ok(OSC2(Shape)),
-            24 => Ok(OSC2(Warp)),
-            25 => Ok(OSC2(FineTune)),
-            26 => Ok(OSC2(CoarseTune)),
-            27 => Ok(OSC2(VolAttack)),
-            28 => Ok(OSC2(VolHold)),
-            29 => Ok(OSC2(VolDecay)),
-            30 => Ok(OSC2(VolSustain)),
-            31 => Ok(OSC2(VolRelease)),
-            32 => Ok(OSC2(VolLFOAmplitude)),
-            33 => Ok(OSC2(VolLFOPeriod)),
-            34 => Ok(OSC2(PitchAttack)),
-            35 => Ok(OSC2(PitchHold)),
-            36 => Ok(OSC2(PitchDecay)),
-            37 => Ok(OSC2(PitchMultiply)),
-            38 => Ok(OSC2(PitchRelease)),
-            39 => Ok(OSC2(PitchLFOAmplitude)),
-            40 => Ok(OSC2(PitchLFOPeriod)),
-            41 => Ok(OSC2(LowPassAlpha)),
+            20 => Ok(OSC1(FilterType)),
+            21 => Ok(OSC1(FilterFreq)),
+            22 => Ok(OSC1(FilterQ)),
+            23 => Ok(OSC2Mod),
+            24 => Ok(OSC2(Volume)),
+            25 => Ok(OSC2(Shape)),
+            26 => Ok(OSC2(Warp)),
+            27 => Ok(OSC2(FineTune)),
+            28 => Ok(OSC2(CoarseTune)),
+            29 => Ok(OSC2(VolAttack)),
+            30 => Ok(OSC2(VolHold)),
+            31 => Ok(OSC2(VolDecay)),
+            32 => Ok(OSC2(VolSustain)),
+            33 => Ok(OSC2(VolRelease)),
+            34 => Ok(OSC2(VolLFOAmplitude)),
+            35 => Ok(OSC2(VolLFOPeriod)),
+            36 => Ok(OSC2(PitchAttack)),
+            37 => Ok(OSC2(PitchHold)),
+            38 => Ok(OSC2(PitchDecay)),
+            39 => Ok(OSC2(PitchMultiply)),
+            40 => Ok(OSC2(PitchRelease)),
+            41 => Ok(OSC2(PitchLFOAmplitude)),
+            42 => Ok(OSC2(PitchLFOPeriod)),
+            43 => Ok(OSC2(FilterType)),
+            44 => Ok(OSC2(FilterFreq)),
+            45 => Ok(OSC2(FilterQ)),
             _ => Err(()),
         }
     }
@@ -711,5 +743,27 @@ impl From<(OSCParameterType, OSCType)> for ParameterType {
             OSCType::OSC1 => ParameterType::OSC1(param),
             OSCType::OSC2 => ParameterType::OSC2(param),
         }
+    }
+}
+
+fn to_filter_type(x: f32) -> biquad::Type {
+    if x < 0.25 {
+        biquad::Type::LowPass
+    } else if x < 0.50 {
+        biquad::Type::HighPass
+    } else if x < 0.75 {
+        biquad::Type::BandPass
+    } else {
+        biquad::Type::Notch
+    }
+}
+
+fn to_string(x: biquad::Type) -> String {
+    match x {
+        biquad::Type::SinglePoleLowPass => "Single Pole Low Pass".to_string(),
+        biquad::Type::LowPass => "Low Pass".to_string(),
+        biquad::Type::HighPass => "High Pass".to_string(),
+        biquad::Type::BandPass => "Band Pass".to_string(),
+        biquad::Type::Notch => "Notch Filter".to_string(),
     }
 }

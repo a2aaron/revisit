@@ -1,6 +1,4 @@
-use std::convert::TryInto;
-
-use biquad::{Biquad, DirectForm1, ToHertz, Q_BUTTERWORTH_F32, Q_BUTTERWORTH_F64};
+use biquad::{Biquad, DirectForm1, ToHertz, Q_BUTTERWORTH_F32};
 use wmidi::{Note, PitchBend, U14, U7};
 
 use crate::neighbor_pairs::NeighborPairsIter;
@@ -86,6 +84,10 @@ impl Oscillator {
     ///           EX: amplitude LFO, amplitude modulation, etc, but these
     ///           values should not be included in the note state. Note that
     ///           the real multiplier is mainly applied in SoundGenerator
+    /// pitch - the pitch multiplier to be applied to the base frequency of the
+    ///         oscillator. This is a unitless value.
+    /// filter_info - the filter parameters for the filter to be used. If this
+    ///               is None, the filter is bypassed.
     pub fn next_sample(
         &mut self,
         sample_num: usize,
@@ -93,7 +95,7 @@ impl Oscillator {
         shape: NoteShape,
         vol_env: f32,
         pitch: f32,
-        low_pass_alpha: Option<f32>,
+        filter_params: Option<FilterParams>,
     ) -> f32 {
         // Only advance time if the note is being held down!
         match self.note_state {
@@ -163,20 +165,9 @@ impl Oscillator {
         self.angle = (self.angle + angle_delta) % 1.0;
 
         // Apply low pass filter if it exists
-        let value = match low_pass_alpha {
-            Some(alpha) => {
-                let coefficents = biquad::Coefficients::<f32>::from_params(
-                    biquad::Type::LowPass,
-                    sample_rate.hz(),
-                    (alpha * sample_rate / 2.0)
-                        // avoid numerical instability encountered at very low
-                        // or high frequencies. Clamping at around 20 Hz also
-                        // avoids blowing out the speakers
-                        .clamp(20.0, sample_rate * 0.99 / 2.0)
-                        .hz(),
-                    Q_BUTTERWORTH_F32,
-                )
-                .unwrap();
+        let value = match filter_params {
+            Some(params) => {
+                let coefficents = FilterParams::into_coefficients(params, sample_rate);
                 self.filter.update_coefficients(coefficents);
                 let output = self.filter.run(value);
                 if !output.is_finite() {
@@ -244,88 +235,27 @@ impl Oscillator {
 }
 
 #[derive(Debug, Clone, Copy)]
-struct BadLowPassFilter {
-    prev: Option<f32>,
+pub struct FilterParams {
+    pub filter: biquad::Type,
+    /// in Hz. This value is clamped between 20 and 99% of the Nyquist frequency
+    /// in order to prevent numerical instability at extremely high or low values
+    pub freq: f32,
+    /// Must be non-negative. If it is negative, it will be clamped to zero
+    pub q_value: f32,
 }
 
-impl BadLowPassFilter {
-    fn new() -> BadLowPassFilter {
-        BadLowPassFilter { prev: None }
-    }
-
-    fn next(&mut self, input: f32, alpha: f32) -> f32 {
-        let output = match self.prev {
-            Some(prev) => prev + alpha * (input - prev),
-            None => input,
-        };
-
-        // If output would be NaN or Infinity, instead just output zero
-        // This hopefully also resets the filter if it's broken and avoids
-        // destroying one's ear drums
-        let output = if output.is_finite() { output } else { 0.0 };
-
-        self.prev = Some(output);
-        output
-    }
-}
-#[derive(Debug, Clone, Copy)]
-struct ButterworthFilter {
-    state0: f32,
-    state1: f32,
-    state2: f32,
-    state3: f32,
-}
-
-impl ButterworthFilter {
-    fn new() -> ButterworthFilter {
-        ButterworthFilter {
-            state0: 0.0,
-            state1: 0.0,
-            state2: 0.0,
-            state3: 0.0,
-        }
-    }
-
-    fn next(&mut self, input: f32, freq: f32, Q: f32, sample_rate: SampleRate) -> f32 {
-        // Implementation from https://www.musicdsp.org/en/latest/Synthesis/227-butterworth.html
-
-        // Prewarped digital frequency
-        let K = (std::f32::consts::PI * freq / sample_rate).tan();
-
-        // Now calc some intermediate variables: (see 'Factors of Polynoms' at
-        // http://en.wikipedia.org/wiki/Butterworth_filter, especially if you
-        // want a higher order like 48dB/Oct)
-        let a = 0.76536686473 * Q * K;
-        let b = 1.84775906502 * Q * K;
-
-        let K = K * K; // simplify notation a bit
-
-        // Calculate the first biquad
-        let A0 = K + a + 1.0;
-        let A1 = 2.0 * (1.0 - K);
-        let A2 = a - K - 1.0;
-        let B0 = K;
-        let B1 = 2.0 * B0;
-        let B2 = B0;
-
-        // Calculate the second biquad
-        let A3 = K + b + 1.0;
-        let A4 = 2.0 * (1.0 - K);
-        let A5 = b - K - 1.0;
-        let B3 = K;
-        let B4 = 2.0 * B3;
-        let B5 = B3;
-
-        // Calculate output
-        let stage1 = B0 * input + self.state0;
-        self.state0 = B1 * input + A1 / A0 * stage1 + self.state1;
-        self.state1 = B2 * input + A2 / A0 * stage1;
-
-        let output = B3 * stage1 + self.state2;
-        self.state2 = B4 * stage1 + A4 / A3 * output + self.state3;
-        self.state3 = B5 * stage1 + A5 / A3 * output;
-
-        output
+impl FilterParams {
+    fn into_coefficients(
+        params: FilterParams,
+        sample_rate: SampleRate,
+    ) -> biquad::Coefficients<f32> {
+        // avoid numerical instability encountered at very low
+        // or high frequencies. Clamping at around 20 Hz also
+        // avoids blowing out the speakers.
+        let freq = params.freq.clamp(20.0, sample_rate * 0.99 / 2.0).hz();
+        let q_value = params.q_value.max(0.0);
+        biquad::Coefficients::<f32>::from_params(params.filter, sample_rate.hz(), freq, q_value)
+            .unwrap()
     }
 }
 

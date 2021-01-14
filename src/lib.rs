@@ -70,6 +70,7 @@ impl OSCGroup {
         pitch_bend: f32,
         modulation: f32,
         mod_type: ModulationType,
+        apply_filter: bool,
     ) -> f32 {
         // Compute volume from parameters, ADSR, LFO, and AmpMod
         let vol_env = params
@@ -127,6 +128,15 @@ impl OSCGroup {
             0.0
         };
 
+        // Disable the filter when doing modulation (filtering the signal makes
+        // it nearly impossible to get a nice modulation signal since it messes
+        // with the phase a lot)
+        let filter_params = if apply_filter {
+            Some(params.filter_params)
+        } else {
+            None
+        };
+
         // Get next sample
         self.osc.next_sample(
             i,
@@ -134,7 +144,7 @@ impl OSCGroup {
             params.shape.add(warp_mod),
             vol_env,
             pitch,
-            Some(params.low_pass_alpha),
+            filter_params,
         ) * total_volume
     }
 }
@@ -233,6 +243,7 @@ impl Plugin for Revisit {
                     pitch_bends[i],
                     0.0,
                     ModulationType::Mix,
+                    params.osc_2_mod == ModulationType::Mix,
                 );
 
                 let osc_1 = osc_1.next_sample(
@@ -242,6 +253,7 @@ impl Plugin for Revisit {
                     pitch_bends[i],
                     osc_2,
                     params.osc_2_mod,
+                    true,
                 );
 
                 if params.osc_2_mod == ModulationType::Mix {
