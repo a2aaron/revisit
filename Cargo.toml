@@ -13,6 +13,10 @@ rand = "0.7.3"
 log = "0.4.11"
 simple-logging = "2.0.2"
 variant_count = "1.0.0"
+
+# for audio filtering
+biquad = "0.3.1"
+
 # for GUI
 iced = { version = "0.2", features = ["image"] }
 iced_audio = { git = "https://github.com/a2aaron/iced_audio", branch = "main" }

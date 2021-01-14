@@ -226,6 +226,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "biquad"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "15345c5283a175d5923fa1452cf3f2cb929370c940529adfd804fb9859cee14f"
+dependencies = [
+ "libm",
+]
+
+[[package]]
 name = "bit-set"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1582,6 +1591,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "libm"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7fc7aa29613bd6a620df431842069224d8bc9011086b1db4c0e0cd47fa03ec9a"
+
+[[package]]
 name = "linked-hash-map"
 version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2315,6 +2330,7 @@ name = "revist"
 version = "0.1.0"
 dependencies = [
  "baseview",
+ "biquad",
  "iced",
  "iced_audio",
  "iced_baseview",

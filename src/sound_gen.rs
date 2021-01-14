@@ -1,3 +1,6 @@
+use std::convert::TryInto;
+
+use biquad::{Biquad, DirectForm1, ToHertz, Q_BUTTERWORTH_F32, Q_BUTTERWORTH_F64};
 use wmidi::{Note, PitchBend, U14, U7};
 
 use crate::neighbor_pairs::NeighborPairsIter;
@@ -30,7 +33,7 @@ pub struct Oscillator {
     // The current state of the oscillator (held, released, etc)
     pub note_state: NoteState,
     // The per-sample filter applied to the output
-    filter: BadLowPassFilter,
+    filter: DirectForm1<f32>,
     // If Some(frame_delta, vel), then a note on event occurs at `frame_delta`
     // with note velocity `vel`
     note_on: Option<(FrameDelta, f32)>,
@@ -39,21 +42,29 @@ pub struct Oscillator {
 }
 
 impl Oscillator {
-    pub fn new(pitch: f32, vel: f32) -> Oscillator {
+    pub fn new(pitch: f32, vel: f32, sample_rate: SampleRate) -> Oscillator {
         Oscillator {
             pitch,
             vel,
             angle: 0.0,
             time: 0,
             note_state: NoteState::None,
-            filter: BadLowPassFilter::new(),
+            filter: DirectForm1::<f32>::new(
+                biquad::Coefficients::<f32>::from_params(
+                    biquad::Type::LowPass,
+                    sample_rate.hz(),
+                    (10000).hz(),
+                    Q_BUTTERWORTH_F32,
+                )
+                .unwrap(),
+            ),
             note_on: None,
             note_off: None,
         }
     }
 
-    pub fn new_from_note(note: Note, vel: f32) -> Oscillator {
-        Oscillator::new(Note::to_freq_f32(note), vel)
+    pub fn new_from_note(note: Note, vel: f32, sample_rate: SampleRate) -> Oscillator {
+        Oscillator::new(Note::to_freq_f32(note), vel, sample_rate)
     }
 
     /// Return the next sample from the oscillator
@@ -153,7 +164,32 @@ impl Oscillator {
 
         // Apply low pass filter if it exists
         let value = match low_pass_alpha {
-            Some(alpha) => self.filter.next(value, alpha),
+            Some(alpha) => {
+                let coefficents = biquad::Coefficients::<f32>::from_params(
+                    biquad::Type::LowPass,
+                    sample_rate.hz(),
+                    (alpha * sample_rate / 2.0)
+                        // avoid numerical instability encountered at very low
+                        // or high frequencies. Clamping at around 20 Hz also
+                        // avoids blowing out the speakers
+                        .clamp(20.0, sample_rate * 0.99 / 2.0)
+                        .hz(),
+                    Q_BUTTERWORTH_F32,
+                )
+                .unwrap();
+                self.filter.update_coefficients(coefficents);
+                let output = self.filter.run(value);
+                if !output.is_finite() {
+                    // If the output happens to be NaN or Infinity, output the
+                    // original  signal instead. Hopefully, this will "reset"
+                    // the filter on the next sample, instead of being filled
+                    // with garbage values.
+                    value
+                } else {
+                    output
+                }
+            }
+            // Some(alpha) => self.filter.next(value, alpha),
             // Butterworth(?) filter
             // Some(alpha) => self.filter.next(
             //     value,

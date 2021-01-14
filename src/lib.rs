@@ -293,14 +293,22 @@ impl Plugin for Revisit {
                                 } else {
                                     self.notes.push(SoundGenerator {
                                         osc_1: OSCGroup {
-                                            osc: Oscillator::new_from_note(note, vel),
-                                            volume_lfo: Oscillator::new(1.0, 1.0),
-                                            pitch_lfo: Oscillator::new(1.0, 1.0),
+                                            osc: Oscillator::new_from_note(
+                                                note,
+                                                vel,
+                                                self.sample_rate,
+                                            ),
+                                            volume_lfo: Oscillator::new(1.0, 1.0, self.sample_rate),
+                                            pitch_lfo: Oscillator::new(1.0, 1.0, self.sample_rate),
                                         },
                                         osc_2: OSCGroup {
-                                            osc: Oscillator::new_from_note(note, vel),
-                                            volume_lfo: Oscillator::new(1.0, 1.0),
-                                            pitch_lfo: Oscillator::new(1.0, 1.0),
+                                            osc: Oscillator::new_from_note(
+                                                note,
+                                                vel,
+                                                self.sample_rate,
+                                            ),
+                                            volume_lfo: Oscillator::new(1.0, 1.0, self.sample_rate),
+                                            pitch_lfo: Oscillator::new(1.0, 1.0, self.sample_rate),
                                         },
 
                                         note,
