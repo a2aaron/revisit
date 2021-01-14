@@ -29,8 +29,8 @@ pub struct Oscillator {
     pub time: usize,
     // The current state of the oscillator (held, released, etc)
     pub note_state: NoteState,
-    // If Some(val), then the previous sample's low pass output was `val`
-    low_pass_output: Option<f32>,
+    // The per-sample filter applied to the output
+    filter: BadLowPassFilter,
     // If Some(frame_delta, vel), then a note on event occurs at `frame_delta`
     // with note velocity `vel`
     note_on: Option<(FrameDelta, f32)>,
@@ -46,7 +46,7 @@ impl Oscillator {
             angle: 0.0,
             time: 0,
             note_state: NoteState::None,
-            low_pass_output: None,
+            filter: BadLowPassFilter::new(),
             note_on: None,
             note_off: None,
         }
@@ -151,17 +151,18 @@ impl Oscillator {
         let angle_delta = pitch / sample_rate;
         self.angle = (self.angle + angle_delta) % 1.0;
 
-        // Apply low pass filter
-        if let Some(alpha) = low_pass_alpha {
-            // If there is a prior low pass output (ie: this is the second sample)
-            if let Some(low) = self.low_pass_output {
-                // If low is NaN or Infinity, reset it.
-                let low = if low.is_finite() { low } else { value };
-                value = low + alpha * (value - low);
-            }
-
-            self.low_pass_output = Some(value);
-        }
+        // Apply low pass filter if it exists
+        let value = match low_pass_alpha {
+            Some(alpha) => self.filter.next(value, alpha),
+            // Butterworth(?) filter
+            // Some(alpha) => self.filter.next(
+            //     value,
+            //     alpha * 41000.0 / 4.0,
+            //     1.0 / 2.0f32.sqrt(),
+            //     sample_rate,
+            // ),
+            None => value,
+        };
 
         value
     }
@@ -203,6 +204,92 @@ impl Oscillator {
                 vol: _,
             } => (self.time - release_time) as f32 / sample_rate < release,
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct BadLowPassFilter {
+    prev: Option<f32>,
+}
+
+impl BadLowPassFilter {
+    fn new() -> BadLowPassFilter {
+        BadLowPassFilter { prev: None }
+    }
+
+    fn next(&mut self, input: f32, alpha: f32) -> f32 {
+        let output = match self.prev {
+            Some(prev) => prev + alpha * (input - prev),
+            None => input,
+        };
+
+        // If output would be NaN or Infinity, instead just output zero
+        // This hopefully also resets the filter if it's broken and avoids
+        // destroying one's ear drums
+        let output = if output.is_finite() { output } else { 0.0 };
+
+        self.prev = Some(output);
+        output
+    }
+}
+#[derive(Debug, Clone, Copy)]
+struct ButterworthFilter {
+    state0: f32,
+    state1: f32,
+    state2: f32,
+    state3: f32,
+}
+
+impl ButterworthFilter {
+    fn new() -> ButterworthFilter {
+        ButterworthFilter {
+            state0: 0.0,
+            state1: 0.0,
+            state2: 0.0,
+            state3: 0.0,
+        }
+    }
+
+    fn next(&mut self, input: f32, freq: f32, Q: f32, sample_rate: SampleRate) -> f32 {
+        // Implementation from https://www.musicdsp.org/en/latest/Synthesis/227-butterworth.html
+
+        // Prewarped digital frequency
+        let K = (std::f32::consts::PI * freq / sample_rate).tan();
+
+        // Now calc some intermediate variables: (see 'Factors of Polynoms' at
+        // http://en.wikipedia.org/wiki/Butterworth_filter, especially if you
+        // want a higher order like 48dB/Oct)
+        let a = 0.76536686473 * Q * K;
+        let b = 1.84775906502 * Q * K;
+
+        let K = K * K; // simplify notation a bit
+
+        // Calculate the first biquad
+        let A0 = K + a + 1.0;
+        let A1 = 2.0 * (1.0 - K);
+        let A2 = a - K - 1.0;
+        let B0 = K;
+        let B1 = 2.0 * B0;
+        let B2 = B0;
+
+        // Calculate the second biquad
+        let A3 = K + b + 1.0;
+        let A4 = 2.0 * (1.0 - K);
+        let A5 = b - K - 1.0;
+        let B3 = K;
+        let B4 = 2.0 * B3;
+        let B5 = B3;
+
+        // Calculate output
+        let stage1 = B0 * input + self.state0;
+        self.state0 = B1 * input + A1 / A0 * stage1 + self.state1;
+        self.state1 = B2 * input + A2 / A0 * stage1;
+
+        let output = B3 * stage1 + self.state2;
+        self.state2 = B4 * stage1 + A4 / A3 * output + self.state3;
+        self.state3 = B5 * stage1 + A5 / A3 * output;
+
+        output
     }
 }
 
@@ -251,6 +338,8 @@ pub enum NoteShape {
     /// Sawtooths: 0.0 and 1.0
     /// Triangle: 0.5
     Skewtooth(f32),
+    /// White noise
+    Noise,
 }
 
 impl NoteShape {
@@ -290,6 +379,7 @@ impl NoteShape {
                     -(2.0 * (angle - warp)) / (1.0 - warp) + 1.0
                 }
             }
+            NoteShape::Noise => rand::Rng::gen_range(&mut rand::thread_rng(), -1.0, 1.0),
         }
     }
 }
@@ -298,12 +388,14 @@ impl NoteShape {
     /// Create a NoteShape using the given shape and warp. This is used for
     /// RawParameters mainly.
     pub fn from_warp(shape: f32, warp: f32) -> Self {
-        if shape < 0.33 {
+        if shape < 0.25 {
             NoteShape::Sine
-        } else if shape < 0.66 {
+        } else if shape < 0.5 {
             NoteShape::Skewtooth(warp)
-        } else {
+        } else if shape < 0.75 {
             NoteShape::Square(warp)
+        } else {
+            NoteShape::Noise
         }
     }
 
@@ -315,6 +407,7 @@ impl NoteShape {
             Sine => Sine,
             Square(warp) => Square((warp + modulate).clamp(0.0, 1.0)),
             Skewtooth(warp) => Skewtooth((warp + modulate).clamp(0.0, 1.0)),
+            Noise => Noise,
         }
     }
 }
@@ -342,6 +435,7 @@ impl std::fmt::Display for NoteShape {
                     "Skewed Triangle"
                 }
             }
+            Noise => "White Noise",
         };
 
         write!(f, "{}", string)
