@@ -15,7 +15,7 @@ simple-logging = "2.0.2"
 variant_count = "1.0.0"
 
 # for audio filtering
-biquad = "0.3.1"
+biquad = { path = "https://github.com/a2aaron/biquad-rs", branch = "master" }
 
 # for GUI
 iced = { version = "0.2", features = ["image"] }

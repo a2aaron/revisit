@@ -228,8 +228,6 @@ dependencies = [
 [[package]]
 name = "biquad"
 version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "15345c5283a175d5923fa1452cf3f2cb929370c940529adfd804fb9859cee14f"
 dependencies = [
  "libm",
 ]

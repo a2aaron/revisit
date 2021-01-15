@@ -485,6 +485,7 @@ fn widget_name(param: ParameterType) -> String {
             FilterType => "Filter Type".to_string(),
             FilterFreq => "Freq.".to_string(),
             FilterQ => "Q".to_string(),
+            FilterGain => "Gain".to_string(),
         },
         ParameterType::OSC2Mod => "OSC 2 Mod".to_string(),
     }
