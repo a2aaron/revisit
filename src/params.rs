@@ -345,7 +345,9 @@ impl PluginParameters for RawParameters {
                         FilterFreq => format!("{:.2}", osc.filter_params.freq),
                         FilterQ => format!("{:.2}", osc.filter_params.q_value),
                         FilterGain => match osc.filter_params.filter {
-                            biquad::Type::LowShelf(db_gain) => format!("{:.2}", db_gain),
+                            biquad::Type::LowShelf(db_gain)
+                            | biquad::Type::HighShelf(db_gain)
+                            | biquad::Type::PeakingEQ(db_gain) => format!("{:.2}", db_gain),
                             _ => "N/A".to_string(),
                         },
                     }
@@ -722,16 +724,16 @@ impl From<(OSCParameterType, OSCType)> for ParameterType {
 }
 
 fn to_filter_type(x: f32, db_gain: f32) -> biquad::Type {
-    if x < 1.0 / 5.0 {
-        biquad::Type::LowPass
-    } else if x < 2.0 / 5.0 {
-        biquad::Type::LowShelf(db_gain)
-    } else if x < 3.0 / 5.0 {
-        biquad::Type::HighPass
-    } else if x < 4.0 / 5.0 {
-        biquad::Type::BandPass
-    } else {
-        biquad::Type::Notch
+    let x = (x * 8.0) as i32;
+    match x {
+        0 => biquad::Type::LowShelf(db_gain),
+        1 => biquad::Type::HighShelf(db_gain),
+        2 => biquad::Type::PeakingEQ(db_gain),
+        3 => biquad::Type::Notch,
+        4 => biquad::Type::LowPass,
+        5 => biquad::Type::HighPass,
+        6 => biquad::Type::BandPass,
+        _ => biquad::Type::AllPass,
     }
 }
 
@@ -741,7 +743,10 @@ fn to_string(x: biquad::Type) -> String {
         biquad::Type::LowPass => "Low Pass".to_string(),
         biquad::Type::HighPass => "High Pass".to_string(),
         biquad::Type::BandPass => "Band Pass".to_string(),
+        biquad::Type::AllPass => "All Pass".to_string(),
         biquad::Type::Notch => "Notch Filter".to_string(),
         biquad::Type::LowShelf(_) => "Low Shelf".to_string(),
+        biquad::Type::HighShelf(_) => "High Shelf".to_string(),
+        biquad::Type::PeakingEQ(_) => "Peaking EQ".to_string(),
     }
 }

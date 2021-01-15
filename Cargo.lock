@@ -228,6 +228,7 @@ dependencies = [
 [[package]]
 name = "biquad"
 version = "0.3.1"
+source = "git+https://github.com/a2aaron/biquad-rs?branch=master#bdd410ffe0956de7e0920ee928d2da480408b7df"
 dependencies = [
  "libm",
 ]

@@ -165,33 +165,23 @@ impl Oscillator {
         self.angle = (self.angle + angle_delta) % 1.0;
 
         // Apply low pass filter if it exists
-        let value = match filter_params {
+        match filter_params {
             Some(params) => {
                 let coefficents = FilterParams::into_coefficients(params, sample_rate);
                 self.filter.update_coefficients(coefficents);
                 let output = self.filter.run(value);
-                if !output.is_finite() {
+                if output.is_finite() {
+                    output
+                } else {
                     // If the output happens to be NaN or Infinity, output the
                     // original  signal instead. Hopefully, this will "reset"
                     // the filter on the next sample, instead of being filled
                     // with garbage values.
                     value
-                } else {
-                    output
                 }
             }
-            // Some(alpha) => self.filter.next(value, alpha),
-            // Butterworth(?) filter
-            // Some(alpha) => self.filter.next(
-            //     value,
-            //     alpha * 41000.0 / 4.0,
-            //     1.0 / 2.0f32.sqrt(),
-            //     sample_rate,
-            // ),
             None => value,
-        };
-
-        value
+        }
     }
 
     // Return the next sample from the oscillator, but without applying any
