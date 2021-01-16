@@ -107,7 +107,8 @@ impl OSCGroup {
         ) * params.pitch_lfo.amplitude;
         let pitch_coarse = to_pitch_multiplier(1.0, params.coarse_tune);
         let pitch_fine = to_pitch_multiplier(params.fine_tune, 1);
-        let note_pitch = to_pitch_multiplier(pitch_env + pitch_bend + pitch_lfo, 12);
+        let pitch_bend = to_pitch_multiplier(pitch_bend, 12);
+        let note_pitch = to_pitch_multiplier(pitch_env + pitch_lfo, 24);
 
         let fm_mod = if mod_type == ModulationType::FreqMod {
             to_pitch_multiplier(modulation, 24)
@@ -120,7 +121,7 @@ impl OSCGroup {
         // LFOs applied to it, with a max range of 12 semis.
         // Fine and course pitchbend come from the parameters.
         // And the FM Mod comes from the modulation value.
-        let pitch = note_pitch * pitch_coarse * pitch_fine * fm_mod;
+        let pitch = note_pitch * pitch_bend * pitch_coarse * pitch_fine * fm_mod;
 
         let warp_mod = if mod_type == ModulationType::WarpMod {
             modulation
