@@ -67,7 +67,7 @@ impl From<&RawOSC> for OSCParams {
                     params.filter_type.get(),
                     (params.filter_gain.get() - 0.5) * 36.0,
                 ),
-                q_value: params.filter_q.get().max(0.01) * 10.0,
+                q_value: (params.filter_q.get() * 10.0).max(0.01),
                 freq: ease_in_poly(params.filter_freq.get(), 4).clamp(0.0, 1.0) * 22100.0,
             },
         }
@@ -244,20 +244,6 @@ impl RawParameters {
         }
     }
 
-    pub fn get_default(parameter: ParameterType) -> f32 {
-        use ParameterType::*;
-        match parameter {
-            MasterVolume => 0.33,
-            OSC1(param) => RawOSC::get_default(param, OSCType::OSC1),
-            OSC2Mod => 0.0, // Off
-            OSC2(param) => RawOSC::get_default(param, OSCType::OSC2),
-        }
-    }
-
-    pub fn get(&self, parameter: ParameterType) -> f32 {
-        self.get_ref(parameter).get()
-    }
-
     pub fn set(&self, value: f32, parameter: ParameterType) {
         let update = match parameter {
             parameter if parameter == ParameterType::OSC1(OSCParameterType::Warp) => {
@@ -278,6 +264,20 @@ impl RawParameters {
         if update {
             self.host.update_display();
         }
+    }
+
+    pub fn get_default(parameter: ParameterType) -> f32 {
+        use ParameterType::*;
+        match parameter {
+            MasterVolume => 0.33,
+            OSC1(param) => RawOSC::get_default(param, OSCType::OSC1),
+            OSC2Mod => 0.0, // Mix
+            OSC2(param) => RawOSC::get_default(param, OSCType::OSC2),
+        }
+    }
+
+    pub fn get(&self, parameter: ParameterType) -> f32 {
+        self.get_ref(parameter).get()
     }
 }
 
@@ -316,15 +316,20 @@ impl PluginParameters for RawParameters {
             match param {
                 ParameterType::MasterVolume => format!("{:.2}", self.master_vol.get()),
                 ParameterType::OSC1(osc_param) | ParameterType::OSC2(osc_param) => {
-                    let (osc, warp) = match param {
-                        ParameterType::OSC1(_) => (&params.osc_1, self.osc_1.warp.get()),
-                        ParameterType::OSC2(_) => (&params.osc_2, self.osc_2.warp.get()),
+                    let osc = match param {
+                        ParameterType::OSC1(_) => &params.osc_1,
+                        ParameterType::OSC2(_) => &params.osc_2,
                         _ => unreachable!(),
                     };
                     match osc_param {
                         Volume => format!("{:.2}", osc.volume * 100.0),
                         Shape => format!("{:.2}", osc.shape),
-                        Warp => format!("{:.2}", warp),
+                        Warp => match osc.shape {
+                            NoteShape::Skewtooth(warp) | NoteShape::Square(warp) => {
+                                format!("{:.2}", warp)
+                            }
+                            NoteShape::Sine | NoteShape::Noise => "N/A".to_string(),
+                        },
                         CoarseTune => format!("{}", osc.coarse_tune),
                         FineTune => format!("{:.2}", osc.fine_tune * 100.0),
                         VolAttack => format!("{:.2}", osc.vol_adsr.attack),
