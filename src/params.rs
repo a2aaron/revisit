@@ -73,6 +73,7 @@ impl From<&RawOSC> for OSCParams {
         }
     }
 }
+
 /// An ADSR envelope.
 #[derive(Debug, Clone, Copy)]
 pub struct AmplitudeADSR {
@@ -279,86 +280,96 @@ impl RawParameters {
     pub fn get(&self, parameter: ParameterType) -> f32 {
         self.get_ref(parameter).get()
     }
+
+    /// Returns a user-facing text output for the given parameter. This is broken
+    /// into a tuple consisting of (`value`, `units`)
+    fn get_strings(&self, parameter: ParameterType) -> (String, String) {
+        use OSCParameterType::*;
+        let params = Parameters::from(self);
+
+        let value = match parameter {
+            ParameterType::MasterVolume => format!("{:.2}", self.master_vol.get()),
+            ParameterType::OSC1(osc_param) | ParameterType::OSC2(osc_param) => {
+                let osc = match parameter {
+                    ParameterType::OSC1(_) => &params.osc_1,
+                    ParameterType::OSC2(_) => &params.osc_2,
+                    _ => unreachable!(),
+                };
+                match osc_param {
+                    Volume => format!("{:.2}", osc.volume * 100.0),
+                    Shape => format!("{:.2}", osc.shape),
+                    Warp => match osc.shape {
+                        NoteShape::Skewtooth(warp) | NoteShape::Square(warp) => {
+                            format!("{:.2}", warp)
+                        }
+                        NoteShape::Sine | NoteShape::Noise => "N/A".to_string(),
+                    },
+                    CoarseTune => format!("{}", osc.coarse_tune),
+                    FineTune => format!("{:.2}", osc.fine_tune * 100.0),
+                    VolAttack => format!("{:.2}", osc.vol_adsr.attack),
+                    VolHold => format!("{:.2}", osc.vol_adsr.hold),
+                    VolDecay => format!("{:.2}", osc.vol_adsr.decay),
+                    VolSustain => format!("{:.2}", osc.vol_adsr.sustain * 100.0),
+                    VolRelease => format!("{:.2}", osc.vol_adsr.release),
+                    VolLFOAmplitude => format!("{:.2}", osc.vol_lfo.amplitude * 100.0),
+                    VolLFOPeriod => format!("{:.2}", osc.vol_lfo.period),
+                    PitchAttack => format!("{:.2}", osc.pitch_adsr.attack),
+                    PitchHold => format!("{:.2}", osc.pitch_adsr.hold),
+                    PitchDecay => format!("{:.2}", osc.pitch_adsr.decay),
+                    PitchMultiply => format!("{:.2}", osc.pitch_adsr.multiply * 100.0),
+                    PitchRelease => format!("{:.2}", osc.pitch_adsr.release),
+                    PitchLFOAmplitude => format!("{:.2}", osc.pitch_lfo.amplitude * 100.0),
+                    PitchLFOPeriod => format!("{:.2}", osc.pitch_lfo.period),
+                    FilterType => to_string(osc.filter_params.filter),
+                    FilterFreq => format!("{:.2}", osc.filter_params.freq),
+                    FilterQ => format!("{:.2}", osc.filter_params.q_value),
+                    FilterGain => match osc.filter_params.filter {
+                        biquad::Type::LowShelf(db_gain)
+                        | biquad::Type::HighShelf(db_gain)
+                        | biquad::Type::PeakingEQ(db_gain) => format!("{:.2}", db_gain),
+                        _ => "N/A".to_string(),
+                    },
+                }
+            }
+            ParameterType::OSC2Mod => format!("{}", params.osc_2_mod),
+        };
+
+        let unit = match parameter {
+            ParameterType::MasterVolume => "%".to_string(),
+            ParameterType::OSC1(param) | ParameterType::OSC2(param) => match param {
+                Volume => "%".to_string(),
+                Shape | Warp => "".to_string(),
+                VolAttack | VolHold | VolDecay | VolRelease => " sec".to_string(),
+                PitchAttack | PitchHold | PitchDecay | PitchRelease => " sec".to_string(),
+                VolSustain | PitchMultiply => "%".to_string(),
+                VolLFOAmplitude | PitchLFOAmplitude => "%".to_string(),
+                VolLFOPeriod | PitchLFOPeriod => " sec".to_string(),
+                CoarseTune => " semis".to_string(),
+                FineTune => " cents".to_string(),
+                FilterType => "".to_string(),
+                FilterFreq => " Hz".to_string(),
+                FilterQ => "".to_string(),
+                FilterGain => " dB".to_string(),
+            },
+            ParameterType::OSC2Mod => "".to_string(),
+        };
+
+        (value, unit)
+    }
 }
 
 impl PluginParameters for RawParameters {
     fn get_parameter_label(&self, index: i32) -> String {
-        if let Ok(param) = ParameterType::try_from(index) {
-            use OSCParameterType::*;
-            match param {
-                ParameterType::MasterVolume => "%".to_string(),
-                ParameterType::OSC1(param) | ParameterType::OSC2(param) => match param {
-                    Volume => "%".to_string(),
-                    Shape | Warp => "".to_string(),
-                    VolAttack | VolHold | VolDecay | VolRelease => " sec".to_string(),
-                    PitchAttack | PitchHold | PitchDecay | PitchRelease => " sec".to_string(),
-                    VolSustain | PitchMultiply => "%".to_string(),
-                    VolLFOAmplitude | PitchLFOAmplitude => "%".to_string(),
-                    VolLFOPeriod | PitchLFOPeriod => " sec".to_string(),
-                    CoarseTune => " semis".to_string(),
-                    FineTune => " cents".to_string(),
-                    FilterType => "".to_string(),
-                    FilterFreq => " Hz".to_string(),
-                    FilterQ => "".to_string(),
-                    FilterGain => " dB".to_string(),
-                },
-                ParameterType::OSC2Mod => "".to_string(),
-            }
+        if let Ok(parameter) = ParameterType::try_from(index) {
+            self.get_strings(parameter).1
         } else {
             "".to_string()
         }
     }
 
     fn get_parameter_text(&self, index: i32) -> String {
-        let params = Parameters::from(self);
-        if let Ok(param) = ParameterType::try_from(index) {
-            use OSCParameterType::*;
-            match param {
-                ParameterType::MasterVolume => format!("{:.2}", self.master_vol.get()),
-                ParameterType::OSC1(osc_param) | ParameterType::OSC2(osc_param) => {
-                    let osc = match param {
-                        ParameterType::OSC1(_) => &params.osc_1,
-                        ParameterType::OSC2(_) => &params.osc_2,
-                        _ => unreachable!(),
-                    };
-                    match osc_param {
-                        Volume => format!("{:.2}", osc.volume * 100.0),
-                        Shape => format!("{:.2}", osc.shape),
-                        Warp => match osc.shape {
-                            NoteShape::Skewtooth(warp) | NoteShape::Square(warp) => {
-                                format!("{:.2}", warp)
-                            }
-                            NoteShape::Sine | NoteShape::Noise => "N/A".to_string(),
-                        },
-                        CoarseTune => format!("{}", osc.coarse_tune),
-                        FineTune => format!("{:.2}", osc.fine_tune * 100.0),
-                        VolAttack => format!("{:.2}", osc.vol_adsr.attack),
-                        VolHold => format!("{:.2}", osc.vol_adsr.hold),
-                        VolDecay => format!("{:.2}", osc.vol_adsr.decay),
-                        VolSustain => format!("{:.2}", osc.vol_adsr.sustain * 100.0),
-                        VolRelease => format!("{:.2}", osc.vol_adsr.release),
-                        VolLFOAmplitude => format!("{:.2}", osc.vol_lfo.amplitude * 100.0),
-                        VolLFOPeriod => format!("{:.2}", osc.vol_lfo.period),
-                        PitchAttack => format!("{:.2}", osc.pitch_adsr.attack),
-                        PitchHold => format!("{:.2}", osc.pitch_adsr.hold),
-                        PitchDecay => format!("{:.2}", osc.pitch_adsr.decay),
-                        PitchMultiply => format!("{:.2}", osc.pitch_adsr.multiply * 100.0),
-                        PitchRelease => format!("{:.2}", osc.pitch_adsr.release),
-                        PitchLFOAmplitude => format!("{:.2}", osc.pitch_lfo.amplitude * 100.0),
-                        PitchLFOPeriod => format!("{:.2}", osc.pitch_lfo.period),
-                        FilterType => to_string(osc.filter_params.filter),
-                        FilterFreq => format!("{:.2}", osc.filter_params.freq),
-                        FilterQ => format!("{:.2}", osc.filter_params.q_value),
-                        FilterGain => match osc.filter_params.filter {
-                            biquad::Type::LowShelf(db_gain)
-                            | biquad::Type::HighShelf(db_gain)
-                            | biquad::Type::PeakingEQ(db_gain) => format!("{:.2}", db_gain),
-                            _ => "N/A".to_string(),
-                        },
-                    }
-                }
-                ParameterType::OSC2Mod => format!("{}", params.osc_2_mod),
-            }
+        if let Ok(parameter) = ParameterType::try_from(index) {
+            self.get_strings(parameter).0
         } else {
             "".to_string()
         }
