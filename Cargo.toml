@@ -15,11 +15,11 @@ simple-logging = "2.0.2"
 variant_count = "1.0.0"
 
 # for audio filtering
-biquad = { git = "https://github.com/a2aaron/biquad-rs", branch = "master" }
+biquad = "0.4.0" # { git = "https://github.com/a2aaron/biquad-rs", branch = "master" }
 
 # for GUI
 iced = { version = "0.2", features = ["image"] }
-iced_audio = { git = "https://github.com/a2aaron/iced_audio", branch = "main" }
+iced_audio = "0.6.1" # { git = "https://github.com/a2aaron/iced_audio", branch = "main" }
 iced_baseview = { git = "https://github.com/a2aaron/iced_baseview", branch = "main" }
 iced_native = "0.3.0"
 iced_futures = { version = "0.2.0", features = ["async-std"] }

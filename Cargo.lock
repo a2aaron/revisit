@@ -227,8 +227,9 @@ dependencies = [
 
 [[package]]
 name = "biquad"
-version = "0.3.1"
-source = "git+https://github.com/a2aaron/biquad-rs?branch=master#bdd410ffe0956de7e0920ee928d2da480408b7df"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "40ad4f380076944059eb1f4f481e341e87ee19bef833248615d386883b859360"
 dependencies = [
  "libm",
 ]
@@ -1296,8 +1297,9 @@ dependencies = [
 
 [[package]]
 name = "iced_audio"
-version = "0.5.4"
-source = "git+https://github.com/a2aaron/iced_audio?branch=main#c36897174f70fa9f3b793d00f6afbba1cf0b3d94"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "479de05b76612b172abc73c90e647f8914c2c3fef263d489a6779ec4f5fc8b8b"
 dependencies = [
  "iced_graphics",
  "iced_native",

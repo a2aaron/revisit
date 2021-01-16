@@ -144,6 +144,7 @@ pub struct OSCKnobs {
     filter_type: knob::State,
     filter_freq: knob::State,
     filter_q: knob::State,
+    filter_gain: knob::State,
 }
 
 impl OSCKnobs {
@@ -172,34 +173,39 @@ impl OSCKnobs {
             filter_type: make_knob(param_ref, (FilterType, osc).into()),
             filter_freq: make_knob(param_ref, (FilterFreq, osc).into()),
             filter_q: make_knob(param_ref, (FilterQ, osc).into()),
+            filter_gain: make_knob(param_ref, (FilterGain, osc).into()),
         }
     }
 
     fn update(&mut self, osc: &RawOSC) {
         use OSCParameterType::*;
-        self.volume.set(osc.get(Volume).into());
-        self.coarse_tune.set(osc.get(CoarseTune).into());
-        self.fine_tune.set(osc.get(FineTune).into());
-        self.attack.set(osc.get(VolAttack).into());
-        self.hold.set(osc.get(VolHold).into());
-        self.decay.set(osc.get(VolDecay).into());
-        self.sustain.set(osc.get(VolSustain).into());
-        self.release.set(osc.get(VolRelease).into());
-        self.vol_lfo_amplitude.set(osc.get(VolLFOAmplitude).into());
-        self.vol_lfo_period.set(osc.get(VolLFOPeriod).into());
-        self.note_shape.set(osc.get(Shape).into());
-        self.note_warp.set(osc.get(Warp).into());
-        self.pitch_attack.set(osc.get(PitchAttack).into());
-        self.pitch_hold.set(osc.get(PitchHold).into());
-        self.pitch_decay.set(osc.get(PitchDecay).into());
-        self.pitch_multiply.set(osc.get(PitchMultiply).into());
-        self.pitch_release.set(osc.get(PitchRelease).into());
+        self.volume.set_normal(osc.get(Volume).into());
+        self.coarse_tune.set_normal(osc.get(CoarseTune).into());
+        self.fine_tune.set_normal(osc.get(FineTune).into());
+        self.attack.set_normal(osc.get(VolAttack).into());
+        self.hold.set_normal(osc.get(VolHold).into());
+        self.decay.set_normal(osc.get(VolDecay).into());
+        self.sustain.set_normal(osc.get(VolSustain).into());
+        self.release.set_normal(osc.get(VolRelease).into());
+        self.vol_lfo_amplitude
+            .set_normal(osc.get(VolLFOAmplitude).into());
+        self.vol_lfo_period.set_normal(osc.get(VolLFOPeriod).into());
+        self.note_shape.set_normal(osc.get(Shape).into());
+        self.note_warp.set_normal(osc.get(Warp).into());
+        self.pitch_attack.set_normal(osc.get(PitchAttack).into());
+        self.pitch_hold.set_normal(osc.get(PitchHold).into());
+        self.pitch_decay.set_normal(osc.get(PitchDecay).into());
+        self.pitch_multiply
+            .set_normal(osc.get(PitchMultiply).into());
+        self.pitch_release.set_normal(osc.get(PitchRelease).into());
         self.pitch_lfo_amplitude
-            .set(osc.get(PitchLFOAmplitude).into());
-        self.pitch_lfo_period.set(osc.get(PitchLFOPeriod).into());
-        self.filter_type.set(osc.get(FilterType).into());
-        self.filter_freq.set(osc.get(FilterFreq).into());
-        self.filter_q.set(osc.get(FilterQ).into());
+            .set_normal(osc.get(PitchLFOAmplitude).into());
+        self.pitch_lfo_period
+            .set_normal(osc.get(PitchLFOPeriod).into());
+        self.filter_type.set_normal(osc.get(FilterType).into());
+        self.filter_freq.set_normal(osc.get(FilterFreq).into());
+        self.filter_q.set_normal(osc.get(FilterQ).into());
+        self.filter_gain.set_normal(osc.get(FilterGain).into());
     }
 
     fn make_widget<'a>(
@@ -247,6 +253,7 @@ impl OSCKnobs {
         let filter_type = widget!(Knob, &mut self.filter_type, (FilterType, osc).into());
         let filter_freq = widget!(Knob, &mut self.filter_freq, (FilterFreq, osc).into());
         let filter_q = widget!(Knob, &mut self.filter_q, (FilterQ, osc).into());
+        let filter_gain = widget!(Knob, &mut self.filter_gain, (FilterGain, osc).into());
 
         let osc_pane = make_pane_with_checkbox(
             "OSC",
@@ -277,7 +284,7 @@ impl OSCKnobs {
 
         let filter_pane = make_pane(
             "FILTER",
-            vec![(vec![filter_type, filter_freq, filter_q], "")],
+            vec![(vec![filter_type, filter_freq, filter_q, filter_gain], "")],
         );
         Column::with_children(vec![osc_pane.into(), pitch_pane.into(), filter_pane.into()])
             .padding(20)
@@ -328,12 +335,12 @@ impl Application for UIFrontEnd {
             }
             Message::ForceRedraw => {
                 self.master_vol
-                    .set(self.params.get(ParameterType::MasterVolume).into());
+                    .set_normal(self.params.get(ParameterType::MasterVolume).into());
                 self.osc_1.update(&self.params.osc_1);
                 self.osc_2.update(&self.params.osc_2);
                 // TODO : Don't use a RawParameters for this
                 self.osc_2_mod
-                    .set(self.params.get(ParameterType::OSC2Mod).into());
+                    .set_normal(self.params.get(ParameterType::OSC2Mod).into());
             }
         }
         // Make the host DAW update its own parameter display

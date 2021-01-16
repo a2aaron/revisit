@@ -314,7 +314,7 @@ impl PluginParameters for RawParameters {
         if let Ok(param) = ParameterType::try_from(index) {
             use OSCParameterType::*;
             match param {
-                ParameterType::MasterVolume => "%".to_string(),
+                ParameterType::MasterVolume => format!("{:.2}", self.master_vol.get()),
                 ParameterType::OSC1(osc_param) | ParameterType::OSC2(osc_param) => {
                     let (osc, warp) = match param {
                         ParameterType::OSC1(_) => (&params.osc_1, self.osc_1.warp.get()),
@@ -484,9 +484,9 @@ impl RawOSC {
             PitchLFOAmplitude => 0.0,
             PitchLFOPeriod => 0.5,
             FilterType => 0.0, // Low Pass
-            FilterFreq => 1.0,
-            FilterQ => 0.5,
-            FilterGain => 0.0,
+            FilterFreq => 1.0, // 22khz
+            FilterQ => 0.1,
+            FilterGain => 0.5, // 0 dB
         }
     }
 
@@ -723,21 +723,21 @@ impl From<(OSCParameterType, OSCType)> for ParameterType {
     }
 }
 
-fn to_filter_type(x: f32, db_gain: f32) -> biquad::Type {
+fn to_filter_type(x: f32, db_gain: f32) -> biquad::Type<f32> {
     let x = (x * 8.0) as i32;
     match x {
-        0 => biquad::Type::LowShelf(db_gain),
-        1 => biquad::Type::HighShelf(db_gain),
+        0 => biquad::Type::LowPass,
+        1 => biquad::Type::HighPass,
         2 => biquad::Type::PeakingEQ(db_gain),
-        3 => biquad::Type::Notch,
-        4 => biquad::Type::LowPass,
-        5 => biquad::Type::HighPass,
-        6 => biquad::Type::BandPass,
+        3 => biquad::Type::LowShelf(db_gain),
+        4 => biquad::Type::HighShelf(db_gain),
+        5 => biquad::Type::BandPass,
+        6 => biquad::Type::Notch,
         _ => biquad::Type::AllPass,
     }
 }
 
-fn to_string(x: biquad::Type) -> String {
+fn to_string(x: biquad::Type<f32>) -> String {
     match x {
         biquad::Type::SinglePoleLowPass => "Single Pole Low Pass".to_string(),
         biquad::Type::LowPass => "Low Pass".to_string(),

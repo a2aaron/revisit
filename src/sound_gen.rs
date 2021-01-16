@@ -226,7 +226,7 @@ impl Oscillator {
 
 #[derive(Debug, Clone, Copy)]
 pub struct FilterParams {
-    pub filter: biquad::Type,
+    pub filter: biquad::Type<f32>,
     /// in Hz. This value is clamped between 20 and 99% of the Nyquist frequency
     /// in order to prevent numerical instability at extremely high or low values
     pub freq: f32,
