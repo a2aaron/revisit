@@ -2,7 +2,7 @@ use std::ffi::c_void;
 use std::sync::Arc;
 
 use iced::{futures, Align, Column, Command, Element, Row, Subscription};
-use iced_audio::{knob, v_slider, IntRange, Knob, Normal, NormalParam, VSlider};
+use iced_audio::{knob, v_slider, Knob, NormalParam, VSlider};
 use iced_baseview::{Application, Handle, WindowSubs};
 use raw_window_handle::RawWindowHandle;
 use tokio::sync::Notify;
@@ -12,10 +12,10 @@ use crate::params::{
     ModulationType, OSCParameterType, OSCType, ParameterType, RawOSC, RawParameters,
 };
 
-// Create a widget (actually a column) that:
-// 1. Uses `$state` as the widget's `$widget::State` struct
-// 2. Sends the message ParameterChanged(normal, $parameter)
-// 3. Has the title `widget_name($parameter)`
+/// Create a widget (actually a column) that:
+/// 1. Uses `$state` as the widget's `$widget::State` struct
+/// 2. Sends the message ParameterChanged(normal, $parameter)
+/// 3. Has the title `widget_name($parameter)`
 macro_rules! widget {
     ($widget:ident, $state:expr, $parameter:expr) => {
         with_label(
@@ -27,12 +27,16 @@ macro_rules! widget {
     };
 }
 
+/// Create a combined element with the label `title` under a `widget`
 fn with_label<'a>(widget: impl Into<Element<'a, Message>>, title: &str) -> Element<'a, Message> {
     Column::with_children(vec![widget.into(), iced::Text::new(title).size(15).into()])
         .align_items(Align::Center)
         .into()
 }
 
+/// Convience function to make a `NormalParam` using a `RawParameters`. The
+/// `NormalParam` will have a default value of whatever the default value is for
+/// a `RawParameters`.
 fn make_normal_param(param_ref: &RawParameters, param_type: ParameterType) -> NormalParam {
     NormalParam {
         value: param_ref.get(param_type).into(),
@@ -40,10 +44,13 @@ fn make_normal_param(param_ref: &RawParameters, param_type: ParameterType) -> No
     }
 }
 
+/// Convience function to make `knob::State` out of a `RawParameters`
+/// and `ParameterType`
 fn make_knob(param_ref: &RawParameters, param_type: ParameterType) -> knob::State {
     knob::State::new(make_normal_param(param_ref, param_type))
 }
 
+/// Create a row of `knobs` with the title `title`.
 fn knob_row<'a>(knobs: Vec<Element<'a, Message>>, title: &str) -> Element<'a, Message> {
     Column::new()
         .push(iced::Text::new(title).size(18))
@@ -57,14 +64,17 @@ fn knob_row<'a>(knobs: Vec<Element<'a, Message>>, title: &str) -> Element<'a, Me
         .into()
 }
 
+/// Make a row of widgets with better default spacing.
 fn row(widgets: Vec<Element<'_, Message>>) -> Element<'_, Message> {
     Row::with_children(widgets).spacing(5).into()
 }
 
+/// Make an empty column with better default spacing.
 fn column<'a>() -> Column<'a, Message> {
     Column::new().spacing(5)
 }
 
+/// Make a pane without the additional `on_off` widget.
 fn make_pane<'a>(
     title: &str,
     widgets: Vec<(Vec<Element<'a, Message>>, &str)>,
@@ -72,11 +82,19 @@ fn make_pane<'a>(
     make_pane_with_checkbox(title, None, widgets)
 }
 
+/// Makes a pane of widgets with the specified title.
+/// `widgets` consists of a vector of (`inner_vec`, `row_title`). Each `inner_vec`
+///  is a list of widgets that will be arranged in a row. The row will have the
+/// heading of `row_title`.
+/// If `on_off` is `Some(element)`. then the title for this pane will have the
+/// `element` to the right of it.
 fn make_pane_with_checkbox<'a>(
     title: &str,
     on_off: Option<Element<'a, Message>>,
     widgets: Vec<(Vec<Element<'a, Message>>, &str)>,
 ) -> Column<'a, Message> {
+    // If there is no `on_off` element, just use a empty widget.
+    // Picking `Length::Shrink` for a `Space` widget makes it have zero size.
     let on_off = on_off.unwrap_or_else(|| {
         iced::widget::Space::new(iced::Length::Shrink, iced::Length::Shrink).into()
     });
@@ -87,15 +105,40 @@ fn make_pane_with_checkbox<'a>(
     pane
 }
 
+/// A replacement struct for `iced_audio::IntRange`. This is used for snapping
+/// knobs which only take on discrete integer values (for example, the Shape knob).
+/// However, unlike `iced_audio::IntRange`, this knob sets the integer regions
+/// via truncation, rather than rounding. This makes each int region have the
+/// same size, which is needed because this matches with how `RawParameters`'s
+/// `AtomicFloat` values are convereted to their discrete values.
+/// For example, if we have a parameter that takes on 4 values, then we convert
+/// from the `AtomicFloat` to the integer as follows:
+/// 0.00 to 0.25 = 0
+/// 0.25 to 0.50 = 1
+/// 0.50 to 0.75 = 2
+/// 0.75 to 1.00 = 3
+/// However, iced_audio's `IntRange` wouldn't do this for the `Normal` that is
+/// held in a `knob::State`, because it _rounds_ the float instead of truncating
+/// it, which produces the wrong thing! It would end up having:
+/// 0.00 to 0.16 = 0
+/// 0.16 to 0.50 = 1
+/// 0.50 to 0.83 = 2
+/// 0.83 to 1.00 = 3
+/// Which isn't evenly spaced. Thus, `TruncatingIntRange` instead snaps floats
+/// using truncation instead.
+/// See also: https://www.desmos.com/calculator/esnnnbfzml for a visualization
 struct TruncatingIntRange {
     num_regions: usize,
 }
 
 impl TruncatingIntRange {
+    /// Snap a normalized float to the nearest normalized float value corresponding
+    /// to an integer.
     fn snap(&self, value: f32) -> f32 {
         snap_float(value, self.num_regions)
     }
 
+    /// Snap a knob to the nearest integer value.
     fn snap_knob(&self, knob: &mut knob::State) {
         knob.normal_param.value = self.snap(knob.normal().into()).into();
     }
@@ -105,10 +148,16 @@ impl TruncatingIntRange {
 /// For example, snap_float(_, 4) will snap a float to either:
 /// 0.0, 0.333, 0.666, or 1.0
 fn snap_float(value: f32, num_regions: usize) -> f32 {
+    // We subtract one from this denominator because we want there to only be
+    // four jumps. See also https://www.desmos.com/calculator/esnnnbfzml
     let num_regions = num_regions as f32;
     (num_regions * value).floor() / (num_regions - 1.0)
 }
 
+/// A struct implementing `iced_native::Recipe`. This will send a
+/// `Message::ForceRedraw` whenever the `notifier` is recieves a notification.
+/// This struct is used to make the iced GUI update whenever the VST host alters
+/// a parameter (say, via an automation curve).
 struct NotifyRecipe {
     notifier: Arc<Notify>,
 }
@@ -120,11 +169,20 @@ where
     type Output = Message;
 
     fn hash(&self, state: &mut H) {
+        // generic hash implementation. this isn't actually very important to us
         use std::hash::Hash;
-
         std::any::TypeId::of::<Self>().hash(state);
     }
 
+    // This stream function was a nightmare to figure out initally, but here's
+    // how it works (thank you to Cassie for explaining this to me!)
+    // The function returns a `futures::BoxStream`, which is a async thing.
+    // The BoxStream has a function that returns an `Option((message, next_state))`
+    // If it returns None, then the stream ends (we don't want this)
+    // If it returns `Some((message, next_state))` then we fire off the `message`
+    // to iced, and the `next_state` becomes the argument for the input of the
+    // function the next time it is run (which is... immediately, i think?)
+    // Hence we essentially just run in a look and yield every so often.
     fn stream(
         self: Box<Self>,
         _: futures::stream::BoxStream<'static, I>,
@@ -132,6 +190,8 @@ where
         Box::pin(futures::stream::unfold(
             self.notifier.clone(),
             |notifier| async move {
+                // Wait for the notifier to recieve a notification before firing
+                // the message.
                 notifier.notified().await;
                 Some((Message::ForceRedraw, notifier))
             },
@@ -139,12 +199,21 @@ where
     }
 }
 
+/// A GUI message.
 #[derive(Debug, Clone, Copy)]
 pub enum Message {
+    /// These indicate that the GUI has changed a parameter
     ParameterChanged(f32, ParameterType),
+    /// These are called to make the GUI update itself. Usually, this means that
+    /// the host has changed a parameter, so the GUI should change to match.
+    /// Note that this works because sending a message also causes `iced` to
+    /// call `view` and do a screen update. If it didn't do that, then this won't
+    /// work.
     ForceRedraw,
 }
 
+/// A struct keeping track of the various knob states an oscillator has.
+/// The ranges are used for snapping the knobs.
 pub struct OSCKnobs {
     volume: knob::State,
     coarse_tune: knob::State,
@@ -201,7 +270,6 @@ impl OSCKnobs {
             filter_freq: make_knob(param_ref, (FilterFreq, osc).into()),
             filter_q: make_knob(param_ref, (FilterQ, osc).into()),
             filter_gain: make_knob(param_ref, (FilterGain, osc).into()),
-            // Subtract one because we want there to be n different values, and these ranges happen to be end-inclusive
             coarse_tune_range: TruncatingIntRange {
                 num_regions: 24 * 2 + 1,
             },
@@ -217,6 +285,8 @@ impl OSCKnobs {
     /// Set the knob states using the `osc` reference provided.
     /// This method is called whenever a ForceRedraw happens.
     fn update(&mut self, osc: &RawOSC) {
+        /// Sets a knob while also the TruncatingIntRange to snap the value to
+        /// the right spot.
         fn set_knob_with_range(knob: &mut knob::State, range: &TruncatingIntRange, value: f32) {
             knob.set_normal(range.snap(value).into());
         }
@@ -253,18 +323,25 @@ impl OSCKnobs {
             .set_normal(osc.get(PitchLFOAmplitude).into());
         self.pitch_lfo_period
             .set_normal(osc.get(PitchLFOPeriod).into());
-        // self.filter_type.set_normal(osc.get(FilterType).into());
+
         set_knob_with_range(
             &mut self.filter_type,
             &self.filter_type_range,
             osc.get(FilterType),
-            // crate::params::FILTER_TYPE_VARIANT_COUNT,
         );
+
         self.filter_freq.set_normal(osc.get(FilterFreq).into());
         self.filter_q.set_normal(osc.get(FilterQ).into());
         self.filter_gain.set_normal(osc.get(FilterGain).into());
     }
 
+    /// Create the set of widget for a particular oscillator.
+    /// `osc` is used to set what type of ParamterType is fired for the
+    /// `ParameterChanged(f32, ParameterType)` messages. Ex: is `osc` is
+    /// OSCType::OSC1, then the volume knob will fire
+    /// `ParameterChanged(value, ParameterType::OSC1(OSCParameterType::Volume))`
+    /// When `on_off` is `Some(widget)`, the widget will be inserted to the right
+    /// of the title of this widget block. This is usually the OSC 2 mod control.
     fn make_widget<'a>(
         &'a mut self,
         osc: OSCType,
@@ -312,8 +389,13 @@ impl OSCKnobs {
         let filter_q = widget!(Knob, &mut self.filter_q, (FilterQ, osc).into());
         let filter_gain = widget!(Knob, &mut self.filter_gain, (FilterGain, osc).into());
 
+        let title = match osc {
+            OSCType::OSC1 => "OSC 1",
+            OSCType::OSC2 => "OSC 2",
+        };
+
         let osc_pane = make_pane_with_checkbox(
-            "OSC",
+            title,
             on_off,
             vec![
                 (vec![volume, fine_tune, coarse_tune, shape, warp], "Sound"),
@@ -343,6 +425,7 @@ impl OSCKnobs {
             "FILTER",
             vec![(vec![filter_type, filter_freq, filter_q, filter_gain], "")],
         );
+
         Column::with_children(vec![osc_pane.into(), pitch_pane.into(), filter_pane.into()])
             .padding(20)
             .spacing(20)
@@ -350,15 +433,30 @@ impl OSCKnobs {
     }
 }
 
+/// The struct which manages the GUI. This struct handles both the messages
+/// passed to it by iced as well as communciating with host VST for GUI stuff.
 pub struct UIFrontEnd {
+    // Knobs and sliders
     master_vol: v_slider::State,
     osc_1: OSCKnobs,
     osc_2: OSCKnobs,
     osc_2_mod: knob::State,
     osc_2_mod_range: TruncatingIntRange,
+    // This is used so that the GUI can update the shared parameters object when
+    // a GUI element is changed.
     params: std::sync::Arc<RawParameters>,
+    // An `iced_baseview` handle. This is None if the GUI hasn't been opened
+    // and `Some(Handle)` otherwise. This is used for some small things, such as
+    // getting iced to run closing code when closing the window, as well as
+    // being able to pass in keyboard events, because some VST hosts capture the
+    // keyboard event.
     handle: Option<Handle>,
+    // This notifier gains a message whenever the VST host alters a parameter,
+    // and is used to force redraws to keep the GUI in sync with the parameters.
     notifier: Arc<Notify>,
+    // This just tracks if the control key is held down. This is needed because
+    // the VST host captures keyboard events, so we we need to manually track
+    // keydown/keyup events.
     control_key: keyboard_types::KeyState,
 }
 
@@ -389,10 +487,12 @@ impl Application for UIFrontEnd {
         (ui, Command::none())
     }
 
+    /// React to an incoming message
     fn update(&mut self, message: Self::Message) -> Command<Self::Message> {
         match message {
             // The GUI has changed a parameter
             Message::ParameterChanged(value, param) => {
+                // We set the parameter according to the changed value.
                 self.params.set(value, param);
 
                 // If the knob changed was a "snapping" knob, make sure the knob
@@ -422,24 +522,33 @@ impl Application for UIFrontEnd {
                     }
                     ParameterType::MasterVolume => (),
                 }
+
+                // Make the VST host update its own parameter display. This is needed
+                // so the host actually has updates with GUI.
+                self.params.host.update_display();
             }
             // The host has changed a parameter, or a redraw was requested
             // We update the knobs based on the current parameter values
             Message::ForceRedraw => {
+                // TODO : Don't use a RawParameters for this? Instead consider
+                // using a normal Parameter struct and letting the knobs have
+                // actual values instead of weird 0.0-1.0 normalized values.
+                // This is fine as it is right now though.
                 self.master_vol
                     .set_normal(self.params.get(ParameterType::MasterVolume).into());
                 self.osc_1.update(&self.params.osc_1);
                 self.osc_2.update(&self.params.osc_2);
-                // TODO : Don't use a RawParameters for this
                 self.osc_2_mod
                     .set_normal(self.params.get(ParameterType::OSC2Mod).into());
             }
         }
-        // Make the host DAW update its own parameter display
-        self.params.host.update_display();
+
         Command::none()
     }
 
+    /// Set up the GUI elements
+    /// Note that this isn't called every frame--it's only called when there's
+    /// an update to the view (which happens to be only when messages happen)
     fn view(&mut self) -> iced::Element<'_, Self::Message> {
         let screen = self.size();
         let (screen_width, screen_height) = (screen.0 as u32, screen.1 as u32);
@@ -463,6 +572,7 @@ impl Application for UIFrontEnd {
             .into()
     }
 
+    /// This allows iced to recieve messages from the notifier
     fn subscription(
         &self,
         _window_subs: &mut WindowSubs<Self::Message>,
@@ -557,6 +667,7 @@ impl Editor for UIFrontEnd {
     }
 }
 
+/// The widget name for a given parameter
 fn widget_name(param: ParameterType) -> String {
     use OSCParameterType::*;
     match param {
@@ -590,6 +701,10 @@ fn widget_name(param: ParameterType) -> String {
     }
 }
 
+/// Convert a `vst::Keycode` + `keyboard_types::KeyState` into an actual
+/// `keyboard_types::KeyboardEvent`. This is minimal and pretty much only works
+/// with the Control key, so you'll need to fix it if you wanna do more with it.
+/// This is used to send keyboard events into `iced_baseview`.
 fn to_keyboard_event(
     _: vst::editor::KeyCode,
     state: keyboard_types::KeyState,

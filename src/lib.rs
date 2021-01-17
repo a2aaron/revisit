@@ -18,7 +18,6 @@ use sound_gen::{
 use ui::UIFrontEnd;
 
 use iced_baseview::Application;
-use log::{info, LevelFilter};
 use vst::{
     api::{Events, Supported},
     buffer::AudioBuffer,
@@ -181,11 +180,11 @@ impl Plugin for Revisit {
     }
 
     fn init(&mut self) {
-        let result = simple_logging::log_to_file("revisit.log", LevelFilter::Info);
-        if let Err(err) = result {
-            println!("Couldn't start logging! {}", err);
-        }
-        info!("Begin VST log");
+        // let result = simple_logging::log_to_file("revisit.log", LevelFilter::Info);
+        // if let Err(err) = result {
+        //     println!("Couldn't start logging! {}", err);
+        // }
+        // info!("Begin VST log");
     }
 
     fn get_info(&self) -> Info {
@@ -357,9 +356,7 @@ impl Plugin for Revisit {
         self.pitch_bend.sort_unstable_by(|a, b| a.1.cmp(&b.1));
     }
 
-    fn stop_process(&mut self) {
-        info!("Stopping process...");
-    }
+    fn stop_process(&mut self) {}
 
     fn set_sample_rate(&mut self, rate: f32) {
         self.sample_rate = rate;
