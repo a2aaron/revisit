@@ -337,7 +337,7 @@ impl RawParameters {
                     PitchRelease => duration_strings(osc.pitch_adsr.release),
                     PitchLFOAmplitude => make_strings(osc.pitch_lfo.amplitude * 100.0, "%"),
                     PitchLFOPeriod => duration_strings(osc.pitch_lfo.period),
-                    FilterType => (to_string(osc.filter_params.filter), "".to_string()),
+                    FilterType => (biquad_to_string(osc.filter_params.filter), "".to_string()),
                     FilterFreq => make_strings(osc.filter_params.freq, " Hz"),
                     FilterQ => make_strings(osc.filter_params.q_value, ""),
                     FilterGain => match osc.filter_params.filter {
@@ -744,7 +744,7 @@ impl From<(OSCParameterType, OSCType)> for ParameterType {
     }
 }
 
-fn to_filter_type(x: f32, db_gain: f32) -> biquad::Type<f32> {
+pub fn to_filter_type(x: f32, db_gain: f32) -> biquad::Type<f32> {
     let x = (x * 8.0) as i32;
     match x {
         0 => biquad::Type::LowPass,
@@ -758,7 +758,7 @@ fn to_filter_type(x: f32, db_gain: f32) -> biquad::Type<f32> {
     }
 }
 
-fn to_string(x: biquad::Type<f32>) -> String {
+pub fn biquad_to_string(x: biquad::Type<f32>) -> String {
     match x {
         biquad::Type::SinglePoleLowPass => "Single Pole Low Pass".to_string(),
         biquad::Type::LowPass => "Low Pass".to_string(),

@@ -8,22 +8,31 @@ use raw_window_handle::RawWindowHandle;
 use tokio::sync::Notify;
 use vst::{editor::Editor, host::Host};
 
-use crate::params::{
-    ModulationType, OSCParameterType, OSCType, ParameterType, RawOSC, RawParameters,
+use crate::{
+    params::{
+        biquad_to_string, to_filter_type, ModulationType, OSCParameterType, OSCType, ParameterType,
+        RawOSC, RawParameters,
+    },
+    sound_gen::NoteShape,
 };
 
+/// Use: widget!(identifier, state, param, title);
 /// Create a widget (actually a column) that:
 /// 1. Uses `$state` as the widget's `$widget::State` struct
 /// 2. Sends the message ParameterChanged(normal, $parameter)
-/// 3. Has the title `widget_name($parameter)`
+/// 3. Has the title `title` (or `widget_name($parameter)` if not provided)
 macro_rules! widget {
-    ($widget:ident, $state:expr, $parameter:expr) => {
+    ($widget:ident, $state:expr, $parameter:expr, $title:expr) => {
         with_label(
             $widget::new($state, move |normal| {
                 Message::ParameterChanged(normal.as_f32(), $parameter)
             }),
-            &widget_name($parameter),
+            $title,
         );
+    };
+
+    ($widget:ident, $state:expr, $parameter:expr) => {
+        widget!($widget, $state, $parameter, &widget_name($parameter));
     };
 }
 
@@ -351,7 +360,19 @@ impl OSCKnobs {
         let volume = widget!(Knob, &mut self.volume, (Volume, osc).into());
         let fine_tune = widget!(Knob, &mut self.fine_tune, (FineTune, osc).into());
         let coarse_tune = widget!(Knob, &mut self.coarse_tune, (CoarseTune, osc).into());
-        let shape = widget!(Knob, &mut self.note_shape, (Shape, osc).into());
+
+        let shape_title = NoteShape::from_warp(
+            self.note_shape.normal().into(),
+            self.note_warp.normal().into(),
+        )
+        .to_string();
+        let shape = widget!(
+            Knob,
+            &mut self.note_shape,
+            (Shape, osc).into(),
+            &shape_title
+        );
+
         let warp = widget!(Knob, &mut self.note_warp, (Warp, osc).into());
 
         let attack = widget!(Knob, &mut self.attack, (VolAttack, osc).into());
@@ -384,7 +405,17 @@ impl OSCKnobs {
             (PitchLFOPeriod, osc).into()
         );
 
-        let filter_type = widget!(Knob, &mut self.filter_type, (FilterType, osc).into());
+        let filter_type_title = biquad_to_string(to_filter_type(
+            self.filter_type.normal().into(),
+            self.filter_gain.normal().into(),
+        ));
+
+        let filter_type = widget!(
+            Knob,
+            &mut self.filter_type,
+            (FilterType, osc).into(),
+            &filter_type_title
+        );
         let filter_freq = widget!(Knob, &mut self.filter_freq, (FilterFreq, osc).into());
         let filter_q = widget!(Knob, &mut self.filter_q, (FilterQ, osc).into());
         let filter_gain = widget!(Knob, &mut self.filter_gain, (FilterGain, osc).into());
