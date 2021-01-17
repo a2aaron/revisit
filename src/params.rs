@@ -287,8 +287,20 @@ impl RawParameters {
         use OSCParameterType::*;
         let params = Parameters::from(self);
 
-        let value = match parameter {
-            ParameterType::MasterVolume => format!("{:.2}", self.master_vol.get()),
+        fn make_strings(value: f32, label: &str) -> (String, String) {
+            (format!("{:.2}", value), label.to_string())
+        }
+
+        fn duration_strings(duration: f32) -> (String, String) {
+            if duration < 1.0 {
+                (format!("{:.1}", duration * 1000.0), " ms".to_string())
+            } else {
+                (format!("{:.2}", duration), " sec".to_string())
+            }
+        }
+
+        match parameter {
+            ParameterType::MasterVolume => make_strings(self.master_vol.get() * 100.0, "%"),
             ParameterType::OSC1(osc_param) | ParameterType::OSC2(osc_param) => {
                 let osc = match parameter {
                     ParameterType::OSC1(_) => &params.osc_1,
@@ -296,65 +308,43 @@ impl RawParameters {
                     _ => unreachable!(),
                 };
                 match osc_param {
-                    Volume => format!("{:.2}", osc.volume * 100.0),
-                    Shape => format!("{:.2}", osc.shape),
+                    Volume => make_strings(osc.volume * 100.0, "%"),
+                    Shape => (format!("{:.2}", osc.shape), "".to_string()),
                     Warp => match osc.shape {
                         NoteShape::Skewtooth(warp) | NoteShape::Square(warp) => {
-                            format!("{:.2}", warp)
+                            (format!("{:.2}", warp), "".to_string())
                         }
-                        NoteShape::Sine | NoteShape::Noise => "N/A".to_string(),
+                        NoteShape::Sine | NoteShape::Noise => ("N/A".to_string(), "".to_string()),
                     },
-                    CoarseTune => format!("{}", osc.coarse_tune),
-                    FineTune => format!("{:.2}", osc.fine_tune * 100.0),
-                    VolAttack => format!("{:.2}", osc.vol_adsr.attack),
-                    VolHold => format!("{:.2}", osc.vol_adsr.hold),
-                    VolDecay => format!("{:.2}", osc.vol_adsr.decay),
-                    VolSustain => format!("{:.2}", osc.vol_adsr.sustain * 100.0),
-                    VolRelease => format!("{:.2}", osc.vol_adsr.release),
-                    VolLFOAmplitude => format!("{:.2}", osc.vol_lfo.amplitude * 100.0),
-                    VolLFOPeriod => format!("{:.2}", osc.vol_lfo.period),
-                    PitchAttack => format!("{:.2}", osc.pitch_adsr.attack),
-                    PitchHold => format!("{:.2}", osc.pitch_adsr.hold),
-                    PitchDecay => format!("{:.2}", osc.pitch_adsr.decay),
-                    PitchMultiply => format!("{:.2}", osc.pitch_adsr.multiply * 100.0),
-                    PitchRelease => format!("{:.2}", osc.pitch_adsr.release),
-                    PitchLFOAmplitude => format!("{:.2}", osc.pitch_lfo.amplitude * 100.0),
-                    PitchLFOPeriod => format!("{:.2}", osc.pitch_lfo.period),
-                    FilterType => to_string(osc.filter_params.filter),
-                    FilterFreq => format!("{:.2}", osc.filter_params.freq),
-                    FilterQ => format!("{:.2}", osc.filter_params.q_value),
+                    CoarseTune => (format!("{}", osc.coarse_tune), " semis".to_string()),
+                    FineTune => make_strings(osc.fine_tune * 100.0, " cents"),
+                    VolAttack => duration_strings(osc.vol_adsr.attack),
+                    VolHold => duration_strings(osc.vol_adsr.hold),
+                    VolDecay => duration_strings(osc.vol_adsr.decay),
+                    VolSustain => make_strings(osc.vol_adsr.sustain * 100.0, "%"),
+                    VolRelease => duration_strings(osc.vol_adsr.release),
+                    VolLFOAmplitude => make_strings(osc.vol_lfo.amplitude * 100.0, "%"),
+                    VolLFOPeriod => duration_strings(osc.vol_lfo.period),
+                    PitchAttack => duration_strings(osc.pitch_adsr.attack),
+                    PitchHold => duration_strings(osc.pitch_adsr.hold),
+                    PitchDecay => duration_strings(osc.pitch_adsr.decay),
+                    PitchMultiply => make_strings(osc.pitch_adsr.multiply * 100.0, "%"),
+                    PitchRelease => duration_strings(osc.pitch_adsr.release),
+                    PitchLFOAmplitude => make_strings(osc.pitch_lfo.amplitude * 100.0, "%"),
+                    PitchLFOPeriod => duration_strings(osc.pitch_lfo.period),
+                    FilterType => (to_string(osc.filter_params.filter), "".to_string()),
+                    FilterFreq => make_strings(osc.filter_params.freq, " Hz"),
+                    FilterQ => make_strings(osc.filter_params.q_value, ""),
                     FilterGain => match osc.filter_params.filter {
                         biquad::Type::LowShelf(db_gain)
                         | biquad::Type::HighShelf(db_gain)
-                        | biquad::Type::PeakingEQ(db_gain) => format!("{:.2}", db_gain),
-                        _ => "N/A".to_string(),
+                        | biquad::Type::PeakingEQ(db_gain) => make_strings(db_gain, " dB"),
+                        _ => ("N/A".to_string(), "".to_string()),
                     },
                 }
             }
-            ParameterType::OSC2Mod => format!("{}", params.osc_2_mod),
-        };
-
-        let unit = match parameter {
-            ParameterType::MasterVolume => "%".to_string(),
-            ParameterType::OSC1(param) | ParameterType::OSC2(param) => match param {
-                Volume => "%".to_string(),
-                Shape | Warp => "".to_string(),
-                VolAttack | VolHold | VolDecay | VolRelease => " sec".to_string(),
-                PitchAttack | PitchHold | PitchDecay | PitchRelease => " sec".to_string(),
-                VolSustain | PitchMultiply => "%".to_string(),
-                VolLFOAmplitude | PitchLFOAmplitude => "%".to_string(),
-                VolLFOPeriod | PitchLFOPeriod => " sec".to_string(),
-                CoarseTune => " semis".to_string(),
-                FineTune => " cents".to_string(),
-                FilterType => "".to_string(),
-                FilterFreq => " Hz".to_string(),
-                FilterQ => "".to_string(),
-                FilterGain => " dB".to_string(),
-            },
-            ParameterType::OSC2Mod => "".to_string(),
-        };
-
-        (value, unit)
+            ParameterType::OSC2Mod => (format!("{}", params.osc_2_mod), "".to_string()),
+        }
     }
 }
 
