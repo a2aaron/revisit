@@ -2,13 +2,15 @@ use std::ffi::c_void;
 use std::sync::Arc;
 
 use iced::{futures, Align, Column, Command, Element, Row, Subscription};
-use iced_audio::{knob, v_slider, Knob, NormalParam, VSlider};
+use iced_audio::{knob, v_slider, IntRange, Knob, Normal, NormalParam, VSlider};
 use iced_baseview::{Application, Handle, WindowSubs};
 use raw_window_handle::RawWindowHandle;
 use tokio::sync::Notify;
 use vst::{editor::Editor, host::Host};
 
-use crate::params::{OSCParameterType, OSCType, ParameterType, RawOSC, RawParameters};
+use crate::params::{
+    ModulationType, OSCParameterType, OSCType, ParameterType, RawOSC, RawParameters,
+};
 
 // Create a widget (actually a column) that:
 // 1. Uses `$state` as the widget's `$widget::State` struct
@@ -85,6 +87,28 @@ fn make_pane_with_checkbox<'a>(
     pane
 }
 
+struct TruncatingIntRange {
+    num_regions: usize,
+}
+
+impl TruncatingIntRange {
+    fn snap(&self, value: f32) -> f32 {
+        snap_float(value, self.num_regions)
+    }
+
+    fn snap_knob(&self, knob: &mut knob::State) {
+        knob.normal_param.value = self.snap(knob.normal().into()).into();
+    }
+}
+
+/// Snap a float value in range 0.0-1.0 to the nearest f32 region
+/// For example, snap_float(_, 4) will snap a float to either:
+/// 0.0, 0.333, 0.666, or 1.0
+fn snap_float(value: f32, num_regions: usize) -> f32 {
+    let num_regions = num_regions as f32;
+    (num_regions * value).floor() / (num_regions - 1.0)
+}
+
 struct NotifyRecipe {
     notifier: Arc<Notify>,
 }
@@ -145,6 +169,9 @@ pub struct OSCKnobs {
     filter_freq: knob::State,
     filter_q: knob::State,
     filter_gain: knob::State,
+    coarse_tune_range: TruncatingIntRange,
+    note_shape_range: TruncatingIntRange,
+    filter_type_range: TruncatingIntRange,
 }
 
 impl OSCKnobs {
@@ -174,13 +201,35 @@ impl OSCKnobs {
             filter_freq: make_knob(param_ref, (FilterFreq, osc).into()),
             filter_q: make_knob(param_ref, (FilterQ, osc).into()),
             filter_gain: make_knob(param_ref, (FilterGain, osc).into()),
+            // Subtract one because we want there to be n different values, and these ranges happen to be end-inclusive
+            coarse_tune_range: TruncatingIntRange {
+                num_regions: 24 * 2 + 1,
+            },
+            note_shape_range: TruncatingIntRange {
+                num_regions: crate::sound_gen::NoteShape::VARIANT_COUNT,
+            },
+            filter_type_range: TruncatingIntRange {
+                num_regions: crate::params::FILTER_TYPE_VARIANT_COUNT,
+            },
         }
     }
 
+    /// Set the knob states using the `osc` reference provided.
+    /// This method is called whenever a ForceRedraw happens.
     fn update(&mut self, osc: &RawOSC) {
+        fn set_knob_with_range(knob: &mut knob::State, range: &TruncatingIntRange, value: f32) {
+            knob.set_normal(range.snap(value).into());
+        }
+
         use OSCParameterType::*;
         self.volume.set_normal(osc.get(Volume).into());
-        self.coarse_tune.set_normal(osc.get(CoarseTune).into());
+
+        set_knob_with_range(
+            &mut self.coarse_tune,
+            &self.coarse_tune_range,
+            osc.get(CoarseTune),
+        );
+
         self.fine_tune.set_normal(osc.get(FineTune).into());
         self.attack.set_normal(osc.get(VolAttack).into());
         self.hold.set_normal(osc.get(VolHold).into());
@@ -190,7 +239,9 @@ impl OSCKnobs {
         self.vol_lfo_amplitude
             .set_normal(osc.get(VolLFOAmplitude).into());
         self.vol_lfo_period.set_normal(osc.get(VolLFOPeriod).into());
-        self.note_shape.set_normal(osc.get(Shape).into());
+
+        set_knob_with_range(&mut self.note_shape, &self.note_shape_range, osc.get(Shape));
+
         self.note_warp.set_normal(osc.get(Warp).into());
         self.pitch_attack.set_normal(osc.get(PitchAttack).into());
         self.pitch_hold.set_normal(osc.get(PitchHold).into());
@@ -202,7 +253,13 @@ impl OSCKnobs {
             .set_normal(osc.get(PitchLFOAmplitude).into());
         self.pitch_lfo_period
             .set_normal(osc.get(PitchLFOPeriod).into());
-        self.filter_type.set_normal(osc.get(FilterType).into());
+        // self.filter_type.set_normal(osc.get(FilterType).into());
+        set_knob_with_range(
+            &mut self.filter_type,
+            &self.filter_type_range,
+            osc.get(FilterType),
+            // crate::params::FILTER_TYPE_VARIANT_COUNT,
+        );
         self.filter_freq.set_normal(osc.get(FilterFreq).into());
         self.filter_q.set_normal(osc.get(FilterQ).into());
         self.filter_gain.set_normal(osc.get(FilterGain).into());
@@ -298,6 +355,7 @@ pub struct UIFrontEnd {
     osc_1: OSCKnobs,
     osc_2: OSCKnobs,
     osc_2_mod: knob::State,
+    osc_2_mod_range: TruncatingIntRange,
     params: std::sync::Arc<RawParameters>,
     handle: Option<Handle>,
     notifier: Arc<Notify>,
@@ -320,6 +378,9 @@ impl Application for UIFrontEnd {
             osc_1: OSCKnobs::new(param_ref, OSCType::OSC1),
             osc_2: OSCKnobs::new(param_ref, OSCType::OSC1),
             osc_2_mod: make_knob(param_ref, ParameterType::OSC2Mod),
+            osc_2_mod_range: TruncatingIntRange {
+                num_regions: ModulationType::VARIANT_COUNT,
+            },
             params,
             handle: None,
             notifier,
@@ -330,9 +391,40 @@ impl Application for UIFrontEnd {
 
     fn update(&mut self, message: Self::Message) -> Command<Self::Message> {
         match message {
+            // The GUI has changed a parameter
             Message::ParameterChanged(value, param) => {
                 self.params.set(value, param);
+
+                // If the knob changed was a "snapping" knob, make sure the knob
+                // ends up appearing snapped.
+                match param {
+                    ParameterType::OSC1(osc_param) | ParameterType::OSC2(osc_param) => {
+                        let osc = match param {
+                            ParameterType::OSC1(_) => &mut self.osc_1,
+                            ParameterType::OSC2(_) => &mut self.osc_2,
+                            _ => unreachable!(),
+                        };
+                        match osc_param {
+                            OSCParameterType::CoarseTune => {
+                                osc.coarse_tune_range.snap_knob(&mut osc.coarse_tune)
+                            }
+                            OSCParameterType::Shape => {
+                                osc.note_shape_range.snap_knob(&mut osc.note_shape)
+                            }
+                            OSCParameterType::FilterType => {
+                                osc.filter_type_range.snap_knob(&mut osc.filter_type)
+                            }
+                            _ => (),
+                        }
+                    }
+                    ParameterType::OSC2Mod => {
+                        self.osc_2_mod_range.snap_knob(&mut self.osc_2_mod);
+                    }
+                    ParameterType::MasterVolume => (),
+                }
             }
+            // The host has changed a parameter, or a redraw was requested
+            // We update the knobs based on the current parameter values
             Message::ForceRedraw => {
                 self.master_vol
                     .set_normal(self.params.get(ParameterType::MasterVolume).into());

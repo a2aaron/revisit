@@ -11,6 +11,11 @@ use vst::{
     util::AtomicFloat,
 };
 
+// Low Pass, High Pass, Bandpass
+// All Pass, Notch Filter
+// Low Shelf, High Shelf, Peaking EQ
+pub const FILTER_TYPE_VARIANT_COUNT: usize = 8;
+
 pub struct Parameters {
     pub osc_1: OSCParams,
     pub osc_2: OSCParams,
@@ -612,7 +617,7 @@ pub enum OSCType {
     OSC2,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, VariantCount)]
 pub enum ModulationType {
     Mix,
     AmpMod,

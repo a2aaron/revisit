@@ -1,4 +1,5 @@
 use biquad::{Biquad, DirectForm1, ToHertz, Q_BUTTERWORTH_F32};
+use variant_count::VariantCount;
 use wmidi::{Note, PitchBend, U14, U7};
 
 use crate::neighbor_pairs::NeighborPairsIter;
@@ -283,7 +284,7 @@ pub enum NoteState {
 
 /// The shape of a note. The associated f32 indicates the "warp" of the note.
 /// The warp is a value between 0.0 and 1.0.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, VariantCount)]
 pub enum NoteShape {
     /// A sine wave
     Sine,
