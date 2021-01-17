@@ -393,6 +393,16 @@ impl PluginParameters for RawParameters {
 
     fn set_parameter(&self, index: i32, value: f32) {
         if let Ok(parameter) = ParameterType::try_from(index) {
+            // This is needed because some VST hosts, such as Ableton, echo a
+            // parameter change back to the plugin. This causes issues such as
+            // weird knob behavior where the knob "flickers" because the user tries
+            // to change the knob value, but ableton keeps sending back old, echoed
+            // values.
+            #[allow(clippy::float_cmp)]
+            if self.get(parameter) == value {
+                return;
+            }
+
             self.set(value, parameter);
             self.notify.as_ref().notify_one();
         }
