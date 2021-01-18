@@ -658,10 +658,10 @@ impl std::fmt::Display for ModulationType {
         use ModulationType::*;
         match self {
             Mix => write!(f, "Mix"),
-            AmpMod => write!(f, "Amplitude Modulation"),
-            FreqMod => write!(f, "Frequency Modulation"),
-            PhaseMod => write!(f, "Phase Modulation"),
-            WarpMod => write!(f, "Warp Modulation"),
+            AmpMod => write!(f, "Amp. Mod"),
+            FreqMod => write!(f, "Freq. Mod"),
+            PhaseMod => write!(f, "Phase Mod"),
+            WarpMod => write!(f, "Warp Mod"),
         }
     }
 }

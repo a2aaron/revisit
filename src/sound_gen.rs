@@ -392,7 +392,7 @@ impl std::fmt::Display for NoteShape {
                     "Skewed Triangle"
                 }
             }
-            Noise => "White Noise",
+            Noise => "Noise",
         };
 
         write!(f, "{}", string)

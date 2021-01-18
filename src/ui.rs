@@ -16,6 +16,9 @@ use crate::{
     sound_gen::NoteShape,
 };
 
+const LABEL_WIDTH: u16 = 45;
+const KNOB_SPACING: u16 = 12;
+
 /// Use: widget!(identifier, state, param, title);
 /// Create a widget (actually a column) that:
 /// 1. Uses `$state` as the widget's `$widget::State` struct
@@ -38,7 +41,11 @@ macro_rules! widget {
 
 /// Create a combined element with the label `title` under a `widget`
 fn with_label<'a>(widget: impl Into<Element<'a, Message>>, title: &str) -> Element<'a, Message> {
-    Column::with_children(vec![widget.into(), iced::Text::new(title).size(15).into()])
+    let text = iced::Text::new(title)
+        .size(15)
+        .width(iced::Length::Units(LABEL_WIDTH))
+        .horizontal_alignment(iced::HorizontalAlignment::Center);
+    Column::with_children(vec![widget.into(), text.into()])
         .align_items(Align::Center)
         .into()
 }
@@ -66,7 +73,7 @@ fn knob_row<'a>(knobs: Vec<Element<'a, Message>>, title: &str) -> Element<'a, Me
         .push(
             Row::with_children(knobs)
                 .align_items(Align::Center)
-                .spacing(20),
+                .spacing(KNOB_SPACING),
         )
         .align_items(Align::Start)
         .spacing(2)
@@ -587,7 +594,13 @@ impl Application for UIFrontEnd {
         let master_vol_widget = widget!(VSlider, &mut self.master_vol, ParameterType::MasterVolume);
 
         // TODO: Consider a smarter way for messages that doesn't involve always casting to f32
-        let osc_2_mod = widget!(Knob, &mut self.osc_2_mod, ParameterType::OSC2Mod);
+        let osc_2_mod_title = ModulationType::from(self.osc_2_mod.normal().as_f32()).to_string();
+        let osc_2_mod = widget!(
+            Knob,
+            &mut self.osc_2_mod,
+            ParameterType::OSC2Mod,
+            &osc_2_mod_title
+        );
 
         let master_pane = master_vol_widget;
         let osc_1 = OSCKnobs::make_widget(&mut self.osc_1, OSCType::OSC1, None);
@@ -714,14 +727,14 @@ fn widget_name(param: ParameterType) -> String {
             VolDecay => "D".to_string(),
             VolSustain => "S".to_string(),
             VolRelease => "R".to_string(),
-            VolLFOAmplitude => "Amplitude".to_string(),
+            VolLFOAmplitude => "Amount".to_string(),
             VolLFOPeriod => "Period".to_string(),
             PitchAttack => "A".to_string(),
             PitchHold => "H".to_string(),
             PitchDecay => "D".to_string(),
             PitchMultiply => "M".to_string(),
             PitchRelease => "R".to_string(),
-            PitchLFOAmplitude => "Amplitude".to_string(),
+            PitchLFOAmplitude => "Amount".to_string(),
             PitchLFOPeriod => "Period".to_string(),
             FilterType => "Filter Type".to_string(),
             FilterFreq => "Freq.".to_string(),
