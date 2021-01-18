@@ -39,65 +39,6 @@ macro_rules! widget {
     };
 }
 
-/// Create a combined element with the label `title` under a `widget`
-fn with_label<'a>(widget: impl Into<Element<'a, Message>>, title: &str) -> Element<'a, Message> {
-    let text = iced::Text::new(title)
-        .size(15)
-        .width(iced::Length::Units(LABEL_WIDTH))
-        .horizontal_alignment(iced::HorizontalAlignment::Center);
-    Column::with_children(vec![widget.into(), text.into()])
-        .align_items(Align::Center)
-        .into()
-}
-
-/// Convience function to make a `NormalParam` using a `RawParameters`. The
-/// `NormalParam` will have a default value of whatever the default value is for
-/// a `RawParameters`.
-fn make_normal_param(param_ref: &RawParameters, param_type: ParameterType) -> NormalParam {
-    NormalParam {
-        value: param_ref.get(param_type).into(),
-        default: RawParameters::get_default(param_type).into(),
-    }
-}
-
-/// Convience function to make `knob::State` out of a `RawParameters`
-/// and `ParameterType`
-fn make_knob(param_ref: &RawParameters, param_type: ParameterType) -> knob::State {
-    knob::State::new(make_normal_param(param_ref, param_type))
-}
-
-/// Create a row of `knobs` with the title `title`.
-fn knob_row<'a>(knobs: Vec<Element<'a, Message>>, title: &str) -> Element<'a, Message> {
-    Column::new()
-        .push(iced::Text::new(title).size(18))
-        .push(
-            Row::with_children(knobs)
-                .align_items(Align::Center)
-                .spacing(KNOB_SPACING),
-        )
-        .align_items(Align::Start)
-        .spacing(2)
-        .into()
-}
-
-/// Make a row of widgets with better default spacing.
-fn row(widgets: Vec<Element<'_, Message>>) -> Element<'_, Message> {
-    Row::with_children(widgets).spacing(5).into()
-}
-
-/// Make an empty column with better default spacing.
-fn column<'a>() -> Column<'a, Message> {
-    Column::new().spacing(5)
-}
-
-/// Make a pane without the additional `on_off` widget.
-fn make_pane<'a>(
-    title: &str,
-    widgets: Vec<(Vec<Element<'a, Message>>, &str)>,
-) -> Column<'a, Message> {
-    make_pane_with_checkbox(title, None, widgets)
-}
-
 /// Makes a pane of widgets with the specified title.
 /// `widgets` consists of a vector of (`inner_vec`, `row_title`). Each `inner_vec`
 ///  is a list of widgets that will be arranged in a row. The row will have the
@@ -119,6 +60,99 @@ fn make_pane_with_checkbox<'a>(
         pane = pane.push(knob_row(knobs, title));
     }
     pane
+}
+
+/// Make a pane without the additional `on_off` widget.
+fn make_pane<'a>(
+    title: &str,
+    widgets: Vec<(Vec<Element<'a, Message>>, &str)>,
+) -> Column<'a, Message> {
+    make_pane_with_checkbox(title, None, widgets)
+}
+
+/// Create a row of `knobs` with the title `title`.
+fn knob_row<'a>(knobs: Vec<Element<'a, Message>>, title: &str) -> Element<'a, Message> {
+    Column::new()
+        .push(iced::Text::new(title).size(18))
+        .push(
+            Row::with_children(knobs)
+                .align_items(Align::Center)
+                .spacing(KNOB_SPACING),
+        )
+        .align_items(Align::Start)
+        .spacing(2)
+        .into()
+}
+
+/// Create a combined element with the label `title` under a `widget`
+fn with_label<'a>(widget: impl Into<Element<'a, Message>>, title: &str) -> Element<'a, Message> {
+    let text = iced::Text::new(title)
+        .size(15)
+        .width(iced::Length::Units(LABEL_WIDTH))
+        .horizontal_alignment(iced::HorizontalAlignment::Center);
+    Column::with_children(vec![widget.into(), text.into()])
+        .align_items(Align::Center)
+        .into()
+}
+
+/// Convience function to make `knob::State` out of a `RawParameters`
+/// and `ParameterType`
+fn make_knob(param_ref: &RawParameters, param_type: ParameterType) -> knob::State {
+    knob::State::new(make_normal_param(param_ref, param_type))
+}
+
+/// Make a row of widgets with better default spacing.
+fn row(widgets: Vec<Element<'_, Message>>) -> Element<'_, Message> {
+    Row::with_children(widgets).spacing(5).into()
+}
+
+/// Make an empty column with better default spacing.
+fn column<'a>() -> Column<'a, Message> {
+    Column::new().spacing(5)
+}
+
+/// Convience function to make a `NormalParam` using a `RawParameters`. The
+/// `NormalParam` will have a default value of whatever the default value is for
+/// a `RawParameters`.
+fn make_normal_param(param_ref: &RawParameters, param_type: ParameterType) -> NormalParam {
+    NormalParam {
+        value: param_ref.get(param_type).into(),
+        default: RawParameters::get_default(param_type).into(),
+    }
+}
+
+/// The widget name for a given parameter
+fn widget_name(param: ParameterType) -> String {
+    use OSCParameterType::*;
+    match param {
+        ParameterType::MasterVolume => "Master Volume".to_string(),
+        ParameterType::OSC1(param) | ParameterType::OSC2(param) => match param {
+            Volume => "Volume".to_string(),
+            FineTune => "Fine".to_string(),
+            CoarseTune => "Coarse".to_string(),
+            Shape => "Shape".to_string(),
+            Warp => "Warp".to_string(),
+            VolAttack => "A".to_string(),
+            VolHold => "H".to_string(),
+            VolDecay => "D".to_string(),
+            VolSustain => "S".to_string(),
+            VolRelease => "R".to_string(),
+            VolLFOAmplitude => "Amount".to_string(),
+            VolLFOPeriod => "Period".to_string(),
+            PitchAttack => "A".to_string(),
+            PitchHold => "H".to_string(),
+            PitchDecay => "D".to_string(),
+            PitchMultiply => "M".to_string(),
+            PitchRelease => "R".to_string(),
+            PitchLFOAmplitude => "Amount".to_string(),
+            PitchLFOPeriod => "Period".to_string(),
+            FilterType => "Filter Type".to_string(),
+            FilterFreq => "Freq.".to_string(),
+            FilterQ => "Q".to_string(),
+            FilterGain => "Gain".to_string(),
+        },
+        ParameterType::OSC2Mod => "OSC 2 Mod".to_string(),
+    }
 }
 
 /// A replacement struct for `iced_audio::IntRange`. This is used for snapping
@@ -708,40 +742,6 @@ impl Editor for UIFrontEnd {
             }
         }
         false
-    }
-}
-
-/// The widget name for a given parameter
-fn widget_name(param: ParameterType) -> String {
-    use OSCParameterType::*;
-    match param {
-        ParameterType::MasterVolume => "Master Volume".to_string(),
-        ParameterType::OSC1(param) | ParameterType::OSC2(param) => match param {
-            Volume => "Volume".to_string(),
-            FineTune => "Fine".to_string(),
-            CoarseTune => "Coarse".to_string(),
-            Shape => "Shape".to_string(),
-            Warp => "Warp".to_string(),
-            VolAttack => "A".to_string(),
-            VolHold => "H".to_string(),
-            VolDecay => "D".to_string(),
-            VolSustain => "S".to_string(),
-            VolRelease => "R".to_string(),
-            VolLFOAmplitude => "Amount".to_string(),
-            VolLFOPeriod => "Period".to_string(),
-            PitchAttack => "A".to_string(),
-            PitchHold => "H".to_string(),
-            PitchDecay => "D".to_string(),
-            PitchMultiply => "M".to_string(),
-            PitchRelease => "R".to_string(),
-            PitchLFOAmplitude => "Amount".to_string(),
-            PitchLFOPeriod => "Period".to_string(),
-            FilterType => "Filter Type".to_string(),
-            FilterFreq => "Freq.".to_string(),
-            FilterQ => "Q".to_string(),
-            FilterGain => "Gain".to_string(),
-        },
-        ParameterType::OSC2Mod => "OSC 2 Mod".to_string(),
     }
 }
 
