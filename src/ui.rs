@@ -1,14 +1,14 @@
 use std::sync::Arc;
 use std::{ffi::c_void, hash::Hash};
 
-use iced::{futures, Align, Column, Command, Element, Point, Row, Subscription, Vector};
+use iced::{futures, Align, Column, Command, Element, Point, Rectangle, Row, Subscription, Vector};
 use iced_audio::{
     knob::{self, LineCap},
     v_slider, Knob, NormalParam, VSlider,
 };
 use iced_baseview::{Application, Handle, WindowSubs};
 use iced_graphics::{
-    canvas::{path::Builder, Frame, LineJoin, Path, Stroke},
+    canvas::{path::Builder, Frame, LineJoin, Stroke},
     Backend, Primitive, Renderer,
 };
 use iced_native::{layout, mouse, Widget};
@@ -208,27 +208,31 @@ impl<B: Backend> Widget<Message, Renderer<B>> for ModTypeSelector {
         _viewport: &iced::Rectangle,
     ) -> (Primitive, mouse::Interaction) {
         let rect = layout.bounds();
+        let rects = split_rect_horiz(rect, 5);
 
         let mut frame = Frame::new(rect.size());
-        let stroke = Stroke {
-            color: if self.selected % 2 == 0 {
-                iced_native::Color::new(1.0, 0.0, 0.0, 1.0)
-            } else {
-                iced_native::Color::new(0.0, 1.0, 0.0, 1.0)
-            },
+        let mut stroke = Stroke {
+            color: iced_native::Color::BLACK,
             width: 1.0,
             line_cap: LineCap::Round,
             line_join: LineJoin::Miter,
         };
 
-        let mut path = Builder::new();
-        path.move_to(Point::ORIGIN);
-        path.line_to(Point::new(rect.width, rect.height));
-        path.move_to(Point::new(rect.width, 0.0));
-        path.line_to(Point::new(0.0, rect.height));
-        let path = path.build();
+        for (i, rect) in rects.iter().enumerate() {
+            if self.selected == i {
+                stroke = stroke.with_color(iced_native::Color::new(0.0, 1.0, 0.0, 1.0));
+            } else {
+                stroke = stroke.with_color(iced_native::Color::new(1.0, 0.0, 0.0, 1.0));
+            }
+            let mut path = Builder::new();
+            path.move_to(Point::new(i as f32 * rect.width, 0.0));
+            path.line_to(Point::new((i + 1) as f32 * rect.width, rect.height));
+            path.move_to(Point::new((i + 1) as f32 * rect.width, 0.0));
+            path.line_to(Point::new(i as f32 * rect.width, rect.height));
+            let path = path.build();
 
-        frame.stroke(&path, stroke);
+            frame.stroke(&path, stroke);
+        }
 
         let primitive = Primitive::Translate {
             translation: Vector::new(rect.x, rect.y),
@@ -256,10 +260,15 @@ impl<B: Backend> Widget<Message, Renderer<B>> for ModTypeSelector {
         _clipboard: Option<&dyn iced_native::Clipboard>,
     ) -> iced_native::event::Status {
         if let iced_native::Event::Mouse(mouse_event) = event {
-            if mouse_event == mouse::Event::ButtonPressed(mouse::Button::Left)
-                && layout.bounds().contains(cursor_position)
-            {
-                self.selected += 1;
+            if mouse_event == mouse::Event::ButtonPressed(mouse::Button::Left) {
+                let bounds = layout.bounds();
+                let squares = split_rect_horiz(bounds, 5);
+                for (i, square) in squares.iter().enumerate() {
+                    if square.contains(cursor_position) {
+                        self.selected = i;
+                        break;
+                    }
+                }
                 return iced_native::event::Status::Captured;
             }
         }
@@ -891,6 +900,22 @@ fn to_keyboard_event(
             is_composing: false,
         },
     }
+}
+
+/// Split a rectangle horizontally
+fn split_rect_horiz(rect: Rectangle, num_rects: usize) -> Vec<Rectangle> {
+    let mut vec = Vec::with_capacity(num_rects);
+    let new_width = rect.width / num_rects as f32;
+
+    for i in 0..num_rects {
+        vec.push(Rectangle {
+            x: rect.x + i as f32 * new_width,
+            y: rect.y,
+            width: new_width,
+            height: rect.height,
+        })
+    }
+    vec
 }
 
 #[cfg(target_os = "windows")]
