@@ -1,10 +1,16 @@
 use std::sync::Arc;
 use std::{ffi::c_void, hash::Hash};
 
-use iced::{futures, Align, Column, Command, Element, Row, Subscription};
-use iced_audio::{knob, v_slider, Knob, NormalParam, VSlider};
+use iced::{futures, Align, Column, Command, Element, Point, Row, Subscription, Vector};
+use iced_audio::{
+    knob::{self, LineCap},
+    v_slider, Knob, NormalParam, VSlider,
+};
 use iced_baseview::{Application, Handle, WindowSubs};
-use iced_graphics::{Backend, Primitive, Renderer};
+use iced_graphics::{
+    canvas::{path::Builder, Frame, LineJoin, Path, Stroke},
+    Backend, Primitive, Renderer,
+};
 use iced_native::{layout, mouse, Widget};
 use raw_window_handle::RawWindowHandle;
 use tokio::sync::Notify;
@@ -201,14 +207,35 @@ impl<B: Backend> Widget<Message, Renderer<B>> for ModTypeSelector {
         _cursor_position: iced::Point,
         _viewport: &iced::Rectangle,
     ) -> (Primitive, mouse::Interaction) {
-        let quad = Primitive::Quad {
-            bounds: layout.bounds(),
-            background: iced::Background::Color(iced_native::Color::BLACK),
-            border_radius: 1.0,
-            border_width: 2.0,
-            border_color: iced_native::Color::TRANSPARENT,
+        let rect = layout.bounds();
+
+        let mut frame = Frame::new(rect.size());
+        let stroke = Stroke {
+            color: if self.selected % 2 == 0 {
+                iced_native::Color::new(1.0, 0.0, 0.0, 1.0)
+            } else {
+                iced_native::Color::new(0.0, 1.0, 0.0, 1.0)
+            },
+            width: 1.0,
+            line_cap: LineCap::Round,
+            line_join: LineJoin::Miter,
         };
-        (quad, mouse::Interaction::Idle)
+
+        let mut path = Builder::new();
+        path.move_to(Point::ORIGIN);
+        path.line_to(Point::new(rect.width, rect.height));
+        path.move_to(Point::new(rect.width, 0.0));
+        path.line_to(Point::new(0.0, rect.height));
+        let path = path.build();
+
+        frame.stroke(&path, stroke);
+
+        let primitive = Primitive::Translate {
+            translation: Vector::new(rect.x, rect.y),
+            content: Box::new(frame.into_geometry().into_primitive()),
+        };
+
+        (primitive, mouse::Interaction::Idle)
     }
 
     fn hash_layout(&self, state: &mut iced_native::Hasher) {
