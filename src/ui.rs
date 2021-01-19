@@ -1,9 +1,11 @@
-use std::ffi::c_void;
 use std::sync::Arc;
+use std::{ffi::c_void, hash::Hash};
 
 use iced::{futures, Align, Column, Command, Element, Row, Subscription};
 use iced_audio::{knob, v_slider, Knob, NormalParam, VSlider};
 use iced_baseview::{Application, Handle, WindowSubs};
+use iced_graphics::{Backend, Primitive, Renderer};
+use iced_native::{layout, mouse, Widget};
 use raw_window_handle::RawWindowHandle;
 use tokio::sync::Notify;
 use vst::{editor::Editor, host::Host};
@@ -155,6 +157,88 @@ fn widget_name(param: ParameterType) -> String {
     }
 }
 
+struct ModTypeSelector {
+    // Which element is currently selected
+    selected: usize,
+    width: iced::Length,
+    height: iced::Length,
+}
+
+impl ModTypeSelector {
+    fn new() -> ModTypeSelector {
+        ModTypeSelector {
+            selected: 0,
+            width: iced::Length::Fill,
+            height: iced::Length::Fill,
+        }
+    }
+}
+
+impl<B: Backend> Widget<Message, Renderer<B>> for ModTypeSelector {
+    fn width(&self) -> iced::Length {
+        self.width
+    }
+
+    fn height(&self) -> iced::Length {
+        self.height
+    }
+
+    fn layout(
+        &self,
+        _renderer: &Renderer<B>,
+        limits: &iced_native::layout::Limits,
+    ) -> layout::Node {
+        let limits = limits.width(self.width).height(self.height);
+        let size = limits.resolve(iced_native::Size::ZERO);
+        layout::Node::new(size)
+    }
+
+    fn draw(
+        &self,
+        _renderer: &mut Renderer<B>,
+        _defaults: &<iced_graphics::Renderer<B> as iced_native::Renderer>::Defaults,
+        layout: iced_native::Layout<'_>,
+        _cursor_position: iced::Point,
+        _viewport: &iced::Rectangle,
+    ) -> (Primitive, mouse::Interaction) {
+        let quad = Primitive::Quad {
+            bounds: layout.bounds(),
+            background: iced::Background::Color(iced_native::Color::BLACK),
+            border_radius: 1.0,
+            border_width: 2.0,
+            border_color: iced_native::Color::TRANSPARENT,
+        };
+        (quad, mouse::Interaction::Idle)
+    }
+
+    fn hash_layout(&self, state: &mut iced_native::Hasher) {
+        struct Marker;
+        std::any::TypeId::of::<Marker>().hash(state);
+
+        self.width.hash(state);
+        self.height.hash(state);
+    }
+
+    fn on_event(
+        &mut self,
+        event: iced_native::Event,
+        layout: iced_native::Layout<'_>,
+        cursor_position: iced::Point,
+        _messages: &mut Vec<Message>,
+        _renderer: &Renderer<B>,
+        _clipboard: Option<&dyn iced_native::Clipboard>,
+    ) -> iced_native::event::Status {
+        if let iced_native::Event::Mouse(mouse_event) = event {
+            if mouse_event == mouse::Event::ButtonPressed(mouse::Button::Left)
+                && layout.bounds().contains(cursor_position)
+            {
+                self.selected += 1;
+                return iced_native::event::Status::Captured;
+            }
+        }
+        iced_native::event::Status::Ignored
+    }
+}
 /// A replacement struct for `iced_audio::IntRange`. This is used for snapping
 /// knobs which only take on discrete integer values (for example, the Shape knob).
 /// However, unlike `iced_audio::IntRange`, this knob sets the integer regions
@@ -220,7 +304,6 @@ where
 
     fn hash(&self, state: &mut H) {
         // generic hash implementation. this isn't actually very important to us
-        use std::hash::Hash;
         std::any::TypeId::of::<Self>().hash(state);
     }
 
@@ -498,10 +581,18 @@ impl OSCKnobs {
             vec![(vec![filter_type, filter_freq, filter_q, filter_gain], "")],
         );
 
-        Column::with_children(vec![osc_pane.into(), pitch_pane.into(), filter_pane.into()])
-            .padding(20)
-            .spacing(20)
-            .into()
+        // DEBUG
+        let selector = ModTypeSelector::new();
+
+        Column::with_children(vec![
+            osc_pane.into(),
+            pitch_pane.into(),
+            filter_pane.into(),
+            Element::new(selector),
+        ])
+        .padding(20)
+        .spacing(20)
+        .into()
     }
 }
 

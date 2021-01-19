@@ -2336,6 +2336,7 @@ dependencies = [
  "iced_audio",
  "iced_baseview",
  "iced_futures",
+ "iced_graphics",
  "iced_native",
  "keyboard-types",
  "log",

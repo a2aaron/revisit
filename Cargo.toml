@@ -23,6 +23,7 @@ iced_audio = "0.6.1" # { git = "https://github.com/a2aaron/iced_audio", branch =
 iced_baseview = { git = "https://github.com/a2aaron/iced_baseview", branch = "main" }
 iced_native = "0.3.0"
 iced_futures = { version = "0.2.0", features = ["async-std"] }
+iced_graphics = "0.1.0"
 raw-window-handle = "0.3.3"
 baseview = { git = "https://github.com/RustAudio/baseview", branch = "master" }
 # because baseview doesn't reexport this
