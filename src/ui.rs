@@ -209,13 +209,13 @@ struct ModTypeSelector {
     text: Vec<&'static str>,
     text_size: f32,
     // Which element is currently selected
-    pub selected: usize,
+    pub selected: ModulationType,
     width: iced::Length,
     height: iced::Length,
 }
 
 impl ModTypeSelector {
-    fn new(selected: usize, text: Vec<&'static str>) -> ModTypeSelector {
+    fn new(selected: ModulationType, text: Vec<&'static str>) -> ModTypeSelector {
         ModTypeSelector {
             text,
             text_size: 15.0,
@@ -223,6 +223,27 @@ impl ModTypeSelector {
             width: iced::Length::Units(200),
             height: iced::Length::Units(20),
         }
+    }
+}
+
+fn to_mod_type(x: usize) -> ModulationType {
+    match x {
+        0 => ModulationType::Mix,
+        1 => ModulationType::AmpMod,
+        2 => ModulationType::FreqMod,
+        3 => ModulationType::PhaseMod,
+        4 => ModulationType::WarpMod,
+        _ => unreachable!(),
+    }
+}
+
+fn to_usize(x: ModulationType) -> usize {
+    match x {
+        ModulationType::Mix => 0,
+        ModulationType::AmpMod => 1,
+        ModulationType::FreqMod => 2,
+        ModulationType::PhaseMod => 3,
+        ModulationType::WarpMod => 4,
     }
 }
 
@@ -265,7 +286,7 @@ impl<B: Backend> Widget<Message, Renderer<B>> for ModTypeSelector {
         };
 
         for (i, rect) in rects.iter().enumerate() {
-            if self.selected == i {
+            if self.selected == to_mod_type(i) {
                 stroke = stroke.with_color(BLACK_GREEN);
             } else {
                 stroke = stroke.with_color(GREY);
@@ -274,7 +295,7 @@ impl<B: Backend> Widget<Message, Renderer<B>> for ModTypeSelector {
             let text = iced_graphics::canvas::Text {
                 content: self.text[i].to_string(),
                 position: Point::new(((i as f32) + 0.5) * rect.width, rect.height / 2.0),
-                color: if self.selected == i {
+                color: if self.selected == to_mod_type(i) {
                     BLACK_GREEN
                 } else {
                     GREY
@@ -288,7 +309,7 @@ impl<B: Backend> Widget<Message, Renderer<B>> for ModTypeSelector {
         }
 
         let rounded_rect = Primitive::Quad {
-            bounds: rects[self.selected],
+            bounds: rects[to_usize(self.selected)],
             background: Background::Color(GREEN_TRANS),
             border_radius: 3.0,
             border_width: 1.0,
@@ -330,7 +351,7 @@ impl<B: Backend> Widget<Message, Renderer<B>> for ModTypeSelector {
                 let squares = split_rect_horiz(bounds, self.text.len());
                 for (i, square) in squares.iter().enumerate() {
                     if square.contains(cursor_position) {
-                        self.selected = i;
+                        self.selected = to_mod_type(i);
                         match i {
                             0 => messages.push(Message::OSC2ModChanged(ModulationType::Mix)),
                             1 => messages.push(Message::OSC2ModChanged(ModulationType::AmpMod)),
@@ -706,8 +727,6 @@ pub struct UIFrontEnd {
     master_vol: v_slider::State,
     osc_1: OSCKnobs,
     osc_2: OSCKnobs,
-    osc_2_mod: knob::State,
-    osc_2_mod_range: TruncatingIntRange,
     // This is used so that the GUI can update the shared parameters object when
     // a GUI element is changed.
     params: std::sync::Arc<RawParameters>,
@@ -741,10 +760,6 @@ impl Application for UIFrontEnd {
             )),
             osc_1: OSCKnobs::new(param_ref, OSCType::OSC1),
             osc_2: OSCKnobs::new(param_ref, OSCType::OSC1),
-            osc_2_mod: make_knob(param_ref, ParameterType::OSC2Mod),
-            osc_2_mod_range: TruncatingIntRange {
-                num_regions: ModulationType::VARIANT_COUNT,
-            },
             params,
             handle: None,
             notifier,
@@ -792,9 +807,9 @@ impl Application for UIFrontEnd {
                             _ => (),
                         }
                     }
-                    ParameterType::OSC2Mod => {
-                        self.osc_2_mod_range.snap_knob(&mut self.osc_2_mod);
-                    }
+                    // This is definitely unreachable because OSC2Mod handling is
+                    // done by the OSC2ModChanged message
+                    ParameterType::OSC2Mod => unreachable!(),
                     ParameterType::MasterVolume => (),
                 }
 
@@ -813,8 +828,6 @@ impl Application for UIFrontEnd {
                     .set_normal(self.params.get(ParameterType::MasterVolume).into());
                 self.osc_1.update(&self.params.osc_1);
                 self.osc_2.update(&self.params.osc_2);
-                self.osc_2_mod
-                    .set_normal(self.params.get(ParameterType::OSC2Mod).into());
             }
         }
 
@@ -831,20 +844,11 @@ impl Application for UIFrontEnd {
         let master_vol_widget = widget!(VSlider, &mut self.master_vol, ParameterType::MasterVolume);
 
         // TODO: Consider a smarter way for messages that doesn't involve always casting to f32
-        let osc_2_mod_title = ModulationType::from(self.osc_2_mod.normal().as_f32()).to_string();
-
-        // DEBUG
 
         let osc_2_mod = iced::Element::new(ModTypeSelector::new(
-            ((self.params.osc_2_mod.get() * 5.0) as usize).clamp(0, 4), // TODO: THIS IS STUPID
+            self.params.osc_2_mod.get().into(),
             vec!["Mix", "AM", "FM", "PM", "Warp"],
         ));
-        //widget!(
-        //     Knob,
-        //     &mut self.osc_2_mod,
-        //     ParameterType::OSC2Mod,
-        //     &osc_2_mod_title
-        // );
 
         let master_pane = master_vol_widget;
         let osc_1 = OSCKnobs::make_widget(&mut self.osc_1, OSCType::OSC1, None);
