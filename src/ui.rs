@@ -1,7 +1,10 @@
 use std::sync::Arc;
 use std::{ffi::c_void, hash::Hash};
 
-use iced::{futures, Align, Column, Command, Element, Point, Rectangle, Row, Subscription, Vector};
+use iced::{
+    futures, Align, Column, Command, Element, HorizontalAlignment, Point, Rectangle, Row,
+    Subscription, Vector, VerticalAlignment,
+};
 use iced_audio::{
     knob::{self, LineCap},
     v_slider, Knob, NormalParam, VSlider,
@@ -76,7 +79,17 @@ fn make_pane_with_checkbox<'a>(
     let on_off = on_off.unwrap_or_else(|| {
         iced::widget::Space::new(iced::Length::Shrink, iced::Length::Shrink).into()
     });
-    let mut pane = column().push(row(vec![iced::Text::new(title).into(), on_off]));
+
+    let mut pane = column().push(
+        row(vec![
+            iced::Text::new(title)
+                .vertical_alignment(VerticalAlignment::Center)
+                .into(),
+            on_off,
+        ])
+        .align_items(Align::Center),
+    );
+
     for (knobs, title) in widgets.into_iter() {
         pane = pane.push(knob_row(knobs, title));
     }
@@ -110,21 +123,22 @@ fn with_label<'a>(widget: impl Into<Element<'a, Message>>, title: &str) -> Eleme
     let text = iced::Text::new(title)
         .size(15)
         .width(iced::Length::Units(LABEL_WIDTH))
-        .horizontal_alignment(iced::HorizontalAlignment::Center);
+        .horizontal_alignment(HorizontalAlignment::Center);
     Column::with_children(vec![widget.into(), text.into()])
         .align_items(Align::Center)
         .into()
 }
 
 /// Convience function to make `knob::State` out of a `RawParameters`
+
 /// and `ParameterType`
 fn make_knob(param_ref: &RawParameters, param_type: ParameterType) -> knob::State {
     knob::State::new(make_normal_param(param_ref, param_type))
 }
 
 /// Make a row of widgets with better default spacing.
-fn row(widgets: Vec<Element<'_, Message>>) -> Element<'_, Message> {
-    Row::with_children(widgets).spacing(5).into()
+fn row(widgets: Vec<Element<'_, Message>>) -> Row<'_, Message> {
+    Row::with_children(widgets).spacing(5)
 }
 
 /// Make an empty column with better default spacing.
@@ -178,6 +192,7 @@ fn widget_name(param: ParameterType) -> String {
 
 struct ModTypeSelector {
     text: Vec<&'static str>,
+    text_size: f32,
     // Which element is currently selected
     pub selected: usize,
     width: iced::Length,
@@ -188,9 +203,10 @@ impl ModTypeSelector {
     fn new(text: Vec<&'static str>) -> ModTypeSelector {
         ModTypeSelector {
             text,
+            text_size: 15.0,
             selected: 0,
             width: iced::Length::Units(200),
-            height: iced::Length::Fill,
+            height: iced::Length::Units(15),
         }
     }
 }
@@ -250,10 +266,10 @@ impl<B: Backend> Widget<Message, Renderer<B>> for ModTypeSelector {
                 content: self.text[i].to_string(),
                 position: Point::new(((i as f32) + 0.5) * rect.width, rect.height / 2.0),
                 color: if self.selected == i { GREEN } else { RED },
-                size: 15.0,
+                size: self.text_size,
                 font: iced_graphics::Font::Default,
-                horizontal_alignment: iced::HorizontalAlignment::Center,
-                vertical_alignment: iced::VerticalAlignment::Center,
+                vertical_alignment: VerticalAlignment::Center,
+                horizontal_alignment: HorizontalAlignment::Center,
             };
             frame.fill_text(text);
         }
@@ -609,13 +625,9 @@ impl OSCKnobs {
             OSCType::OSC2 => "OSC 2",
         };
 
-        // DEBUG
-        let selector = ModTypeSelector::new(vec!["Mix", "AM", "FM", "PM", "Warp"]);
-
         let osc_pane = make_pane_with_checkbox(
             title,
-            Some(Element::new(selector)),
-            // on_off,
+            on_off,
             vec![
                 (vec![volume, fine_tune, coarse_tune, shape, warp], "Sound"),
                 (vec![attack, hold, decay, sustain, release], "Envelope"),
@@ -776,12 +788,17 @@ impl Application for UIFrontEnd {
 
         // TODO: Consider a smarter way for messages that doesn't involve always casting to f32
         let osc_2_mod_title = ModulationType::from(self.osc_2_mod.normal().as_f32()).to_string();
-        let osc_2_mod = widget!(
-            Knob,
-            &mut self.osc_2_mod,
-            ParameterType::OSC2Mod,
-            &osc_2_mod_title
-        );
+
+        // DEBUG
+
+        let osc_2_mod =
+            iced::Element::new(ModTypeSelector::new(vec!["Mix", "AM", "FM", "PM", "Warp"]));
+        //widget!(
+        //     Knob,
+        //     &mut self.osc_2_mod,
+        //     ParameterType::OSC2Mod,
+        //     &osc_2_mod_title
+        // );
 
         let master_pane = master_vol_widget;
         let osc_1 = OSCKnobs::make_widget(&mut self.osc_1, OSCType::OSC1, None);
