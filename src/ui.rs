@@ -2,8 +2,8 @@ use std::sync::Arc;
 use std::{ffi::c_void, hash::Hash};
 
 use iced::{
-    futures, Align, Column, Command, Element, HorizontalAlignment, Point, Rectangle, Row,
-    Subscription, Vector, VerticalAlignment,
+    futures, Align, Background, Column, Command, Element, HorizontalAlignment, Point, Rectangle,
+    Row, Subscription, Vector, VerticalAlignment,
 };
 use iced_audio::{
     knob::{self, LineCap},
@@ -11,7 +11,7 @@ use iced_audio::{
 };
 use iced_baseview::{Application, Handle, WindowSubs};
 use iced_graphics::{
-    canvas::{path::Builder, Frame, LineJoin, Stroke},
+    canvas::{Frame, LineJoin, Stroke},
     Backend, Primitive, Renderer,
 };
 use iced_native::{layout, mouse, Widget};
@@ -30,17 +30,32 @@ use crate::{
 const LABEL_WIDTH: u16 = 45;
 const KNOB_SPACING: u16 = 12;
 
-const RED: iced_native::Color = iced_native::Color {
-    r: 1.0,
-    g: 0.0,
-    b: 0.0,
-    a: 1.0,
-};
-const GREEN: iced_native::Color = iced_native::Color {
+const GREEN: iced::Color = iced::Color {
     r: 0.0,
     g: 1.0,
     b: 0.0,
     a: 1.0,
+};
+
+const BLACK_GREEN: iced::Color = iced::Color {
+    r: 0.0,
+    g: 0.2,
+    b: 0.0,
+    a: 1.0,
+};
+
+const GREY: iced::Color = iced::Color {
+    r: 0.33,
+    g: 0.33,
+    b: 0.33,
+    a: 1.0,
+};
+
+const GREEN_TRANS: iced::Color = iced::Color {
+    r: 0.0,
+    g: 1.0,
+    b: 0.0,
+    a: 0.5,
 };
 
 /// Use: widget!(identifier, state, param, title);
@@ -206,7 +221,7 @@ impl ModTypeSelector {
             text_size: 15.0,
             selected: 0,
             width: iced::Length::Units(200),
-            height: iced::Length::Units(15),
+            height: iced::Length::Units(20),
         }
     }
 }
@@ -238,7 +253,7 @@ impl<B: Backend> Widget<Message, Renderer<B>> for ModTypeSelector {
         _cursor_position: iced::Point,
         _viewport: &iced::Rectangle,
     ) -> (Primitive, mouse::Interaction) {
-        let rect = layout.bounds();
+        let rect = Rectangle::new(Point::ORIGIN, layout.bounds().size());
         let rects = split_rect_horiz(rect, self.text.len());
 
         let mut frame = Frame::new(rect.size());
@@ -251,21 +266,25 @@ impl<B: Backend> Widget<Message, Renderer<B>> for ModTypeSelector {
 
         for (i, rect) in rects.iter().enumerate() {
             if self.selected == i {
-                stroke = stroke.with_color(iced_native::Color::new(0.0, 1.0, 0.0, 1.0));
+                stroke = stroke.with_color(BLACK_GREEN);
             } else {
-                stroke = stroke.with_color(iced_native::Color::new(1.0, 0.0, 0.0, 1.0));
+                stroke = stroke.with_color(GREY);
             }
-            let mut path = Builder::new();
-            path.move_to(Point::new(i as f32 * rect.width, 0.0));
-            path.line_to(Point::new((i + 1) as f32 * rect.width, rect.height));
-            path.move_to(Point::new((i + 1) as f32 * rect.width, 0.0));
-            path.line_to(Point::new(i as f32 * rect.width, rect.height));
-            let path = path.build();
-            frame.stroke(&path, stroke);
+            // let mut path = Builder::new();
+            // path.move_to(Point::new(i as f32 * rect.width, 0.0));
+            // path.line_to(Point::new((i + 1) as f32 * rect.width, rect.height));
+            // path.move_to(Point::new((i + 1) as f32 * rect.width, 0.0));
+            // path.line_to(Point::new(i as f32 * rect.width, rect.height));
+            // let path = path.build();
+            // frame.stroke(&path, stroke);
             let text = iced_graphics::canvas::Text {
                 content: self.text[i].to_string(),
                 position: Point::new(((i as f32) + 0.5) * rect.width, rect.height / 2.0),
-                color: if self.selected == i { GREEN } else { RED },
+                color: if self.selected == i {
+                    BLACK_GREEN
+                } else {
+                    GREY
+                },
                 size: self.text_size,
                 font: iced_graphics::Font::Default,
                 vertical_alignment: VerticalAlignment::Center,
@@ -274,9 +293,21 @@ impl<B: Backend> Widget<Message, Renderer<B>> for ModTypeSelector {
             frame.fill_text(text);
         }
 
+        let rounded_rect = Primitive::Quad {
+            bounds: rects[self.selected],
+            background: Background::Color(GREEN_TRANS),
+            border_radius: 3.0,
+            border_width: 1.0,
+            border_color: GREEN,
+        };
+
+        let primitive = Primitive::Group {
+            primitives: vec![rounded_rect, frame.into_geometry().into_primitive()],
+        };
+
         let primitive = Primitive::Translate {
-            translation: Vector::new(rect.x, rect.y),
-            content: Box::new(frame.into_geometry().into_primitive()),
+            translation: Vector::new(layout.position().x, layout.position().y),
+            content: Box::new(primitive),
         };
 
         (primitive, mouse::Interaction::Idle)
