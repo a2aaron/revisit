@@ -215,11 +215,11 @@ struct ModTypeSelector {
 }
 
 impl ModTypeSelector {
-    fn new(text: Vec<&'static str>) -> ModTypeSelector {
+    fn new(selected: usize, text: Vec<&'static str>) -> ModTypeSelector {
         ModTypeSelector {
             text,
             text_size: 15.0,
-            selected: 0,
+            selected,
             width: iced::Length::Units(200),
             height: iced::Length::Units(20),
         }
@@ -270,13 +270,7 @@ impl<B: Backend> Widget<Message, Renderer<B>> for ModTypeSelector {
             } else {
                 stroke = stroke.with_color(GREY);
             }
-            // let mut path = Builder::new();
-            // path.move_to(Point::new(i as f32 * rect.width, 0.0));
-            // path.line_to(Point::new((i + 1) as f32 * rect.width, rect.height));
-            // path.move_to(Point::new((i + 1) as f32 * rect.width, 0.0));
-            // path.line_to(Point::new(i as f32 * rect.width, rect.height));
-            // let path = path.build();
-            // frame.stroke(&path, stroke);
+
             let text = iced_graphics::canvas::Text {
                 content: self.text[i].to_string(),
                 position: Point::new(((i as f32) + 0.5) * rect.width, rect.height / 2.0),
@@ -326,7 +320,7 @@ impl<B: Backend> Widget<Message, Renderer<B>> for ModTypeSelector {
         event: iced_native::Event,
         layout: iced_native::Layout<'_>,
         cursor_position: iced::Point,
-        _messages: &mut Vec<Message>,
+        messages: &mut Vec<Message>,
         _renderer: &Renderer<B>,
         _clipboard: Option<&dyn iced_native::Clipboard>,
     ) -> iced_native::event::Status {
@@ -337,6 +331,14 @@ impl<B: Backend> Widget<Message, Renderer<B>> for ModTypeSelector {
                 for (i, square) in squares.iter().enumerate() {
                     if square.contains(cursor_position) {
                         self.selected = i;
+                        match i {
+                            0 => messages.push(Message::OSC2ModChanged(ModulationType::Mix)),
+                            1 => messages.push(Message::OSC2ModChanged(ModulationType::AmpMod)),
+                            2 => messages.push(Message::OSC2ModChanged(ModulationType::FreqMod)),
+                            3 => messages.push(Message::OSC2ModChanged(ModulationType::PhaseMod)),
+                            4 => messages.push(Message::OSC2ModChanged(ModulationType::WarpMod)),
+                            _ => unreachable!(),
+                        }
                         break;
                     }
                 }
@@ -442,7 +444,9 @@ where
 /// A GUI message.
 #[derive(Debug, Clone, Copy)]
 pub enum Message {
-    /// These indicate that the GUI has changed a parameter
+    /// This indicates that the GUI had changed the ModulationType parameter
+    OSC2ModChanged(ModulationType),
+    /// These indicate that the GUI has changed a parameter via a knob
     ParameterChanged(f32, ParameterType),
     /// These are called to make the GUI update itself. Usually, this means that
     /// the host has changed a parameter, so the GUI should change to match.
@@ -752,7 +756,16 @@ impl Application for UIFrontEnd {
     /// React to an incoming message
     fn update(&mut self, message: Self::Message) -> Command<Self::Message> {
         match message {
-            // The GUI has changed a parameter
+            // The GUI has changed the modulation type
+            Message::OSC2ModChanged(mod_type) => {
+                // TODO: Consider using an actual parameter instead of RawParameters
+                self.params.osc_2_mod.set(mod_type.into());
+
+                // Make the VST host update its own parameter display. This is needed
+                // so the host actually has updates with GUI.
+                self.params.host.update_display();
+            }
+            // The GUI has changed a parameter via knob
             Message::ParameterChanged(value, param) => {
                 // We set the parameter according to the changed value.
                 self.params.set(value, param);
@@ -822,8 +835,10 @@ impl Application for UIFrontEnd {
 
         // DEBUG
 
-        let osc_2_mod =
-            iced::Element::new(ModTypeSelector::new(vec!["Mix", "AM", "FM", "PM", "Warp"]));
+        let osc_2_mod = iced::Element::new(ModTypeSelector::new(
+            ((self.params.osc_2_mod.get() * 5.0) as usize).clamp(0, 4), // TODO: THIS IS STUPID
+            vec!["Mix", "AM", "FM", "PM", "Warp"],
+        ));
         //widget!(
         //     Knob,
         //     &mut self.osc_2_mod,

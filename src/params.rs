@@ -636,6 +636,18 @@ pub enum ModulationType {
     WarpMod,
 }
 
+impl From<ModulationType> for f32 {
+    fn from(x: ModulationType) -> Self {
+        match x {
+            ModulationType::Mix => 0.0 / 4.0,
+            ModulationType::AmpMod => 1.0 / 4.0,
+            ModulationType::FreqMod => 2.0 / 4.0,
+            ModulationType::PhaseMod => 3.0 / 4.0,
+            ModulationType::WarpMod => 1.0,
+        }
+    }
+}
+
 impl From<f32> for ModulationType {
     fn from(x: f32) -> Self {
         use ModulationType::*;
