@@ -27,6 +27,19 @@ use crate::{
 const LABEL_WIDTH: u16 = 45;
 const KNOB_SPACING: u16 = 12;
 
+const RED: iced_native::Color = iced_native::Color {
+    r: 1.0,
+    g: 0.0,
+    b: 0.0,
+    a: 1.0,
+};
+const GREEN: iced_native::Color = iced_native::Color {
+    r: 0.0,
+    g: 1.0,
+    b: 0.0,
+    a: 1.0,
+};
+
 /// Use: widget!(identifier, state, param, title);
 /// Create a widget (actually a column) that:
 /// 1. Uses `$state` as the widget's `$widget::State` struct
@@ -164,17 +177,19 @@ fn widget_name(param: ParameterType) -> String {
 }
 
 struct ModTypeSelector {
+    text: Vec<&'static str>,
     // Which element is currently selected
-    selected: usize,
+    pub selected: usize,
     width: iced::Length,
     height: iced::Length,
 }
 
 impl ModTypeSelector {
-    fn new() -> ModTypeSelector {
+    fn new(text: Vec<&'static str>) -> ModTypeSelector {
         ModTypeSelector {
+            text,
             selected: 0,
-            width: iced::Length::Fill,
+            width: iced::Length::Units(200),
             height: iced::Length::Fill,
         }
     }
@@ -208,7 +223,7 @@ impl<B: Backend> Widget<Message, Renderer<B>> for ModTypeSelector {
         _viewport: &iced::Rectangle,
     ) -> (Primitive, mouse::Interaction) {
         let rect = layout.bounds();
-        let rects = split_rect_horiz(rect, 5);
+        let rects = split_rect_horiz(rect, self.text.len());
 
         let mut frame = Frame::new(rect.size());
         let mut stroke = Stroke {
@@ -230,8 +245,17 @@ impl<B: Backend> Widget<Message, Renderer<B>> for ModTypeSelector {
             path.move_to(Point::new((i + 1) as f32 * rect.width, 0.0));
             path.line_to(Point::new(i as f32 * rect.width, rect.height));
             let path = path.build();
-
             frame.stroke(&path, stroke);
+            let text = iced_graphics::canvas::Text {
+                content: self.text[i].to_string(),
+                position: Point::new(((i as f32) + 0.5) * rect.width, rect.height / 2.0),
+                color: if self.selected == i { GREEN } else { RED },
+                size: 15.0,
+                font: iced_graphics::Font::Default,
+                horizontal_alignment: iced::HorizontalAlignment::Center,
+                vertical_alignment: iced::VerticalAlignment::Center,
+            };
+            frame.fill_text(text);
         }
 
         let primitive = Primitive::Translate {
@@ -262,7 +286,7 @@ impl<B: Backend> Widget<Message, Renderer<B>> for ModTypeSelector {
         if let iced_native::Event::Mouse(mouse_event) = event {
             if mouse_event == mouse::Event::ButtonPressed(mouse::Button::Left) {
                 let bounds = layout.bounds();
-                let squares = split_rect_horiz(bounds, 5);
+                let squares = split_rect_horiz(bounds, self.text.len());
                 for (i, square) in squares.iter().enumerate() {
                     if square.contains(cursor_position) {
                         self.selected = i;
@@ -585,9 +609,13 @@ impl OSCKnobs {
             OSCType::OSC2 => "OSC 2",
         };
 
+        // DEBUG
+        let selector = ModTypeSelector::new(vec!["Mix", "AM", "FM", "PM", "Warp"]);
+
         let osc_pane = make_pane_with_checkbox(
             title,
-            on_off,
+            Some(Element::new(selector)),
+            // on_off,
             vec![
                 (vec![volume, fine_tune, coarse_tune, shape, warp], "Sound"),
                 (vec![attack, hold, decay, sustain, release], "Envelope"),
@@ -617,18 +645,10 @@ impl OSCKnobs {
             vec![(vec![filter_type, filter_freq, filter_q, filter_gain], "")],
         );
 
-        // DEBUG
-        let selector = ModTypeSelector::new();
-
-        Column::with_children(vec![
-            osc_pane.into(),
-            pitch_pane.into(),
-            filter_pane.into(),
-            Element::new(selector),
-        ])
-        .padding(20)
-        .spacing(20)
-        .into()
+        Column::with_children(vec![osc_pane.into(), pitch_pane.into(), filter_pane.into()])
+            .padding(20)
+            .spacing(20)
+            .into()
     }
 }
 
