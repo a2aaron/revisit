@@ -87,6 +87,9 @@ impl Oscillator {
     ///           the real multiplier is mainly applied in SoundGenerator
     /// pitch - the pitch multiplier to be applied to the base frequency of the
     ///         oscillator. This is a unitless value.
+    /// phase_mod - how much to add to the current angle value to produce a
+    ///             a phase offset. Units are 0.0-1.0 normalized angles (so
+    ///             0.0 is zero radians, 1.0 is 2pi radians.)
     /// filter_info - the filter parameters for the filter to be used. If this
     ///               is None, the filter is bypassed.
     pub fn next_sample(
@@ -96,6 +99,7 @@ impl Oscillator {
         shape: NoteShape,
         vol_env: f32,
         pitch: f32,
+        phase_mod: f32,
         filter_params: Option<FilterParams>,
     ) -> f32 {
         // Only advance time if the note is being held down!
@@ -150,7 +154,7 @@ impl Oscillator {
         }
 
         // Get the raw signal
-        let mut value = shape.get(self.angle);
+        let mut value = shape.get((self.angle + phase_mod) % 1.0);
 
         // Apply volume envelope and note velocity
         value *= self.vel;
@@ -382,14 +386,12 @@ impl std::fmt::Display for NoteShape {
                 }
             }
             Skewtooth(warp) => {
-                if (warp - 0.0).abs() < 0.1 {
-                    "Reverse Sawtooth"
-                } else if (warp - 1.0).abs() < 0.1 {
+                if (warp - 0.0).abs() < 0.1 || (warp - 1.0).abs() < 0.1 {
                     "Sawtooth"
                 } else if (warp - 0.5).abs() < 0.1 {
                     "Triangle"
                 } else {
-                    "Skewed Triangle"
+                    "Skewtooth"
                 }
             }
             Noise => "Noise",
