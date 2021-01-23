@@ -164,7 +164,7 @@ impl OSCGroup {
             params.shape.add(warp_mod),
             vol_env,
             pitch,
-            phase_mod,
+            phase_mod + params.phase,
             filter_params,
         ) * total_volume
     }
@@ -252,7 +252,9 @@ impl Plugin for Revisit {
         // Get sound for each note
         let (_, mut output_buffer) = buffer.split();
 
-        let mut output = vec![0.0; num_samples];
+        let mut left_out = vec![0.0; num_samples];
+        let mut right_out = vec![0.0; num_samples];
+
         for gen in &mut self.notes {
             for i in 0..num_samples {
                 let (osc_1, osc_2) = (&mut gen.osc_1, &mut gen.osc_2);
@@ -275,19 +277,28 @@ impl Plugin for Revisit {
                     true,
                 );
 
+                fn pan_split(pan: f32) -> (f32, f32) {
+                    let radians = (pan + 1.0) * std::f32::consts::PI / 4.0;
+                    (radians.cos(), radians.sin())
+                }
+
                 if params.osc_2_mod == ModulationType::Mix {
-                    output[i] += osc_1 + osc_2;
+                    let (osc_1_left, osc_1_right) = pan_split(params.osc_1.pan);
+                    let (osc_2_left, osc_2_right) = pan_split(params.osc_2.pan);
+                    left_out[i] += osc_1 * osc_1_left + osc_2 * osc_2_left;
+                    right_out[i] += osc_1 * osc_1_right + osc_2 * osc_2_right;
                 } else {
-                    output[i] += osc_1;
+                    let (pan_left, pan_right) = pan_split(params.osc_1.pan);
+                    left_out[i] += osc_1 * pan_left;
+                    right_out[i] += osc_1 * pan_right;
                 }
             }
         }
 
         // Write sound
-        for channel in output_buffer.into_iter() {
-            for (i, sample) in channel.iter_mut().enumerate() {
-                *sample = output[i] * params.master_vol;
-            }
+        for i in 0..num_samples {
+            output_buffer[0][i] = left_out[i] * params.master_vol;
+            output_buffer[1][i] = right_out[i] * params.master_vol;
         }
     }
 

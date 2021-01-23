@@ -178,6 +178,8 @@ fn widget_name(param: ParameterType) -> String {
         ParameterType::MasterVolume => "Master Volume".to_string(),
         ParameterType::OSC1(param) | ParameterType::OSC2(param) => match param {
             Volume => "Volume".to_string(),
+            Phase => "Phase".to_string(),
+            Pan => "Pan".to_string(),
             FineTune => "Fine".to_string(),
             CoarseTune => "Coarse".to_string(),
             Shape => "Shape".to_string(),

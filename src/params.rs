@@ -37,6 +37,11 @@ impl From<&RawParameters> for Parameters {
 pub struct OSCParams {
     pub volume: f32,
     pub shape: NoteShape,
+    // A value in [-1.0, 1.0] range. -1.0 means hard pan left. 1.0 means hard
+    // pan right. 0.0 means center.
+    pub pan: f32,
+    // A normalized angle in [0.0, 1.0] range
+    pub phase: f32,
     // In semi-tones
     pub coarse_tune: i32,
     // In [-1.0, 1.0] range
@@ -53,6 +58,8 @@ impl From<&RawOSC> for OSCParams {
         OSCParams {
             volume: params.volume.get() * 2.0,
             shape: NoteShape::from_warp(params.shape.get(), params.warp.get()),
+            pan: (params.pan.get() - 0.5) * 2.0,
+            phase: params.phase.get(),
             // In semi-tones
             coarse_tune: ((params.coarse_tune.get() - 0.5) * 2.0 * 24.0) as i32,
             // In [-1.0, 1.0] range
@@ -201,6 +208,8 @@ impl RawParameters {
         match parameter {
             MasterVolume => &self.master_vol,
             OSC1(Volume) => &self.osc_1.volume,
+            OSC1(Phase) => &self.osc_1.phase,
+            OSC1(Pan) => &self.osc_1.pan,
             OSC1(Shape) => &self.osc_1.shape,
             OSC1(Warp) => &self.osc_1.warp,
             OSC1(CoarseTune) => &self.osc_1.coarse_tune,
@@ -225,6 +234,8 @@ impl RawParameters {
             OSC1(FilterGain) => &self.osc_1.filter_gain,
             OSC2Mod => &self.osc_2_mod,
             OSC2(Volume) => &self.osc_2.volume,
+            OSC2(Phase) => &self.osc_2.phase,
+            OSC2(Pan) => &self.osc_2.pan,
             OSC2(Shape) => &self.osc_2.shape,
             OSC2(Warp) => &self.osc_2.warp,
             OSC2(CoarseTune) => &self.osc_2.coarse_tune,
@@ -304,6 +315,16 @@ impl RawParameters {
             }
         }
 
+        fn make_pan(pan: f32) -> (String, String) {
+            if pan < 0.0 {
+                make_strings(-pan * 100.0, "% L")
+            } else if pan > 0.0 {
+                make_strings(pan * 100.0, "% R")
+            } else {
+                ("".to_string(), "% C".to_string())
+            }
+        }
+
         match parameter {
             ParameterType::MasterVolume => make_strings(self.master_vol.get() * 100.0, "%"),
             ParameterType::OSC1(osc_param) | ParameterType::OSC2(osc_param) => {
@@ -314,6 +335,8 @@ impl RawParameters {
                 };
                 match osc_param {
                     Volume => make_strings(osc.volume * 100.0, "%"),
+                    Pan => make_pan(osc.pan),
+                    Phase => make_strings(osc.phase * 360.0, " deg"),
                     Shape => (format!("{:.2}", osc.shape), "".to_string()),
                     Warp => match osc.shape {
                         NoteShape::Skewtooth(warp) | NoteShape::Square(warp) => {
@@ -433,6 +456,8 @@ impl Default for RawParameters {
 pub struct RawOSC {
     pub volume: AtomicFloat,
     pub shape: AtomicFloat,
+    pub pan: AtomicFloat,
+    pub phase: AtomicFloat,
     pub warp: AtomicFloat,
     pub coarse_tune: AtomicFloat,
     pub fine_tune: AtomicFloat,
@@ -451,6 +476,8 @@ impl RawOSC {
         use OSCParameterType::*;
         match param {
             Volume => self.volume.get(),
+            Phase => self.phase.get(),
+            Pan => self.pan.get(),
             Shape => self.shape.get(),
             Warp => self.warp.get(),
             CoarseTune => self.coarse_tune.get(),
@@ -479,22 +506,18 @@ impl RawOSC {
     fn get_default(param: OSCParameterType, osc: OSCType) -> f32 {
         use OSCParameterType::*;
         match param {
-            Volume => 0.5,  // 100%
-            Shape => 0.225, // Triangle
+            Volume => 0.5, // 100%
+            Phase => 0.0,
+            Pan => 0.5,   // Center
+            Shape => 0.0, // Sine
             Warp => 0.5,
             CoarseTune => 0.5, // 0 semitones
             FineTune => 0.5,   // 0 cents
             VolAttack => 0.1,
             VolHold => 0.0,
             VolDecay => 0.2,
-            VolSustain => match osc {
-                OSCType::OSC1 => 0.5,
-                OSCType::OSC2 => 1.0,
-            },
-            VolRelease => match osc {
-                OSCType::OSC1 => 0.3,
-                OSCType::OSC2 => 1.0 / 10000.0,
-            },
+            VolSustain => 0.5,
+            VolRelease => 0.3,
             VolLFOAmplitude => 0.0,
             VolLFOPeriod => 0.5,
             PitchAttack => 1.0 / 10000.0,
@@ -515,6 +538,8 @@ impl RawOSC {
         use OSCParameterType::*;
         RawOSC {
             volume: RawOSC::get_default(Volume, osc).into(),
+            phase: RawOSC::get_default(Phase, osc).into(),
+            pan: RawOSC::get_default(Pan, osc).into(),
             shape: RawOSC::get_default(Shape, osc).into(),
             warp: RawOSC::get_default(Warp, osc).into(),
             coarse_tune: RawOSC::get_default(CoarseTune, osc).into(),
@@ -566,6 +591,8 @@ pub struct RawLFO {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, VariantCount)]
 pub enum OSCParameterType {
     Volume,
+    Phase,
+    Pan,
     Shape,
     Warp,
     FineTune,
@@ -595,6 +622,8 @@ impl std::fmt::Display for OSCParameterType {
         use OSCParameterType::*;
         match self {
             Volume => write!(f, "Volume"),
+            Phase => write!(f, "Phase"),
+            Pan => write!(f, "Pan"),
             Shape => write!(f, "Shape"),
             Warp => write!(f, "Warp"),
             CoarseTune => write!(f, "Coarse Tune"),
@@ -696,52 +725,56 @@ impl TryFrom<i32> for ParameterType {
         match i {
             0 => Ok(MasterVolume),
             1 => Ok(OSC1(Volume)),
-            2 => Ok(OSC1(Shape)),
-            3 => Ok(OSC1(Warp)),
-            4 => Ok(OSC1(FineTune)),
-            5 => Ok(OSC1(CoarseTune)),
-            6 => Ok(OSC1(VolAttack)),
-            7 => Ok(OSC1(VolHold)),
-            8 => Ok(OSC1(VolDecay)),
-            9 => Ok(OSC1(VolSustain)),
-            10 => Ok(OSC1(VolRelease)),
-            11 => Ok(OSC1(VolLFOAmplitude)),
-            12 => Ok(OSC1(VolLFOPeriod)),
-            13 => Ok(OSC1(PitchAttack)),
-            14 => Ok(OSC1(PitchHold)),
-            15 => Ok(OSC1(PitchDecay)),
-            16 => Ok(OSC1(PitchMultiply)),
-            17 => Ok(OSC1(PitchRelease)),
-            18 => Ok(OSC1(PitchLFOAmplitude)),
-            19 => Ok(OSC1(PitchLFOPeriod)),
-            20 => Ok(OSC1(FilterType)),
-            21 => Ok(OSC1(FilterFreq)),
-            22 => Ok(OSC1(FilterQ)),
-            23 => Ok(OSC1(FilterGain)),
-            24 => Ok(OSC2Mod),
-            25 => Ok(OSC2(Volume)),
-            26 => Ok(OSC2(Shape)),
-            27 => Ok(OSC2(Warp)),
-            28 => Ok(OSC2(FineTune)),
-            29 => Ok(OSC2(CoarseTune)),
-            30 => Ok(OSC2(VolAttack)),
-            31 => Ok(OSC2(VolHold)),
-            32 => Ok(OSC2(VolDecay)),
-            33 => Ok(OSC2(VolSustain)),
-            34 => Ok(OSC2(VolRelease)),
-            35 => Ok(OSC2(VolLFOAmplitude)),
-            36 => Ok(OSC2(VolLFOPeriod)),
-            37 => Ok(OSC2(PitchAttack)),
-            38 => Ok(OSC2(PitchHold)),
-            39 => Ok(OSC2(PitchDecay)),
-            40 => Ok(OSC2(PitchMultiply)),
-            41 => Ok(OSC2(PitchRelease)),
-            42 => Ok(OSC2(PitchLFOAmplitude)),
-            43 => Ok(OSC2(PitchLFOPeriod)),
-            44 => Ok(OSC2(FilterType)),
-            45 => Ok(OSC2(FilterFreq)),
-            46 => Ok(OSC2(FilterQ)),
-            47 => Ok(OSC2(FilterGain)),
+            2 => Ok(OSC1(Phase)),
+            3 => Ok(OSC1(Pan)),
+            4 => Ok(OSC1(Shape)),
+            5 => Ok(OSC1(Warp)),
+            6 => Ok(OSC1(FineTune)),
+            7 => Ok(OSC1(CoarseTune)),
+            8 => Ok(OSC1(VolAttack)),
+            9 => Ok(OSC1(VolHold)),
+            10 => Ok(OSC1(VolDecay)),
+            11 => Ok(OSC1(VolSustain)),
+            12 => Ok(OSC1(VolRelease)),
+            13 => Ok(OSC1(VolLFOAmplitude)),
+            14 => Ok(OSC1(VolLFOPeriod)),
+            15 => Ok(OSC1(PitchAttack)),
+            16 => Ok(OSC1(PitchHold)),
+            17 => Ok(OSC1(PitchDecay)),
+            18 => Ok(OSC1(PitchMultiply)),
+            19 => Ok(OSC1(PitchRelease)),
+            20 => Ok(OSC1(PitchLFOAmplitude)),
+            21 => Ok(OSC1(PitchLFOPeriod)),
+            22 => Ok(OSC1(FilterType)),
+            23 => Ok(OSC1(FilterFreq)),
+            24 => Ok(OSC1(FilterQ)),
+            25 => Ok(OSC1(FilterGain)),
+            26 => Ok(OSC2Mod),
+            27 => Ok(OSC2(Volume)),
+            28 => Ok(OSC2(Phase)),
+            29 => Ok(OSC2(Pan)),
+            30 => Ok(OSC2(Shape)),
+            31 => Ok(OSC2(Warp)),
+            32 => Ok(OSC2(FineTune)),
+            33 => Ok(OSC2(CoarseTune)),
+            34 => Ok(OSC2(VolAttack)),
+            35 => Ok(OSC2(VolHold)),
+            36 => Ok(OSC2(VolDecay)),
+            37 => Ok(OSC2(VolSustain)),
+            38 => Ok(OSC2(VolRelease)),
+            39 => Ok(OSC2(VolLFOAmplitude)),
+            40 => Ok(OSC2(VolLFOPeriod)),
+            41 => Ok(OSC2(PitchAttack)),
+            42 => Ok(OSC2(PitchHold)),
+            43 => Ok(OSC2(PitchDecay)),
+            44 => Ok(OSC2(PitchMultiply)),
+            45 => Ok(OSC2(PitchRelease)),
+            46 => Ok(OSC2(PitchLFOAmplitude)),
+            47 => Ok(OSC2(PitchLFOPeriod)),
+            48 => Ok(OSC2(FilterType)),
+            49 => Ok(OSC2(FilterFreq)),
+            50 => Ok(OSC2(FilterQ)),
+            51 => Ok(OSC2(FilterGain)),
             _ => Err(()),
         }
     }
