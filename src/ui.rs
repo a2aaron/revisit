@@ -29,6 +29,10 @@ use crate::{
 
 const LABEL_WIDTH: u16 = 45;
 const KNOB_SPACING: u16 = 12;
+const KNOB_SIZE: iced::Length = iced::Length::Units(29);
+const PANE_SPACING: u16 = 15;
+const PANE_PADDING: u16 = 15;
+const INTERPANE_SPACING: u16 = 15;
 
 const GREEN: iced::Color = iced::Color {
     r: 0.0,
@@ -64,11 +68,21 @@ const GREEN_TRANS: iced::Color = iced::Color {
 /// 2. Sends the message ParameterChanged(normal, $parameter)
 /// 3. Has the title `title` (or `widget_name($parameter)` if not provided)
 macro_rules! widget {
+    (VSlider, $state:expr, $parameter:expr, $title:expr) => {
+        with_label(
+            VSlider::new($state, move |normal| {
+                Message::ParameterChanged(normal.as_f32(), $parameter)
+            }),
+            $title,
+        );
+    };
+
     ($widget:ident, $state:expr, $parameter:expr, $title:expr) => {
         with_label(
             $widget::new($state, move |normal| {
                 Message::ParameterChanged(normal.as_f32(), $parameter)
-            }),
+            })
+            .size(KNOB_SIZE),
             $title,
         );
     };
@@ -483,6 +497,8 @@ pub enum Message {
 /// The ranges are used for snapping the knobs.
 pub struct OSCKnobs {
     volume: knob::State,
+    pan: knob::State,
+    phase: knob::State,
     coarse_tune: knob::State,
     fine_tune: knob::State,
     attack: knob::State,
@@ -515,6 +531,8 @@ impl OSCKnobs {
         use OSCParameterType::*;
         OSCKnobs {
             volume: make_knob(param_ref, (Volume, osc).into()),
+            pan: make_knob(param_ref, (Pan, osc).into()),
+            phase: make_knob(param_ref, (Phase, osc).into()),
             coarse_tune: make_knob(param_ref, (CoarseTune, osc).into()),
             fine_tune: make_knob(param_ref, (FineTune, osc).into()),
             attack: make_knob(param_ref, (VolAttack, osc).into()),
@@ -560,6 +578,8 @@ impl OSCKnobs {
 
         use OSCParameterType::*;
         self.volume.set_normal(osc.get(Volume).into());
+        self.pan.set_normal(osc.get(Pan).into());
+        self.phase.set_normal(osc.get(Phase).into());
 
         set_knob_with_range(
             &mut self.coarse_tune,
@@ -616,6 +636,8 @@ impl OSCKnobs {
     ) -> Element<'a, Message> {
         use OSCParameterType::*;
         let volume = widget!(Knob, &mut self.volume, (Volume, osc).into());
+        let pan = widget!(Knob, &mut self.pan, (Pan, osc).into());
+        let phase = widget!(Knob, &mut self.phase, (Phase, osc).into());
         let fine_tune = widget!(Knob, &mut self.fine_tune, (FineTune, osc).into());
         let coarse_tune = widget!(Knob, &mut self.coarse_tune, (CoarseTune, osc).into());
 
@@ -687,7 +709,8 @@ impl OSCKnobs {
             title,
             on_off,
             vec![
-                (vec![volume, fine_tune, coarse_tune, shape, warp], "Sound"),
+                (vec![volume, pan, phase, coarse_tune, fine_tune], "Sound"),
+                (vec![shape, warp], "Shape"),
                 (vec![attack, hold, decay, sustain, release], "Envelope"),
                 (vec![vol_lfo_amplitude, vol_lfo_period], "LFO"),
             ],
@@ -716,8 +739,8 @@ impl OSCKnobs {
         );
 
         Column::with_children(vec![osc_pane.into(), pitch_pane.into(), filter_pane.into()])
-            .padding(20)
-            .spacing(20)
+            .padding(PANE_PADDING)
+            .spacing(PANE_SPACING)
             .into()
     }
 }
@@ -846,7 +869,6 @@ impl Application for UIFrontEnd {
         let master_vol_widget = widget!(VSlider, &mut self.master_vol, ParameterType::MasterVolume);
 
         // TODO: Consider a smarter way for messages that doesn't involve always casting to f32
-
         let osc_2_mod = iced::Element::new(ModTypeSelector::new(
             self.params.osc_2_mod.get().into(),
             vec!["Mix", "AM", "FM", "PM", "Warp"],
@@ -862,7 +884,8 @@ impl Application for UIFrontEnd {
             .push(master_pane)
             .max_width(screen_width)
             .max_height(screen_height)
-            .spacing(10)
+            .height(iced::Length::Shrink)
+            .spacing(INTERPANE_SPACING)
             .into()
     }
 
