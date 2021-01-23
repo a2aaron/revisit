@@ -52,6 +52,21 @@ impl SoundGenerator {
                 .is_alive(sample_rate, params.osc_1.vol_adsr.release),
         }
     }
+
+    fn note_on(&mut self, mix: ModulationType, frame_delta: i32, vel: f32) {
+        if mix == ModulationType::Mix {
+            self.osc_1.osc.note_on(frame_delta, vel);
+            self.osc_2.osc.note_on(frame_delta, vel);
+        } else {
+            self.osc_1.osc.note_on(frame_delta, vel);
+            self.osc_2.osc.note_on(frame_delta, 1.0);
+        }
+    }
+
+    fn note_off(&mut self, frame_delta: i32) {
+        self.osc_1.osc.note_off(frame_delta);
+        self.osc_2.osc.note_off(frame_delta);
+    }
 }
 
 struct OSCGroup {
@@ -332,16 +347,14 @@ impl Plugin for Revisit {
                                     self.notes.last_mut().unwrap()
                                 };
 
-                                gen.osc_1.osc.note_on(event.delta_frames, vel);
-                                gen.osc_2.osc.note_on(event.delta_frames, 1.0);
+                                gen.note_on(params.osc_2_mod, event.delta_frames, vel);
                             }
                             MidiMessage::NoteOff(_, note, _) => {
                                 // On note off, send note off
                                 if let Some(i) = self.notes.iter().position(|gen| gen.note == note)
                                 {
                                     let gen = &mut self.notes[i];
-                                    gen.osc_1.osc.note_off(event.delta_frames);
-                                    gen.osc_2.osc.note_off(event.delta_frames);
+                                    gen.note_off(event.delta_frames);
                                 }
                             }
                             MidiMessage::PitchBendChange(_, pitch_bend) => {
