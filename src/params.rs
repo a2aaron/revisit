@@ -503,7 +503,7 @@ impl RawOSC {
         }
     }
 
-    fn get_default(param: OSCParameterType, osc: OSCType) -> f32 {
+    fn get_default(param: OSCParameterType, _osc: OSCType) -> f32 {
         use OSCParameterType::*;
         match param {
             Volume => 0.5, // 100%
