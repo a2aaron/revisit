@@ -96,14 +96,14 @@ pub struct MainTab {
 }
 
 impl MainTab {
-    pub fn new(param_ref: &RawParameters) -> MainTab {
+    pub fn new(params: &RawParameters) -> MainTab {
         MainTab {
             master_vol: v_slider::State::new(make_normal_param(
-                param_ref,
+                params,
                 ParameterType::MasterVolume,
             )),
-            osc_1: OSCKnobs::new(param_ref, OSCType::OSC1),
-            osc_2: OSCKnobs::new(param_ref, OSCType::OSC2),
+            osc_1: OSCKnobs::new(params, OSCType::OSC1),
+            osc_2: OSCKnobs::new(params, OSCType::OSC2),
         }
     }
 
@@ -193,13 +193,38 @@ impl MainTab {
     }
 }
 
+/// The tab which has all the various modulation envelopes/LFOs
+pub struct ModulationTab {}
+
+impl ModulationTab {
+    pub fn new(_params: &RawParameters) -> ModulationTab {
+        ModulationTab {}
+    }
+
+    pub fn update(&mut self, message: Message, _params: &RawParameters) {
+        // TODO!
+        match message {
+            _ => (),
+        }
+    }
+
+    pub fn view(
+        &mut self,
+        _screen_width: u32,
+        _screen_height: u32,
+        _params: &RawParameters,
+    ) -> iced::Element<'_, Message> {
+        iced::Text::new("! ! TODO ! !").size(100).into()
+    }
+}
+
 /// The tab which handles preset loading and saving.
 pub struct PresetTab {
     // uh...
 }
 
 impl PresetTab {
-    pub fn new(_param_ref: &RawParameters) -> PresetTab {
+    pub fn new(_params: &RawParameters) -> PresetTab {
         PresetTab {}
     }
 
@@ -224,6 +249,7 @@ impl PresetTab {
 pub enum Tabs {
     Main,
     Preset,
+    Modulation,
 }
 
 /// A struct keeping track of the various knob states an oscillator has.
@@ -260,34 +286,34 @@ pub struct OSCKnobs {
 }
 
 impl OSCKnobs {
-    fn new(param_ref: &RawParameters, osc: OSCType) -> OSCKnobs {
+    fn new(params: &RawParameters, osc: OSCType) -> OSCKnobs {
         use OSCParameterType::*;
         OSCKnobs {
-            volume: make_knob(param_ref, (Volume, osc).into()),
-            pan: make_knob(param_ref, (Pan, osc).into()),
-            phase: make_knob(param_ref, (Phase, osc).into()),
-            coarse_tune: make_knob(param_ref, (CoarseTune, osc).into()),
-            fine_tune: make_knob(param_ref, (FineTune, osc).into()),
-            attack: make_knob(param_ref, (VolAttack, osc).into()),
-            hold: make_knob(param_ref, (VolHold, osc).into()),
-            decay: make_knob(param_ref, (VolDecay, osc).into()),
-            sustain: make_knob(param_ref, (VolSustain, osc).into()),
-            release: make_knob(param_ref, (VolRelease, osc).into()),
-            vol_lfo_amplitude: make_knob(param_ref, (VolLFOAmplitude, osc).into()),
-            vol_lfo_period: make_knob(param_ref, (VolLFOPeriod, osc).into()),
-            note_shape: make_knob(param_ref, (Shape, osc).into()),
-            note_warp: make_knob(param_ref, (Warp, osc).into()),
-            pitch_attack: make_knob(param_ref, (PitchAttack, osc).into()),
-            pitch_hold: make_knob(param_ref, (PitchHold, osc).into()),
-            pitch_decay: make_knob(param_ref, (PitchDecay, osc).into()),
-            pitch_multiply: make_knob(param_ref, (PitchMultiply, osc).into()),
-            pitch_release: make_knob(param_ref, (PitchRelease, osc).into()),
-            pitch_lfo_amplitude: make_knob(param_ref, (PitchLFOAmplitude, osc).into()),
-            pitch_lfo_period: make_knob(param_ref, (PitchLFOPeriod, osc).into()),
-            filter_type: make_knob(param_ref, (FilterType, osc).into()),
-            filter_freq: make_knob(param_ref, (FilterFreq, osc).into()),
-            filter_q: make_knob(param_ref, (FilterQ, osc).into()),
-            filter_gain: make_knob(param_ref, (FilterGain, osc).into()),
+            volume: make_knob(params, (Volume, osc).into()),
+            pan: make_knob(params, (Pan, osc).into()),
+            phase: make_knob(params, (Phase, osc).into()),
+            coarse_tune: make_knob(params, (CoarseTune, osc).into()),
+            fine_tune: make_knob(params, (FineTune, osc).into()),
+            attack: make_knob(params, (VolAttack, osc).into()),
+            hold: make_knob(params, (VolHold, osc).into()),
+            decay: make_knob(params, (VolDecay, osc).into()),
+            sustain: make_knob(params, (VolSustain, osc).into()),
+            release: make_knob(params, (VolRelease, osc).into()),
+            vol_lfo_amplitude: make_knob(params, (VolLFOAmplitude, osc).into()),
+            vol_lfo_period: make_knob(params, (VolLFOPeriod, osc).into()),
+            note_shape: make_knob(params, (Shape, osc).into()),
+            note_warp: make_knob(params, (Warp, osc).into()),
+            pitch_attack: make_knob(params, (PitchAttack, osc).into()),
+            pitch_hold: make_knob(params, (PitchHold, osc).into()),
+            pitch_decay: make_knob(params, (PitchDecay, osc).into()),
+            pitch_multiply: make_knob(params, (PitchMultiply, osc).into()),
+            pitch_release: make_knob(params, (PitchRelease, osc).into()),
+            pitch_lfo_amplitude: make_knob(params, (PitchLFOAmplitude, osc).into()),
+            pitch_lfo_period: make_knob(params, (PitchLFOPeriod, osc).into()),
+            filter_type: make_knob(params, (FilterType, osc).into()),
+            filter_freq: make_knob(params, (FilterFreq, osc).into()),
+            filter_q: make_knob(params, (FilterQ, osc).into()),
+            filter_gain: make_knob(params, (FilterGain, osc).into()),
             coarse_tune_range: TruncatingIntRange {
                 num_regions: 24 * 2 + 1,
             },
@@ -712,8 +738,8 @@ fn with_label<'a>(widget: impl Into<Element<'a, Message>>, title: &str) -> Eleme
 
 /// Convience function to make `knob::State` out of a `RawParameters`
 /// and `ParameterType`
-fn make_knob(param_ref: &RawParameters, param_type: ParameterType) -> knob::State {
-    knob::State::new(make_normal_param(param_ref, param_type))
+fn make_knob(params: &RawParameters, param_type: ParameterType) -> knob::State {
+    knob::State::new(make_normal_param(params, param_type))
 }
 
 /// Make a row of widgets with better default spacing.
@@ -729,9 +755,9 @@ fn column<'a>() -> Column<'a, Message> {
 /// Convience function to make a `NormalParam` using a `RawParameters`. The
 /// `NormalParam` will have a default value of whatever the default value is for
 /// a `RawParameters`.
-fn make_normal_param(param_ref: &RawParameters, param_type: ParameterType) -> NormalParam {
+fn make_normal_param(params: &RawParameters, param_type: ParameterType) -> NormalParam {
     NormalParam {
-        value: param_ref.get(param_type).into(),
+        value: params.get(param_type).into(),
         default: RawParameters::get_default(param_type).into(),
     }
 }

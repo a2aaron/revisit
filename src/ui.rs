@@ -11,7 +11,7 @@ use vst::{editor::Editor, host::Host};
 
 use crate::{
     params::{ModulationType, ParameterType, RawParameters},
-    ui_tabs::{MainTab, PresetTab, Tabs},
+    ui_tabs::{MainTab, ModulationTab, PresetTab, Tabs},
 };
 
 /// A GUI message.
@@ -34,9 +34,11 @@ pub enum Message {
 /// passed to it by iced as well as communciating with host VST for GUI stuff.
 pub struct UIFrontEnd {
     main_tab: MainTab,
+    modulation_tab: ModulationTab,
     preset_tab: PresetTab,
     selected_tab: Tabs,
     main_button_state: button::State,
+    modulation_button_state: button::State,
     preset_button_state: button::State,
 
     // This is used so that the GUI can update the shared parameters object when
@@ -67,8 +69,10 @@ impl Application for UIFrontEnd {
         let ui = UIFrontEnd {
             main_tab: MainTab::new(params.as_ref()),
             preset_tab: PresetTab::new(params.as_ref()),
+            modulation_tab: ModulationTab::new(params.as_ref()),
             selected_tab: Tabs::Main,
             main_button_state: button::State::new(),
+            modulation_button_state: button::State::new(),
             preset_button_state: button::State::new(),
             params,
             handle: None,
@@ -98,27 +102,36 @@ impl Application for UIFrontEnd {
     /// Note that this isn't called every frame--it's only called when there's
     /// an update to the view (which happens to be only when messages happen)
     fn view(&mut self) -> iced::Element<'_, Self::Message> {
-        let (screen_width, screen_height) = self.size();
-
+        let (screen_width, screen_height) = (self.size().0 as u32, self.size().1 as u32);
+        let params = self.params.as_ref();
         let ui_body = match self.selected_tab {
-            Tabs::Main => self.main_tab.view(
-                screen_width as u32,
-                screen_height as u32,
-                self.params.as_ref(),
-            ),
-            Tabs::Preset => self.preset_tab.view(
-                screen_width as u32,
-                screen_height as u32,
-                self.params.as_ref(),
-            ),
+            Tabs::Main => self.main_tab.view(screen_width, screen_height, params),
+            Tabs::Preset => self.preset_tab.view(screen_width, screen_height, params),
+            Tabs::Modulation => self
+                .modulation_tab
+                .view(screen_width, screen_height, params),
         };
 
-        let to_main_tab = iced::Button::new(&mut self.main_button_state, iced::Text::new("Main"))
-            .on_press(Message::ChangeTab(Tabs::Main));
-        let to_preset_tab =
-            iced::Button::new(&mut self.preset_button_state, iced::Text::new("Preset"))
-                .on_press(Message::ChangeTab(Tabs::Preset));
-        let tab_buttons = iced::Row::with_children(vec![to_main_tab.into(), to_preset_tab.into()]);
+        fn make_button<'a>(
+            state: &'a mut button::State,
+            label: &str,
+            tab: Tabs,
+        ) -> iced::Button<'a, Message> {
+            iced::Button::new(state, iced::Text::new(label)).on_press(Message::ChangeTab(tab))
+        }
+
+        let main_tab = make_button(&mut self.main_button_state, "Main", Tabs::Main);
+        let preset_tab = make_button(&mut self.preset_button_state, "Preset", Tabs::Preset);
+        let modulation_tab = make_button(
+            &mut self.modulation_button_state,
+            "Modulation",
+            Tabs::Modulation,
+        );
+        let tab_buttons = iced::Row::with_children(vec![
+            main_tab.into(),
+            modulation_tab.into(),
+            preset_tab.into(),
+        ]);
         Column::with_children(vec![tab_buttons.into(), ui_body]).into()
     }
 
