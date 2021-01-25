@@ -159,6 +159,7 @@ impl MainTab {
                 self.osc_1.update(&params.osc_1);
                 self.osc_2.update(&params.osc_2);
             }
+            Message::ChangeTab(_) => (),
         }
     }
 
@@ -190,6 +191,39 @@ impl MainTab {
             .spacing(INTERPANE_SPACING)
             .into()
     }
+}
+
+/// The tab which handles preset loading and saving.
+pub struct PresetTab {
+    // uh...
+}
+
+impl PresetTab {
+    pub fn new(_param_ref: &RawParameters) -> PresetTab {
+        PresetTab {}
+    }
+
+    pub fn update(&mut self, message: Message, _params: &RawParameters) {
+        // TODO!
+        match message {
+            _ => (),
+        }
+    }
+
+    pub fn view(
+        &mut self,
+        _screen_width: u32,
+        _screen_height: u32,
+        _params: &RawParameters,
+    ) -> iced::Element<'_, Message> {
+        iced::Text::new("! ! TODO ! !").size(48).into()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Tabs {
+    Main,
+    Preset,
 }
 
 /// A struct keeping track of the various knob states an oscillator has.

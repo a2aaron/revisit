@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::{ffi::c_void, hash::Hash};
 
-use iced::{futures, Command, Subscription};
+use iced::{button, futures, Column, Command, Subscription};
 
 use iced_baseview::{Application, Handle, WindowSubs};
 
@@ -11,7 +11,7 @@ use vst::{editor::Editor, host::Host};
 
 use crate::{
     params::{ModulationType, ParameterType, RawParameters},
-    ui_tabs::MainTab,
+    ui_tabs::{MainTab, PresetTab, Tabs},
 };
 
 /// A GUI message.
@@ -27,12 +27,18 @@ pub enum Message {
     /// call `view` and do a screen update. If it didn't do that, then this won't
     /// work.
     ForceRedraw,
+    ChangeTab(Tabs),
 }
 
 /// The struct which manages the GUI. This struct handles both the messages
 /// passed to it by iced as well as communciating with host VST for GUI stuff.
 pub struct UIFrontEnd {
     main_tab: MainTab,
+    preset_tab: PresetTab,
+    selected_tab: Tabs,
+    main_button_state: button::State,
+    preset_button_state: button::State,
+
     // This is used so that the GUI can update the shared parameters object when
     // a GUI element is changed.
     params: std::sync::Arc<RawParameters>,
@@ -60,6 +66,10 @@ impl Application for UIFrontEnd {
         let (params, notifier) = flags;
         let ui = UIFrontEnd {
             main_tab: MainTab::new(params.as_ref()),
+            preset_tab: PresetTab::new(params.as_ref()),
+            selected_tab: Tabs::Main,
+            main_button_state: button::State::new(),
+            preset_button_state: button::State::new(),
             params,
             handle: None,
             notifier,
@@ -71,7 +81,7 @@ impl Application for UIFrontEnd {
     /// React to an incoming message
     fn update(&mut self, message: Self::Message) -> Command<Self::Message> {
         self.main_tab.update(message, self.params.as_ref());
-
+        self.preset_tab.update(message, self.params.as_ref());
         // Make the VST host update its own parameter display. This is needed
         // so the host actually has updates with GUI.
         match message {
@@ -79,6 +89,7 @@ impl Application for UIFrontEnd {
                 self.params.host.update_display()
             }
             Message::ForceRedraw => (),
+            Message::ChangeTab(tab) => self.selected_tab = tab,
         }
         Command::none()
     }
@@ -88,11 +99,27 @@ impl Application for UIFrontEnd {
     /// an update to the view (which happens to be only when messages happen)
     fn view(&mut self) -> iced::Element<'_, Self::Message> {
         let (screen_width, screen_height) = self.size();
-        self.main_tab.view(
-            screen_width as u32,
-            screen_height as u32,
-            self.params.as_ref(),
-        )
+
+        let ui_body = match self.selected_tab {
+            Tabs::Main => self.main_tab.view(
+                screen_width as u32,
+                screen_height as u32,
+                self.params.as_ref(),
+            ),
+            Tabs::Preset => self.preset_tab.view(
+                screen_width as u32,
+                screen_height as u32,
+                self.params.as_ref(),
+            ),
+        };
+
+        let to_main_tab = iced::Button::new(&mut self.main_button_state, iced::Text::new("Main"))
+            .on_press(Message::ChangeTab(Tabs::Main));
+        let to_preset_tab =
+            iced::Button::new(&mut self.preset_button_state, iced::Text::new("Preset"))
+                .on_press(Message::ChangeTab(Tabs::Preset));
+        let tab_buttons = iced::Row::with_children(vec![to_main_tab.into(), to_preset_tab.into()]);
+        Column::with_children(vec![tab_buttons.into(), ui_body]).into()
     }
 
     /// This allows iced to recieve messages from the notifier
