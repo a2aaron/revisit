@@ -10,7 +10,8 @@ mod ui_tabs;
 use std::{convert::TryFrom, sync::Arc};
 
 use params::{
-    ModulationType, OSCParameterType, OSCParams, ParameterType, Parameters, RawParameters,
+    CountedEnum, ModulationType, OSCParameterType, OSCParams, ParameterType, Parameters,
+    RawParameters,
 };
 use sound_gen::{
     normalize_U7, normalize_pitch_bend, to_pitch_envelope, to_pitch_multiplier,
@@ -219,8 +220,7 @@ impl Plugin for Revisit {
             version: 1,
             category: Category::Synth,
             // Subtract one here due to "error" type
-            parameters: (ParameterType::VARIANT_COUNT - 2 + OSCParameterType::VARIANT_COUNT * 2)
-                as i32,
+            parameters: ParameterType::COUNT as i32,
             // No audio inputs
             inputs: 0,
             // Two channel audio!

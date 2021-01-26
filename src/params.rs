@@ -16,6 +16,91 @@ use vst::{
 // Low Shelf, High Shelf, Peaking EQ
 pub const FILTER_TYPE_VARIANT_COUNT: usize = 8;
 
+/// Trait which counts how many possible enum variants can exist. This includes
+/// recursively
+pub trait CountedEnum {
+    const COUNT: usize;
+}
+
+/// Implement TryFrom<i32> for the given enum
+/// SYNTAX:
+/// ```
+/// from_into_int! {
+///     #[derive(Copy, Clone)]
+///     pub enum MyEnum {
+///         A,
+///         B,
+///         C,
+///     }
+/// }
+/// ```
+/// This works with nested enums, so long as the leaf enums are simple and
+/// have no fields.
+/// Thank you to Cassie for providing this code!!!
+macro_rules! from_into_int {
+    // use of @count and @from allows the macro to use only certain rules without
+    // accidentally polluting the public namespace. @count gives how many
+    // variants of an enum exist, for a specific variant (either 1 if a variant
+    // has no fields, and $name::COUNT where $name is the name of the field)
+    // Simple case (variant with no field)
+    (@count) => { 1 };
+    // Complicated case (variant with subenum)
+    (@count $name:ident) => { $name::COUNT };
+    // @from handles generating the TryFrom code.
+    // $Name is the name of the enum, $i is the variable i: i32 as given by the
+    // TryFrom trait, and $base is the "current index" of this enum
+    // Base case -- No more tokens to consume
+    (@from $Name:ident $i:expr; $base:expr ;) => { Err($i) };
+    // Recursive case -- variant with no subenum.
+    (@from $Name:ident $i:expr; $base:expr ; $case:ident, $($rest:tt)*) => {
+        if $i < $base + 1 {
+            Ok($Name::$case)
+        } else {
+            from_into_int!(@from $Name $i; $base + 1; $($rest)*)
+        }
+    };
+    // Recursive case -- variant with a subenum
+    (@from $Name:ident $i:expr; $base:expr; $case:ident $inner:ident, $($rest:tt)*) => {
+        if $i < ($base + $inner::COUNT) {
+            Ok($Name::$case($inner::try_from($i - $base)?))
+        } else {
+            from_into_int!(@from $Name $i; $base + $inner::COUNT; $($rest)*)
+        }
+    };
+    // "Public" facing case--get the enum + any derives and relist them
+    // then implement the traits.
+    (
+        $(
+            #[$($attr:meta)+]
+        )*
+        pub enum $Name:ident {
+            $(
+                $case:ident $(($nested:ident))?,
+            )*
+        }
+    ) => {
+        $(#[$($attr)*])*
+        pub enum $Name {
+            $(
+                $case $(($nested))?,
+            )*
+        }
+
+        impl CountedEnum for $Name {
+            const COUNT: usize = 0 $(
+                + from_into_int!(@count $($nested)?)
+            )*;
+        }
+
+        impl std::convert::TryFrom<usize> for $Name {
+            type Error = usize;
+            fn try_from(i: usize) -> Result<Self, usize> {
+                from_into_int!(@from $Name i; 0 ; $($case $($nested)?,)*)
+            }
+        }
+    }
+}
+
 pub struct Parameters {
     pub osc_1: OSCParams,
     pub osc_2: OSCParams,
@@ -588,33 +673,35 @@ pub struct RawLFO {
     amount: AtomicFloat,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, VariantCount)]
-pub enum OSCParameterType {
-    Volume,
-    Phase,
-    Pan,
-    Shape,
-    Warp,
-    FineTune,
-    CoarseTune,
-    VolAttack,
-    VolHold,
-    VolDecay,
-    VolSustain,
-    VolRelease,
-    VolLFOAmplitude,
-    VolLFOPeriod,
-    PitchAttack,
-    PitchHold,
-    PitchDecay,
-    PitchMultiply,
-    PitchRelease,
-    PitchLFOAmplitude,
-    PitchLFOPeriod,
-    FilterType,
-    FilterFreq,
-    FilterQ,
-    FilterGain,
+from_into_int! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum OSCParameterType {
+        Volume,
+        Phase,
+        Pan,
+        Shape,
+        Warp,
+        FineTune,
+        CoarseTune,
+        VolAttack,
+        VolHold,
+        VolDecay,
+        VolSustain,
+        VolRelease,
+        VolLFOAmplitude,
+        VolLFOPeriod,
+        PitchAttack,
+        PitchHold,
+        PitchDecay,
+        PitchMultiply,
+        PitchRelease,
+        PitchLFOAmplitude,
+        PitchLFOPeriod,
+        FilterType,
+        FilterFreq,
+        FilterQ,
+        FilterGain,
+    }
 }
 
 impl std::fmt::Display for OSCParameterType {
@@ -707,75 +794,24 @@ impl std::fmt::Display for ModulationType {
     }
 }
 
-/// The type of parameter. "Error" is included as a convience type.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, VariantCount)]
-pub enum ParameterType {
-    MasterVolume,
-    OSC1(OSCParameterType),
-    OSC2Mod,
-    OSC2(OSCParameterType),
+from_into_int! {
+    /// The type of parameter.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum ParameterType {
+        MasterVolume,
+        OSC1(OSCParameterType),
+        OSC2Mod,
+        OSC2(OSCParameterType),
+    }
 }
 
 impl TryFrom<i32> for ParameterType {
-    type Error = ();
-
-    fn try_from(i: i32) -> Result<Self, ()> {
-        use OSCParameterType::*;
-        use ParameterType::*;
-        match i {
-            0 => Ok(MasterVolume),
-            1 => Ok(OSC1(Volume)),
-            2 => Ok(OSC1(Phase)),
-            3 => Ok(OSC1(Pan)),
-            4 => Ok(OSC1(Shape)),
-            5 => Ok(OSC1(Warp)),
-            6 => Ok(OSC1(FineTune)),
-            7 => Ok(OSC1(CoarseTune)),
-            8 => Ok(OSC1(VolAttack)),
-            9 => Ok(OSC1(VolHold)),
-            10 => Ok(OSC1(VolDecay)),
-            11 => Ok(OSC1(VolSustain)),
-            12 => Ok(OSC1(VolRelease)),
-            13 => Ok(OSC1(VolLFOAmplitude)),
-            14 => Ok(OSC1(VolLFOPeriod)),
-            15 => Ok(OSC1(PitchAttack)),
-            16 => Ok(OSC1(PitchHold)),
-            17 => Ok(OSC1(PitchDecay)),
-            18 => Ok(OSC1(PitchMultiply)),
-            19 => Ok(OSC1(PitchRelease)),
-            20 => Ok(OSC1(PitchLFOAmplitude)),
-            21 => Ok(OSC1(PitchLFOPeriod)),
-            22 => Ok(OSC1(FilterType)),
-            23 => Ok(OSC1(FilterFreq)),
-            24 => Ok(OSC1(FilterQ)),
-            25 => Ok(OSC1(FilterGain)),
-            26 => Ok(OSC2Mod),
-            27 => Ok(OSC2(Volume)),
-            28 => Ok(OSC2(Phase)),
-            29 => Ok(OSC2(Pan)),
-            30 => Ok(OSC2(Shape)),
-            31 => Ok(OSC2(Warp)),
-            32 => Ok(OSC2(FineTune)),
-            33 => Ok(OSC2(CoarseTune)),
-            34 => Ok(OSC2(VolAttack)),
-            35 => Ok(OSC2(VolHold)),
-            36 => Ok(OSC2(VolDecay)),
-            37 => Ok(OSC2(VolSustain)),
-            38 => Ok(OSC2(VolRelease)),
-            39 => Ok(OSC2(VolLFOAmplitude)),
-            40 => Ok(OSC2(VolLFOPeriod)),
-            41 => Ok(OSC2(PitchAttack)),
-            42 => Ok(OSC2(PitchHold)),
-            43 => Ok(OSC2(PitchDecay)),
-            44 => Ok(OSC2(PitchMultiply)),
-            45 => Ok(OSC2(PitchRelease)),
-            46 => Ok(OSC2(PitchLFOAmplitude)),
-            47 => Ok(OSC2(PitchLFOPeriod)),
-            48 => Ok(OSC2(FilterType)),
-            49 => Ok(OSC2(FilterFreq)),
-            50 => Ok(OSC2(FilterQ)),
-            51 => Ok(OSC2(FilterGain)),
-            _ => Err(()),
+    type Error = usize;
+    fn try_from(i: i32) -> Result<Self, Self::Error> {
+        if i < 0 {
+            Err(413)
+        } else {
+            ParameterType::try_from(i as usize)
         }
     }
 }
