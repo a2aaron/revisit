@@ -254,13 +254,6 @@ impl FilterParams {
     }
 }
 
-/// An envelope trait.
-pub trait ADSR {
-    /// Get the current envelope value. `time` is how many samples it has been
-    /// since the start of the note
-    fn get(&self, time: usize, note_state: NoteState, sample_rate: SampleRate) -> f32;
-}
-
 /// The state of a note, along with the time and velocity that note has, if
 /// relevant. The typical life cycle of a note is as follows:
 /// None -> Held -> Released -> [removed] or Retrigger -> Held

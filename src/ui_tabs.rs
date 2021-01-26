@@ -304,11 +304,11 @@ impl OSCKnobs {
             vol_lfo_period: make_knob(params, (VolLFOPeriod, osc).into()),
             note_shape: make_knob(params, (Shape, osc).into()),
             note_warp: make_knob(params, (Warp, osc).into()),
-            pitch_attack: make_knob(params, (PitchAttack, osc).into()),
-            pitch_hold: make_knob(params, (PitchHold, osc).into()),
-            pitch_decay: make_knob(params, (PitchDecay, osc).into()),
-            pitch_multiply: make_knob(params, (PitchMultiply, osc).into()),
-            pitch_release: make_knob(params, (PitchRelease, osc).into()),
+            pitch_attack: make_knob(params, (PitchEnv(Attack), osc).into()),
+            pitch_hold: make_knob(params, (PitchEnv(Hold), osc).into()),
+            pitch_decay: make_knob(params, (PitchEnv(Decay), osc).into()),
+            pitch_multiply: make_knob(params, (PitchEnv(Multiply), osc).into()),
+            pitch_release: make_knob(params, (PitchEnv(Release), osc).into()),
             pitch_lfo_amplitude: make_knob(params, (PitchLFOAmplitude, osc).into()),
             pitch_lfo_period: make_knob(params, (PitchLFOPeriod, osc).into()),
             filter_type: make_knob(params, (FilterType, osc).into()),
@@ -361,12 +361,14 @@ impl OSCKnobs {
         set_knob_with_range(&mut self.note_shape, &self.note_shape_range, osc.get(Shape));
 
         self.note_warp.set_normal(osc.get(Warp).into());
-        self.pitch_attack.set_normal(osc.get(PitchAttack).into());
-        self.pitch_hold.set_normal(osc.get(PitchHold).into());
-        self.pitch_decay.set_normal(osc.get(PitchDecay).into());
+        self.pitch_attack
+            .set_normal(osc.get(PitchEnv(Attack)).into());
+        self.pitch_hold.set_normal(osc.get(PitchEnv(Hold)).into());
+        self.pitch_decay.set_normal(osc.get(PitchEnv(Decay)).into());
         self.pitch_multiply
-            .set_normal(osc.get(PitchMultiply).into());
-        self.pitch_release.set_normal(osc.get(PitchRelease).into());
+            .set_normal(osc.get(PitchEnv(Multiply)).into());
+        self.pitch_release
+            .set_normal(osc.get(PitchEnv(Release)).into());
         self.pitch_lfo_amplitude
             .set_normal(osc.get(PitchLFOAmplitude).into());
         self.pitch_lfo_period
@@ -431,11 +433,19 @@ impl OSCKnobs {
         );
         let vol_lfo_period = widget!(Knob, &mut self.vol_lfo_period, (VolLFOPeriod, osc).into());
 
-        let pitch_attack = widget!(Knob, &mut self.pitch_attack, (PitchAttack, osc).into());
-        let pitch_hold = widget!(Knob, &mut self.pitch_hold, (PitchHold, osc).into());
-        let pitch_decay = widget!(Knob, &mut self.pitch_decay, (PitchDecay, osc).into());
-        let pitch_multiply = widget!(Knob, &mut self.pitch_multiply, (PitchMultiply, osc).into());
-        let pitch_release = widget!(Knob, &mut self.pitch_release, (PitchRelease, osc).into());
+        let pitch_attack = widget!(Knob, &mut self.pitch_attack, (PitchEnv(Attack), osc).into());
+        let pitch_hold = widget!(Knob, &mut self.pitch_hold, (PitchEnv(Hold), osc).into());
+        let pitch_decay = widget!(Knob, &mut self.pitch_decay, (PitchEnv(Decay), osc).into());
+        let pitch_multiply = widget!(
+            Knob,
+            &mut self.pitch_multiply,
+            (PitchEnv(Multiply), osc).into()
+        );
+        let pitch_release = widget!(
+            Knob,
+            &mut self.pitch_release,
+            (PitchEnv(Release), osc).into()
+        );
 
         let pitch_lfo_amplitude = widget!(
             Knob,
@@ -833,7 +843,6 @@ fn split_rect_horiz(rect: Rectangle, num_rects: usize) -> Vec<Rectangle> {
 
 /// The widget name for a given parameter
 fn widget_name(param: ParameterType) -> String {
-    use EnvelopeParam::*;
     use OSCParameterType::*;
     match param {
         ParameterType::MasterVolume => "Master Volume".to_string(),
@@ -845,19 +854,16 @@ fn widget_name(param: ParameterType) -> String {
             CoarseTune => "Coarse".to_string(),
             Shape => "Shape".to_string(),
             Warp => "Warp".to_string(),
-            VolumeEnv(Attack) => "A".to_string(),
-            VolumeEnv(Hold) => "H".to_string(),
-            VolumeEnv(Decay) => "D".to_string(),
-            VolumeEnv(Sustain) => "S".to_string(),
-            VolumeEnv(Release) => "R".to_string(),
-            VolumeEnv(Multiply) => "M".to_string(),
+            VolumeEnv(param) | PitchEnv(param) => match param {
+                EnvelopeParam::Attack => "A".to_string(),
+                EnvelopeParam::Hold => "H".to_string(),
+                EnvelopeParam::Decay => "D".to_string(),
+                EnvelopeParam::Sustain => "S".to_string(),
+                EnvelopeParam::Release => "R".to_string(),
+                EnvelopeParam::Multiply => "M".to_string(),
+            },
             VolLFOAmplitude => "Amount".to_string(),
             VolLFOPeriod => "Period".to_string(),
-            PitchAttack => "A".to_string(),
-            PitchHold => "H".to_string(),
-            PitchDecay => "D".to_string(),
-            PitchMultiply => "M".to_string(),
-            PitchRelease => "R".to_string(),
             PitchLFOAmplitude => "Amount".to_string(),
             PitchLFOPeriod => "Period".to_string(),
             FilterType => "Filter Type".to_string(),

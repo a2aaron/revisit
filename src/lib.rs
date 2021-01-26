@@ -12,7 +12,7 @@ use std::{convert::TryFrom, sync::Arc};
 use params::{CountedEnum, ModulationType, OSCParams, ParameterType, Parameters, RawParameters};
 use sound_gen::{
     normalize_U7, normalize_pitch_bend, to_pitch_envelope, to_pitch_multiplier,
-    NormalizedPitchbend, NoteShape, Oscillator, SampleRate, ADSR,
+    NormalizedPitchbend, NoteShape, Oscillator, SampleRate,
 };
 use ui::UIFrontEnd;
 
