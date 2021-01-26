@@ -4,6 +4,7 @@ use crate::sound_gen::{
     ease_in_expo, ease_in_poly, envelope, FilterParams, NoteShape, NoteState, SampleRate, ADSR,
 };
 
+use derive_more::Display;
 use variant_count::VariantCount;
 use vst::{
     host::Host,
@@ -184,6 +185,8 @@ pub struct AmplitudeADSR {
     pub sustain: f32,
     // In seconds
     pub release: f32,
+    // In percent (0.0 to 1.0)
+    pub multiply: f32,
 }
 
 impl ADSR for AmplitudeADSR {
@@ -212,6 +215,7 @@ impl From<&RawEnvelope> for AmplitudeADSR {
         let decay = ease_in_expo(params.decay.get());
         let sustain = params.sustain.get();
         let release = ease_in_expo(params.release.get());
+        let multiply = (params.multiply.get() - 0.5) * 2.0;
         AmplitudeADSR {
             // Clamp values to around 1 ms minimum.
             // This avoids division by zero problems.
@@ -221,6 +225,7 @@ impl From<&RawEnvelope> for AmplitudeADSR {
             decay: (decay * 5.0).max(1.0 / 1000.0),
             sustain,
             release: (release * 5.0).max(1.0 / 1000.0),
+            multiply,
         }
     }
 }
@@ -288,6 +293,7 @@ pub struct RawParameters {
 
 impl RawParameters {
     fn get_ref(&self, parameter: ParameterType) -> &AtomicFloat {
+        use EnvelopeParam::*;
         use OSCParameterType::*;
         use ParameterType::*;
         match parameter {
@@ -299,11 +305,12 @@ impl RawParameters {
             OSC1(Warp) => &self.osc_1.warp,
             OSC1(CoarseTune) => &self.osc_1.coarse_tune,
             OSC1(FineTune) => &self.osc_1.fine_tune,
-            OSC1(VolAttack) => &self.osc_1.vol_adsr.attack,
-            OSC1(VolHold) => &self.osc_1.vol_adsr.hold,
-            OSC1(VolDecay) => &self.osc_1.vol_adsr.decay,
-            OSC1(VolSustain) => &self.osc_1.vol_adsr.sustain,
-            OSC1(VolRelease) => &self.osc_1.vol_adsr.release,
+            OSC1(VolumeEnv(Attack)) => &self.osc_1.vol_adsr.attack,
+            OSC1(VolumeEnv(Hold)) => &self.osc_1.vol_adsr.hold,
+            OSC1(VolumeEnv(Decay)) => &self.osc_1.vol_adsr.decay,
+            OSC1(VolumeEnv(Sustain)) => &self.osc_1.vol_adsr.sustain,
+            OSC1(VolumeEnv(Release)) => &self.osc_1.vol_adsr.release,
+            OSC1(VolumeEnv(Multiply)) => &self.osc_1.vol_adsr.multiply,
             OSC1(VolLFOAmplitude) => &self.osc_1.vol_lfo.amount,
             OSC1(VolLFOPeriod) => &self.osc_1.vol_lfo.period,
             OSC1(PitchAttack) => &self.osc_1.pitch_adsr.attack,
@@ -325,11 +332,12 @@ impl RawParameters {
             OSC2(Warp) => &self.osc_2.warp,
             OSC2(CoarseTune) => &self.osc_2.coarse_tune,
             OSC2(FineTune) => &self.osc_2.fine_tune,
-            OSC2(VolAttack) => &self.osc_2.vol_adsr.attack,
-            OSC2(VolHold) => &self.osc_2.vol_adsr.hold,
-            OSC2(VolDecay) => &self.osc_2.vol_adsr.decay,
-            OSC2(VolSustain) => &self.osc_2.vol_adsr.sustain,
-            OSC2(VolRelease) => &self.osc_2.vol_adsr.release,
+            OSC2(VolumeEnv(Attack)) => &self.osc_2.vol_adsr.attack,
+            OSC2(VolumeEnv(Hold)) => &self.osc_2.vol_adsr.hold,
+            OSC2(VolumeEnv(Decay)) => &self.osc_2.vol_adsr.decay,
+            OSC2(VolumeEnv(Sustain)) => &self.osc_2.vol_adsr.sustain,
+            OSC2(VolumeEnv(Release)) => &self.osc_2.vol_adsr.release,
+            OSC2(VolumeEnv(Multiply)) => &self.osc_2.vol_adsr.multiply,
             OSC2(VolLFOAmplitude) => &self.osc_2.vol_lfo.amount,
             OSC2(VolLFOPeriod) => &self.osc_2.vol_lfo.period,
             OSC2(PitchAttack) => &self.osc_2.pitch_adsr.attack,
@@ -385,6 +393,7 @@ impl RawParameters {
     /// Returns a user-facing text output for the given parameter. This is broken
     /// into a tuple consisting of (`value`, `units`)
     fn get_strings(&self, parameter: ParameterType) -> (String, String) {
+        use EnvelopeParam::*;
         use OSCParameterType::*;
         let params = Parameters::from(self);
 
@@ -431,11 +440,12 @@ impl RawParameters {
                     },
                     CoarseTune => (format!("{}", osc.coarse_tune), " semis".to_string()),
                     FineTune => make_strings(osc.fine_tune * 100.0, " cents"),
-                    VolAttack => duration_strings(osc.vol_adsr.attack),
-                    VolHold => duration_strings(osc.vol_adsr.hold),
-                    VolDecay => duration_strings(osc.vol_adsr.decay),
-                    VolSustain => make_strings(osc.vol_adsr.sustain * 100.0, "%"),
-                    VolRelease => duration_strings(osc.vol_adsr.release),
+                    VolumeEnv(Attack) => duration_strings(osc.vol_adsr.attack),
+                    VolumeEnv(Hold) => duration_strings(osc.vol_adsr.hold),
+                    VolumeEnv(Decay) => duration_strings(osc.vol_adsr.decay),
+                    VolumeEnv(Sustain) => make_strings(osc.vol_adsr.sustain * 100.0, "%"),
+                    VolumeEnv(Release) => duration_strings(osc.vol_adsr.release),
+                    VolumeEnv(Multiply) => make_strings(osc.vol_adsr.multiply * 100.0, "%"),
                     VolLFOAmplitude => make_strings(osc.vol_lfo.amplitude * 100.0, "%"),
                     VolLFOPeriod => duration_strings(osc.vol_lfo.period),
                     PitchAttack => duration_strings(osc.pitch_adsr.attack),
@@ -558,6 +568,7 @@ pub struct RawOSC {
 
 impl RawOSC {
     pub fn get(&self, param: OSCParameterType) -> f32 {
+        use EnvelopeParam::*;
         use OSCParameterType::*;
         match param {
             Volume => self.volume.get(),
@@ -567,11 +578,12 @@ impl RawOSC {
             Warp => self.warp.get(),
             CoarseTune => self.coarse_tune.get(),
             FineTune => self.fine_tune.get(),
-            VolAttack => self.vol_adsr.attack.get(),
-            VolHold => self.vol_adsr.hold.get(),
-            VolDecay => self.vol_adsr.decay.get(),
-            VolSustain => self.vol_adsr.sustain.get(),
-            VolRelease => self.vol_adsr.release.get(),
+            VolumeEnv(Attack) => self.vol_adsr.attack.get(),
+            VolumeEnv(Hold) => self.vol_adsr.hold.get(),
+            VolumeEnv(Decay) => self.vol_adsr.decay.get(),
+            VolumeEnv(Sustain) => self.vol_adsr.sustain.get(),
+            VolumeEnv(Release) => self.vol_adsr.release.get(),
+            VolumeEnv(Multiply) => self.vol_adsr.multiply.get(),
             VolLFOAmplitude => self.vol_lfo.amount.get(),
             VolLFOPeriod => self.vol_lfo.period.get(),
             PitchAttack => self.pitch_adsr.attack.get(),
@@ -589,6 +601,7 @@ impl RawOSC {
     }
 
     fn get_default(param: OSCParameterType, _osc: OSCType) -> f32 {
+        use EnvelopeParam::*;
         use OSCParameterType::*;
         match param {
             Volume => 0.5, // 100%
@@ -598,11 +611,12 @@ impl RawOSC {
             Warp => 0.5,
             CoarseTune => 0.5, // 0 semitones
             FineTune => 0.5,   // 0 cents
-            VolAttack => 0.1,
-            VolHold => 0.0,
-            VolDecay => 0.2,
-            VolSustain => 0.5,
-            VolRelease => 0.3,
+            VolumeEnv(Attack) => 0.1,
+            VolumeEnv(Hold) => 0.0,
+            VolumeEnv(Decay) => 0.2,
+            VolumeEnv(Sustain) => 0.5,
+            VolumeEnv(Release) => 0.3,
+            VolumeEnv(Multiply) => 0.0, // TODO!
             VolLFOAmplitude => 0.0,
             VolLFOPeriod => 0.5,
             PitchAttack => 1.0 / 10000.0,
@@ -629,13 +643,7 @@ impl RawOSC {
             warp: RawOSC::get_default(Warp, osc).into(),
             coarse_tune: RawOSC::get_default(CoarseTune, osc).into(),
             fine_tune: RawOSC::get_default(FineTune, osc).into(),
-            vol_adsr: RawEnvelope {
-                attack: RawOSC::get_default(VolAttack, osc).into(),
-                hold: RawOSC::get_default(VolHold, osc).into(),
-                decay: RawOSC::get_default(VolDecay, osc).into(),
-                sustain: RawOSC::get_default(VolSustain, osc).into(),
-                release: RawOSC::get_default(VolRelease, osc).into(),
-            },
+            vol_adsr: RawEnvelope::get_default(VolumeEnv, osc),
             vol_lfo: RawLFO {
                 period: RawOSC::get_default(VolLFOPeriod, osc).into(),
                 amount: RawOSC::get_default(VolLFOAmplitude, osc).into(),
@@ -646,6 +654,7 @@ impl RawOSC {
                 decay: RawOSC::get_default(PitchDecay, osc).into(),
                 sustain: RawOSC::get_default(PitchMultiply, osc).into(),
                 release: RawOSC::get_default(PitchRelease, osc).into(),
+                multiply: 0.0.into(), // TODO
             },
             pitch_lfo: RawLFO {
                 period: RawOSC::get_default(PitchLFOPeriod, osc).into(),
@@ -666,6 +675,21 @@ pub struct RawEnvelope {
     decay: AtomicFloat,
     sustain: AtomicFloat,
     release: AtomicFloat,
+    multiply: AtomicFloat,
+}
+
+impl RawEnvelope {
+    fn get_default(param: impl Fn(EnvelopeParam) -> OSCParameterType, osc: OSCType) -> RawEnvelope {
+        use EnvelopeParam::*;
+        RawEnvelope {
+            attack: RawOSC::get_default(param(Attack), osc).into(),
+            hold: RawOSC::get_default(param(Hold), osc).into(),
+            decay: RawOSC::get_default(param(Decay), osc).into(),
+            sustain: RawOSC::get_default(param(Sustain), osc).into(),
+            release: RawOSC::get_default(param(Release), osc).into(),
+            multiply: RawOSC::get_default(param(Multiply), osc).into(),
+        }
+    }
 }
 
 pub struct RawLFO {
@@ -683,11 +707,7 @@ from_into_int! {
         Warp,
         FineTune,
         CoarseTune,
-        VolAttack,
-        VolHold,
-        VolDecay,
-        VolSustain,
-        VolRelease,
+        VolumeEnv(EnvelopeParam),
         VolLFOAmplitude,
         VolLFOPeriod,
         PitchAttack,
@@ -715,11 +735,7 @@ impl std::fmt::Display for OSCParameterType {
             Warp => write!(f, "Warp"),
             CoarseTune => write!(f, "Coarse Tune"),
             FineTune => write!(f, "Fine Tune"),
-            VolAttack => write!(f, "Attack (Volume)"),
-            VolHold => write!(f, "Hold (Volume)"),
-            VolDecay => write!(f, "Decay (Volume)"),
-            VolSustain => write!(f, "Sustain (Volume)"),
-            VolRelease => write!(f, "Release (Volume)"),
+            VolumeEnv(param) => write!(f, "{} (Volume)", param),
             VolLFOAmplitude => write!(f, "LFO Amplitude (Volume)"),
             VolLFOPeriod => write!(f, "LFO Period (Volume)"),
             PitchAttack => write!(f, "Attack (Pitch)"),
@@ -737,6 +753,17 @@ impl std::fmt::Display for OSCParameterType {
     }
 }
 
+from_into_int! {
+    #[derive(Debug, Display, Clone, Copy, PartialEq, Eq)]
+    pub enum EnvelopeParam {
+        Attack,
+        Decay,
+        Hold,
+        Sustain,
+        Release,
+        Multiply,
+    }
+}
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OSCType {
     OSC1,

@@ -13,6 +13,7 @@ rand = "0.7.3"
 log = "0.4.11"
 simple-logging = "2.0.2"
 variant_count = "1.0.0"
+derive_more = "0.99.11"
 
 # for audio filtering
 biquad = "0.4.0" # { git = "https://github.com/a2aaron/biquad-rs", branch = "master" }

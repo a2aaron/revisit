@@ -16,8 +16,8 @@ use iced_native::{layout, mouse, Widget};
 
 use crate::{
     params::{
-        biquad_to_string, to_filter_type, ModulationType, OSCParameterType, OSCType, ParameterType,
-        RawOSC, RawParameters,
+        biquad_to_string, to_filter_type, EnvelopeParam, ModulationType, OSCParameterType, OSCType,
+        ParameterType, RawOSC, RawParameters,
     },
     sound_gen::NoteShape,
     ui::Message,
@@ -287,6 +287,7 @@ pub struct OSCKnobs {
 
 impl OSCKnobs {
     fn new(params: &RawParameters, osc: OSCType) -> OSCKnobs {
+        use EnvelopeParam::*;
         use OSCParameterType::*;
         OSCKnobs {
             volume: make_knob(params, (Volume, osc).into()),
@@ -294,11 +295,11 @@ impl OSCKnobs {
             phase: make_knob(params, (Phase, osc).into()),
             coarse_tune: make_knob(params, (CoarseTune, osc).into()),
             fine_tune: make_knob(params, (FineTune, osc).into()),
-            attack: make_knob(params, (VolAttack, osc).into()),
-            hold: make_knob(params, (VolHold, osc).into()),
-            decay: make_knob(params, (VolDecay, osc).into()),
-            sustain: make_knob(params, (VolSustain, osc).into()),
-            release: make_knob(params, (VolRelease, osc).into()),
+            attack: make_knob(params, (VolumeEnv(Attack), osc).into()),
+            hold: make_knob(params, (VolumeEnv(Hold), osc).into()),
+            decay: make_knob(params, (VolumeEnv(Decay), osc).into()),
+            sustain: make_knob(params, (VolumeEnv(Sustain), osc).into()),
+            release: make_knob(params, (VolumeEnv(Release), osc).into()),
             vol_lfo_amplitude: make_knob(params, (VolLFOAmplitude, osc).into()),
             vol_lfo_period: make_knob(params, (VolLFOPeriod, osc).into()),
             note_shape: make_knob(params, (Shape, osc).into()),
@@ -335,6 +336,7 @@ impl OSCKnobs {
             knob.set_normal(range.snap(value).into());
         }
 
+        use EnvelopeParam::*;
         use OSCParameterType::*;
         self.volume.set_normal(osc.get(Volume).into());
         self.pan.set_normal(osc.get(Pan).into());
@@ -347,11 +349,11 @@ impl OSCKnobs {
         );
 
         self.fine_tune.set_normal(osc.get(FineTune).into());
-        self.attack.set_normal(osc.get(VolAttack).into());
-        self.hold.set_normal(osc.get(VolHold).into());
-        self.decay.set_normal(osc.get(VolDecay).into());
-        self.sustain.set_normal(osc.get(VolSustain).into());
-        self.release.set_normal(osc.get(VolRelease).into());
+        self.attack.set_normal(osc.get(VolumeEnv(Attack)).into());
+        self.hold.set_normal(osc.get(VolumeEnv(Hold)).into());
+        self.decay.set_normal(osc.get(VolumeEnv(Decay)).into());
+        self.sustain.set_normal(osc.get(VolumeEnv(Sustain)).into());
+        self.release.set_normal(osc.get(VolumeEnv(Release)).into());
         self.vol_lfo_amplitude
             .set_normal(osc.get(VolLFOAmplitude).into());
         self.vol_lfo_period.set_normal(osc.get(VolLFOPeriod).into());
@@ -393,7 +395,9 @@ impl OSCKnobs {
         osc: OSCType,
         on_off: Option<Element<'a, Message>>,
     ) -> Element<'a, Message> {
+        use EnvelopeParam::*;
         use OSCParameterType::*;
+
         let volume = widget!(Knob, &mut self.volume, (Volume, osc).into());
         let pan = widget!(Knob, &mut self.pan, (Pan, osc).into());
         let phase = widget!(Knob, &mut self.phase, (Phase, osc).into());
@@ -414,11 +418,11 @@ impl OSCKnobs {
 
         let warp = widget!(Knob, &mut self.note_warp, (Warp, osc).into());
 
-        let attack = widget!(Knob, &mut self.attack, (VolAttack, osc).into());
-        let hold = widget!(Knob, &mut self.hold, (VolHold, osc).into());
-        let decay = widget!(Knob, &mut self.decay, (VolDecay, osc).into());
-        let sustain = widget!(Knob, &mut self.sustain, (VolSustain, osc).into());
-        let release = widget!(Knob, &mut self.release, (VolRelease, osc).into());
+        let attack = widget!(Knob, &mut self.attack, (VolumeEnv(Attack), osc).into());
+        let hold = widget!(Knob, &mut self.hold, (VolumeEnv(Hold), osc).into());
+        let decay = widget!(Knob, &mut self.decay, (VolumeEnv(Decay), osc).into());
+        let sustain = widget!(Knob, &mut self.sustain, (VolumeEnv(Sustain), osc).into());
+        let release = widget!(Knob, &mut self.release, (VolumeEnv(Release), osc).into());
 
         let vol_lfo_amplitude = widget!(
             Knob,
@@ -829,6 +833,7 @@ fn split_rect_horiz(rect: Rectangle, num_rects: usize) -> Vec<Rectangle> {
 
 /// The widget name for a given parameter
 fn widget_name(param: ParameterType) -> String {
+    use EnvelopeParam::*;
     use OSCParameterType::*;
     match param {
         ParameterType::MasterVolume => "Master Volume".to_string(),
@@ -840,11 +845,12 @@ fn widget_name(param: ParameterType) -> String {
             CoarseTune => "Coarse".to_string(),
             Shape => "Shape".to_string(),
             Warp => "Warp".to_string(),
-            VolAttack => "A".to_string(),
-            VolHold => "H".to_string(),
-            VolDecay => "D".to_string(),
-            VolSustain => "S".to_string(),
-            VolRelease => "R".to_string(),
+            VolumeEnv(Attack) => "A".to_string(),
+            VolumeEnv(Hold) => "H".to_string(),
+            VolumeEnv(Decay) => "D".to_string(),
+            VolumeEnv(Sustain) => "S".to_string(),
+            VolumeEnv(Release) => "R".to_string(),
+            VolumeEnv(Multiply) => "M".to_string(),
             VolLFOAmplitude => "Amount".to_string(),
             VolLFOPeriod => "Period".to_string(),
             PitchAttack => "A".to_string(),
