@@ -130,13 +130,13 @@ impl MainTab {
                         };
                         match osc_param {
                             OSCParameterType::CoarseTune => {
-                                osc.coarse_tune_range.snap_knob(&mut osc.coarse_tune)
+                                osc.coarse_tune_range.snap_knob(&mut osc.coarse_tune.0)
                             }
                             OSCParameterType::Shape => {
-                                osc.note_shape_range.snap_knob(&mut osc.note_shape)
+                                osc.note_shape_range.snap_knob(&mut osc.note_shape.0)
                             }
                             OSCParameterType::FilterType => {
-                                osc.filter_type_range.snap_knob(&mut osc.filter_type)
+                                osc.filter_type_range.snap_knob(&mut osc.filter_type.0)
                             }
                             _ => (),
                         }
@@ -255,31 +255,31 @@ pub enum Tabs {
 /// A struct keeping track of the various knob states an oscillator has.
 /// The ranges are used for snapping the knobs.
 pub struct OSCKnobs {
-    volume: knob::State,
-    pan: knob::State,
-    phase: knob::State,
-    coarse_tune: knob::State,
-    fine_tune: knob::State,
-    attack: knob::State,
-    hold: knob::State,
-    decay: knob::State,
-    sustain: knob::State,
-    release: knob::State,
-    vol_lfo_amplitude: knob::State,
-    vol_lfo_period: knob::State,
-    note_shape: knob::State,
-    note_warp: knob::State,
-    pitch_attack: knob::State,
-    pitch_hold: knob::State,
-    pitch_decay: knob::State,
-    pitch_multiply: knob::State,
-    pitch_release: knob::State,
-    pitch_lfo_amplitude: knob::State,
-    pitch_lfo_period: knob::State,
-    filter_type: knob::State,
-    filter_freq: knob::State,
-    filter_q: knob::State,
-    filter_gain: knob::State,
+    volume: (knob::State, ParameterType),
+    pan: (knob::State, ParameterType),
+    phase: (knob::State, ParameterType),
+    coarse_tune: (knob::State, ParameterType),
+    fine_tune: (knob::State, ParameterType),
+    attack: (knob::State, ParameterType),
+    hold: (knob::State, ParameterType),
+    decay: (knob::State, ParameterType),
+    sustain: (knob::State, ParameterType),
+    release: (knob::State, ParameterType),
+    vol_lfo_amplitude: (knob::State, ParameterType),
+    vol_lfo_period: (knob::State, ParameterType),
+    note_shape: (knob::State, ParameterType),
+    note_warp: (knob::State, ParameterType),
+    pitch_attack: (knob::State, ParameterType),
+    pitch_hold: (knob::State, ParameterType),
+    pitch_decay: (knob::State, ParameterType),
+    pitch_multiply: (knob::State, ParameterType),
+    pitch_release: (knob::State, ParameterType),
+    pitch_lfo_amplitude: (knob::State, ParameterType),
+    pitch_lfo_period: (knob::State, ParameterType),
+    filter_type: (knob::State, ParameterType),
+    filter_freq: (knob::State, ParameterType),
+    filter_q: (knob::State, ParameterType),
+    filter_gain: (knob::State, ParameterType),
     coarse_tune_range: TruncatingIntRange,
     note_shape_range: TruncatingIntRange,
     filter_type_range: TruncatingIntRange,
@@ -330,17 +330,29 @@ impl OSCKnobs {
     /// Set the knob states using the `osc` reference provided.
     /// This method is called whenever a ForceRedraw happens.
     fn update(&mut self, osc: &RawOSC) {
-        /// Sets a knob while also the TruncatingIntRange to snap the value to
-        /// the right spot.
-        fn set_knob_with_range(knob: &mut knob::State, range: &TruncatingIntRange, value: f32) {
-            knob.set_normal(range.snap(value).into());
+        fn set_knob(knob: &mut (knob::State, ParameterType), osc: &RawOSC) {
+            match knob.1 {
+                ParameterType::OSC1(param) | ParameterType::OSC2(param) => {
+                    knob.0.set_normal(osc.get(param).into())
+                }
+                _ => unreachable!("ParameterType must be an OSC1 or OSC2 variant"),
+            }
         }
 
-        use EnvelopeParam::*;
+        /// Sets a knob while also the TruncatingIntRange to snap the value to
+        /// the right spot.
+        fn set_knob_with_range(
+            knob: &mut (knob::State, ParameterType),
+            range: &TruncatingIntRange,
+            value: f32,
+        ) {
+            knob.0.set_normal(range.snap(value).into());
+        }
+
         use OSCParameterType::*;
-        self.volume.set_normal(osc.get(Volume).into());
-        self.pan.set_normal(osc.get(Pan).into());
-        self.phase.set_normal(osc.get(Phase).into());
+        set_knob(&mut self.volume, osc);
+        set_knob(&mut self.pan, osc);
+        set_knob(&mut self.phase, osc);
 
         set_knob_with_range(
             &mut self.coarse_tune,
@@ -348,31 +360,28 @@ impl OSCKnobs {
             osc.get(CoarseTune),
         );
 
-        self.fine_tune.set_normal(osc.get(FineTune).into());
-        self.attack.set_normal(osc.get(VolumeEnv(Attack)).into());
-        self.hold.set_normal(osc.get(VolumeEnv(Hold)).into());
-        self.decay.set_normal(osc.get(VolumeEnv(Decay)).into());
-        self.sustain.set_normal(osc.get(VolumeEnv(Sustain)).into());
-        self.release.set_normal(osc.get(VolumeEnv(Release)).into());
-        self.vol_lfo_amplitude
-            .set_normal(osc.get(VolLFOAmplitude).into());
-        self.vol_lfo_period.set_normal(osc.get(VolLFOPeriod).into());
+        set_knob(&mut self.fine_tune, osc);
+        set_knob(&mut self.attack, osc);
+        set_knob(&mut self.hold, osc);
+        set_knob(&mut self.decay, osc);
+        set_knob(&mut self.sustain, osc);
+        set_knob(&mut self.release, osc);
+
+        set_knob(&mut self.vol_lfo_amplitude, osc);
+        set_knob(&mut self.vol_lfo_period, osc);
 
         set_knob_with_range(&mut self.note_shape, &self.note_shape_range, osc.get(Shape));
 
-        self.note_warp.set_normal(osc.get(Warp).into());
-        self.pitch_attack
-            .set_normal(osc.get(PitchEnv(Attack)).into());
-        self.pitch_hold.set_normal(osc.get(PitchEnv(Hold)).into());
-        self.pitch_decay.set_normal(osc.get(PitchEnv(Decay)).into());
-        self.pitch_multiply
-            .set_normal(osc.get(PitchEnv(Multiply)).into());
-        self.pitch_release
-            .set_normal(osc.get(PitchEnv(Release)).into());
-        self.pitch_lfo_amplitude
-            .set_normal(osc.get(PitchLFOAmplitude).into());
-        self.pitch_lfo_period
-            .set_normal(osc.get(PitchLFOPeriod).into());
+        set_knob(&mut self.note_warp, osc);
+
+        set_knob(&mut self.pitch_attack, osc);
+        set_knob(&mut self.pitch_hold, osc);
+        set_knob(&mut self.pitch_decay, osc);
+        set_knob(&mut self.pitch_multiply, osc);
+        set_knob(&mut self.pitch_release, osc);
+
+        set_knob(&mut self.pitch_lfo_amplitude, osc);
+        set_knob(&mut self.pitch_lfo_period, osc);
 
         set_knob_with_range(
             &mut self.filter_type,
@@ -380,9 +389,9 @@ impl OSCKnobs {
             osc.get(FilterType),
         );
 
-        self.filter_freq.set_normal(osc.get(FilterFreq).into());
-        self.filter_q.set_normal(osc.get(FilterQ).into());
-        self.filter_gain.set_normal(osc.get(FilterGain).into());
+        set_knob(&mut self.filter_freq, osc);
+        set_knob(&mut self.filter_q, osc);
+        set_knob(&mut self.filter_gain, osc);
     }
 
     /// Create the set of widget for a particular oscillator.
@@ -397,81 +406,64 @@ impl OSCKnobs {
         osc: OSCType,
         on_off: Option<Element<'a, Message>>,
     ) -> Element<'a, Message> {
-        use EnvelopeParam::*;
-        use OSCParameterType::*;
+        fn make_knob(knob: &mut (knob::State, ParameterType)) -> Element<'_, Message> {
+            make_knob_with_label(knob, &widget_name(knob.1))
+        }
 
-        let volume = widget!(Knob, &mut self.volume, (Volume, osc).into());
-        let pan = widget!(Knob, &mut self.pan, (Pan, osc).into());
-        let phase = widget!(Knob, &mut self.phase, (Phase, osc).into());
-        let fine_tune = widget!(Knob, &mut self.fine_tune, (FineTune, osc).into());
-        let coarse_tune = widget!(Knob, &mut self.coarse_tune, (CoarseTune, osc).into());
+        fn make_knob_with_label<'a>(
+            knob: &'a mut (knob::State, ParameterType),
+            title: &str,
+        ) -> Element<'a, Message> {
+            let param = knob.1;
+            let knob = Knob::new(&mut knob.0, move |normal| {
+                Message::ParameterChanged(normal.as_f32(), param)
+            })
+            .size(KNOB_SIZE);
+            with_label(knob, title)
+        }
+
+        let volume = make_knob(&mut self.volume);
+        let pan = make_knob(&mut self.pan);
+        let phase = make_knob(&mut self.phase);
+        let fine_tune = make_knob(&mut self.fine_tune);
+        let coarse_tune = make_knob(&mut self.coarse_tune);
 
         let shape_title = NoteShape::from_warp(
-            self.note_shape.normal().into(),
-            self.note_warp.normal().into(),
+            self.note_shape.0.normal().into(),
+            self.note_warp.0.normal().into(),
         )
         .to_string();
-        let shape = widget!(
-            Knob,
-            &mut self.note_shape,
-            (Shape, osc).into(),
-            &shape_title
-        );
+        let shape = make_knob_with_label(&mut self.note_shape, &shape_title);
 
-        let warp = widget!(Knob, &mut self.note_warp, (Warp, osc).into());
+        let warp = make_knob(&mut self.note_warp);
 
-        let attack = widget!(Knob, &mut self.attack, (VolumeEnv(Attack), osc).into());
-        let hold = widget!(Knob, &mut self.hold, (VolumeEnv(Hold), osc).into());
-        let decay = widget!(Knob, &mut self.decay, (VolumeEnv(Decay), osc).into());
-        let sustain = widget!(Knob, &mut self.sustain, (VolumeEnv(Sustain), osc).into());
-        let release = widget!(Knob, &mut self.release, (VolumeEnv(Release), osc).into());
+        let attack = make_knob(&mut self.attack);
+        let hold = make_knob(&mut self.hold);
+        let decay = make_knob(&mut self.decay);
+        let sustain = make_knob(&mut self.sustain);
+        let release = make_knob(&mut self.release);
 
-        let vol_lfo_amplitude = widget!(
-            Knob,
-            &mut self.vol_lfo_amplitude,
-            (VolLFOAmplitude, osc).into()
-        );
-        let vol_lfo_period = widget!(Knob, &mut self.vol_lfo_period, (VolLFOPeriod, osc).into());
+        let vol_lfo_amplitude = make_knob(&mut self.vol_lfo_amplitude);
+        let vol_lfo_period = make_knob(&mut self.vol_lfo_period);
 
-        let pitch_attack = widget!(Knob, &mut self.pitch_attack, (PitchEnv(Attack), osc).into());
-        let pitch_hold = widget!(Knob, &mut self.pitch_hold, (PitchEnv(Hold), osc).into());
-        let pitch_decay = widget!(Knob, &mut self.pitch_decay, (PitchEnv(Decay), osc).into());
-        let pitch_multiply = widget!(
-            Knob,
-            &mut self.pitch_multiply,
-            (PitchEnv(Multiply), osc).into()
-        );
-        let pitch_release = widget!(
-            Knob,
-            &mut self.pitch_release,
-            (PitchEnv(Release), osc).into()
-        );
+        let pitch_attack = make_knob(&mut self.pitch_attack);
+        let pitch_hold = make_knob(&mut self.pitch_hold);
+        let pitch_decay = make_knob(&mut self.pitch_decay);
+        let pitch_multiply = make_knob(&mut self.pitch_multiply);
+        let pitch_release = make_knob(&mut self.pitch_release);
 
-        let pitch_lfo_amplitude = widget!(
-            Knob,
-            &mut self.pitch_lfo_amplitude,
-            (PitchLFOAmplitude, osc).into()
-        );
-        let pitch_lfo_period = widget!(
-            Knob,
-            &mut self.pitch_lfo_period,
-            (PitchLFOPeriod, osc).into()
-        );
+        let pitch_lfo_amplitude = make_knob(&mut self.pitch_lfo_amplitude);
+        let pitch_lfo_period = make_knob(&mut self.pitch_lfo_period);
 
         let filter_type_title = biquad_to_string(to_filter_type(
-            self.filter_type.normal().into(),
-            self.filter_gain.normal().into(),
+            self.filter_type.0.normal().into(),
+            self.filter_gain.0.normal().into(),
         ));
 
-        let filter_type = widget!(
-            Knob,
-            &mut self.filter_type,
-            (FilterType, osc).into(),
-            &filter_type_title
-        );
-        let filter_freq = widget!(Knob, &mut self.filter_freq, (FilterFreq, osc).into());
-        let filter_q = widget!(Knob, &mut self.filter_q, (FilterQ, osc).into());
-        let filter_gain = widget!(Knob, &mut self.filter_gain, (FilterGain, osc).into());
+        let filter_type = make_knob_with_label(&mut self.filter_type, &filter_type_title);
+        let filter_freq = make_knob(&mut self.filter_freq);
+        let filter_q = make_knob(&mut self.filter_q);
+        let filter_gain = make_knob(&mut self.filter_gain);
 
         let title = match osc {
             OSCType::OSC1 => "OSC 1",
@@ -752,8 +744,9 @@ fn with_label<'a>(widget: impl Into<Element<'a, Message>>, title: &str) -> Eleme
 
 /// Convience function to make `knob::State` out of a `RawParameters`
 /// and `ParameterType`
-fn make_knob(params: &RawParameters, param_type: ParameterType) -> knob::State {
-    knob::State::new(make_normal_param(params, param_type))
+fn make_knob(params: &RawParameters, param_type: ParameterType) -> (knob::State, ParameterType) {
+    let knob = knob::State::new(make_normal_param(params, param_type));
+    (knob, param_type)
 }
 
 /// Make a row of widgets with better default spacing.
