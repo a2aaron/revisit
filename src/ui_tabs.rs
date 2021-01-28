@@ -16,8 +16,8 @@ use iced_native::{layout, mouse, Widget};
 
 use crate::{
     params::{
-        biquad_to_string, to_filter_type, EnvelopeParam, ModulationType, OSCParameterType, OSCType,
-        ParameterType, RawOSC, RawParameters,
+        biquad_to_string, to_filter_type, EnvelopeParam, ModBankType, ModulationType,
+        OSCParameterType, OSCType, ParameterType, RawEnvelope, RawOSC, RawParameters,
     },
     sound_gen::NoteShape,
     ui::Message,
@@ -144,7 +144,9 @@ impl MainTab {
                     // This is definitely unreachable because OSC2Mod handling is
                     // done by the OSC2ModChanged message
                     ParameterType::OSC2Mod => unreachable!(),
+                    // Don't do anything special for these parameter types.
                     ParameterType::MasterVolume => (),
+                    ParameterType::ModBank(_) => (),
                 }
             }
             // The host has changed a parameter, or a redraw was requested
@@ -194,18 +196,22 @@ impl MainTab {
 }
 
 /// The tab which has all the various modulation envelopes/LFOs
-pub struct ModulationTab {}
+pub struct ModulationTab {
+    env_1: EnvKnobGroup,
+    env_2: EnvKnobGroup,
+}
 
 impl ModulationTab {
-    pub fn new(_params: &RawParameters) -> ModulationTab {
-        ModulationTab {}
+    pub fn new(params: &RawParameters) -> ModulationTab {
+        ModulationTab {
+            env_1: EnvKnobGroup::new(&params.mod_bank.env_1),
+            env_2: EnvKnobGroup::new(&params.mod_bank.env_2),
+        }
     }
 
-    pub fn update(&mut self, message: Message, _params: &RawParameters) {
-        // TODO!
-        match message {
-            _ => (),
-        }
+    pub fn update(&mut self, _message: Message, params: &RawParameters) {
+        self.env_1.update(&params.mod_bank.env_1);
+        self.env_2.update(&params.mod_bank.env_2);
     }
 
     pub fn view(
@@ -214,7 +220,16 @@ impl ModulationTab {
         _screen_height: u32,
         _params: &RawParameters,
     ) -> iced::Element<'_, Message> {
-        iced::Text::new("! ! TODO ! !").size(100).into()
+        column()
+            .push(
+                self.env_1
+                    .widgets(ModBankType::Env1(EnvelopeParam::Attack), "ENV 1"),
+            )
+            .push(
+                self.env_2
+                    .widgets(ModBankType::Env2(EnvelopeParam::Attack), "ENV 2"),
+            )
+            .into()
     }
 }
 
@@ -228,11 +243,8 @@ impl PresetTab {
         PresetTab {}
     }
 
-    pub fn update(&mut self, message: Message, _params: &RawParameters) {
+    pub fn update(&mut self, _message: Message, _params: &RawParameters) {
         // TODO!
-        match message {
-            _ => (),
-        }
     }
 
     pub fn view(
@@ -676,6 +688,89 @@ impl<B: Backend> Widget<Message, Renderer<B>> for ModTypeSelector {
     }
 }
 
+/// A group of knobs, arranged horizontally, reprsenting envelope knobs.
+struct EnvKnobGroup {
+    attack: knob::State,
+    hold: knob::State,
+    decay: knob::State,
+    sustain: knob::State,
+    release: knob::State,
+    multiply: knob::State,
+}
+
+impl EnvKnobGroup {
+    /// Create a new EnvKnobGroup out of the RawEnvelope
+    fn new(envelope: &RawEnvelope) -> EnvKnobGroup {
+        fn make_state(envelope: &RawEnvelope, param: EnvelopeParam) -> knob::State {
+            knob::State::new(NormalParam {
+                value: envelope.get_ref(param).get().into(),
+                default: EnvelopeParam::get_default(param).into(),
+            })
+        }
+        EnvKnobGroup {
+            attack: make_state(envelope, EnvelopeParam::Attack),
+            hold: make_state(envelope, EnvelopeParam::Hold),
+            decay: make_state(envelope, EnvelopeParam::Decay),
+            sustain: make_state(envelope, EnvelopeParam::Sustain),
+            release: make_state(envelope, EnvelopeParam::Release),
+            multiply: make_state(envelope, EnvelopeParam::Multiply),
+        }
+    }
+
+    /// Set the internal knob states using the given raw envelope
+    fn update(&mut self, envelope: &RawEnvelope) {
+        fn set_knob(knob: &mut knob::State, envelope: &RawEnvelope, param: EnvelopeParam) {
+            knob.set_normal(envelope.get_ref(param).get().into())
+        }
+        set_knob(&mut self.attack, envelope, EnvelopeParam::Attack);
+        set_knob(&mut self.hold, envelope, EnvelopeParam::Hold);
+        set_knob(&mut self.decay, envelope, EnvelopeParam::Decay);
+        set_knob(&mut self.sustain, envelope, EnvelopeParam::Sustain);
+        set_knob(&mut self.release, envelope, EnvelopeParam::Release);
+        set_knob(&mut self.multiply, envelope, EnvelopeParam::Multiply);
+    }
+
+    /// Make a widget group out of the EnvKnobGroup
+    /// TODO: Don't use ModBankType here
+    pub fn widgets(&mut self, param: ModBankType, title: &str) -> iced::Element<'_, Message> {
+        let param = match param {
+            ModBankType::Env1(_) => ModBankType::Env1,
+            ModBankType::Env2(_) => ModBankType::Env2,
+        };
+        let attack = widget!(
+            Knob,
+            &mut self.attack,
+            ParameterType::ModBank(param(EnvelopeParam::Attack))
+        );
+        let hold = widget!(
+            Knob,
+            &mut self.hold,
+            ParameterType::ModBank(param(EnvelopeParam::Hold))
+        );
+        let decay = widget!(
+            Knob,
+            &mut self.decay,
+            ParameterType::ModBank(param(EnvelopeParam::Decay))
+        );
+        let sustain = widget!(
+            Knob,
+            &mut self.sustain,
+            ParameterType::ModBank(param(EnvelopeParam::Sustain))
+        );
+        let release = widget!(
+            Knob,
+            &mut self.release,
+            ParameterType::ModBank(param(EnvelopeParam::Release))
+        );
+        let multiply = widget!(
+            Knob,
+            &mut self.multiply,
+            ParameterType::ModBank(param(EnvelopeParam::Multiply))
+        );
+        knob_row(vec![attack, hold, decay, sustain, release, multiply], title)
+    }
+}
+
 /// Makes a pane of widgets with the specified title.
 /// `widgets` consists of a vector of (`inner_vec`, `row_title`). Each `inner_vec`
 ///  is a list of widgets that will be arranged in a row. The row will have the
@@ -836,6 +931,17 @@ fn split_rect_horiz(rect: Rectangle, num_rects: usize) -> Vec<Rectangle> {
 
 /// The widget name for a given parameter
 fn widget_name(param: ParameterType) -> String {
+    fn widget_name_env(param: EnvelopeParam) -> String {
+        match param {
+            EnvelopeParam::Attack => "A".to_string(),
+            EnvelopeParam::Hold => "H".to_string(),
+            EnvelopeParam::Decay => "D".to_string(),
+            EnvelopeParam::Sustain => "S".to_string(),
+            EnvelopeParam::Release => "R".to_string(),
+            EnvelopeParam::Multiply => "M".to_string(),
+        }
+    }
+
     use OSCParameterType::*;
     match param {
         ParameterType::MasterVolume => "Master Volume".to_string(),
@@ -847,14 +953,7 @@ fn widget_name(param: ParameterType) -> String {
             CoarseTune => "Coarse".to_string(),
             Shape => "Shape".to_string(),
             Warp => "Warp".to_string(),
-            VolumeEnv(param) | PitchEnv(param) => match param {
-                EnvelopeParam::Attack => "A".to_string(),
-                EnvelopeParam::Hold => "H".to_string(),
-                EnvelopeParam::Decay => "D".to_string(),
-                EnvelopeParam::Sustain => "S".to_string(),
-                EnvelopeParam::Release => "R".to_string(),
-                EnvelopeParam::Multiply => "M".to_string(),
-            },
+            VolumeEnv(param) | PitchEnv(param) => widget_name_env(param),
             VolLFOAmplitude => "Amount".to_string(),
             VolLFOPeriod => "Period".to_string(),
             PitchLFOAmplitude => "Amount".to_string(),
@@ -865,5 +964,7 @@ fn widget_name(param: ParameterType) -> String {
             FilterGain => "Gain".to_string(),
         },
         ParameterType::OSC2Mod => "OSC 2 Mod".to_string(),
+        ParameterType::ModBank(ModBankType::Env1(param)) => widget_name_env(param),
+        ParameterType::ModBank(ModBankType::Env2(param)) => widget_name_env(param),
     }
 }

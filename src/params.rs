@@ -107,6 +107,7 @@ pub struct Parameters {
     pub osc_2: OSCParams,
     pub master_vol: f32,
     pub osc_2_mod: ModulationType,
+    pub mod_bank: ModulationBank,
 }
 
 impl From<&RawParameters> for Parameters {
@@ -116,6 +117,7 @@ impl From<&RawParameters> for Parameters {
             osc_2: OSCParams::from(&params.osc_2),
             master_vol: params.master_vol.get(),
             osc_2_mod: params.osc_2_mod.get().into(),
+            mod_bank: ModulationBank::from(&params.mod_bank),
         }
     }
 }
@@ -168,6 +170,20 @@ impl From<&RawOSC> for OSCParams {
                 q_value: (params.filter_q.get() * 10.0).max(0.01),
                 freq: ease_in_poly(params.filter_freq.get(), 4).clamp(0.0, 1.0) * 22100.0,
             },
+        }
+    }
+}
+
+pub struct ModulationBank {
+    env_1: Envelope,
+    env_2: Envelope,
+}
+
+impl From<&RawModBank> for ModulationBank {
+    fn from(params: &RawModBank) -> Self {
+        ModulationBank {
+            env_1: Envelope::from(&params.env_1),
+            env_2: Envelope::from(&params.env_2),
         }
     }
 }
@@ -245,6 +261,7 @@ pub struct RawParameters {
     pub osc_2: RawOSC,
     pub master_vol: AtomicFloat,
     pub osc_2_mod: AtomicFloat,
+    pub mod_bank: RawModBank,
     pub host: HostCallback,
     pub notify: Arc<tokio::sync::Notify>,
 }
@@ -256,6 +273,8 @@ impl RawParameters {
             ParameterType::OSC2Mod => &self.osc_2_mod,
             ParameterType::OSC1(param) => self.osc_1.get_ref(param),
             ParameterType::OSC2(param) => self.osc_2.get_ref(param),
+            ParameterType::ModBank(ModBankType::Env1(param)) => self.mod_bank.env_1.get_ref(param),
+            ParameterType::ModBank(ModBankType::Env2(param)) => self.mod_bank.env_2.get_ref(param),
         }
     }
 
@@ -282,12 +301,13 @@ impl RawParameters {
     }
 
     pub fn get_default(parameter: ParameterType) -> f32 {
-        use ParameterType::*;
         match parameter {
-            MasterVolume => 0.33,
-            OSC1(param) => RawOSC::get_default(param, OSCType::OSC1),
-            OSC2Mod => 0.0, // Mix
-            OSC2(param) => RawOSC::get_default(param, OSCType::OSC2),
+            ParameterType::MasterVolume => 0.33,
+            ParameterType::OSC2Mod => 0.0, // Mix
+            ParameterType::OSC1(param) => RawOSC::get_default(param, OSCType::OSC1),
+            ParameterType::OSC2(param) => RawOSC::get_default(param, OSCType::OSC2),
+            ParameterType::ModBank(ModBankType::Env1(param)) => EnvelopeParam::get_default(param),
+            ParameterType::ModBank(ModBankType::Env2(param)) => EnvelopeParam::get_default(param),
         }
     }
 
@@ -324,6 +344,17 @@ impl RawParameters {
             }
         }
 
+        fn envelope_strings(envelope: Envelope, param: EnvelopeParam) -> (String, String) {
+            match param {
+                Attack => duration_strings(envelope.attack),
+                Hold => duration_strings(envelope.hold),
+                Decay => duration_strings(envelope.decay),
+                Sustain => make_strings(envelope.sustain * 100.0, "%"),
+                Release => duration_strings(envelope.release),
+                Multiply => make_strings(envelope.multiply * 100.0, "%"),
+            }
+        }
+
         match parameter {
             ParameterType::MasterVolume => make_strings(self.master_vol.get() * 100.0, "%"),
             ParameterType::OSC1(osc_param) | ParameterType::OSC2(osc_param) => {
@@ -345,24 +376,10 @@ impl RawParameters {
                     },
                     CoarseTune => (format!("{}", osc.coarse_tune), " semis".to_string()),
                     FineTune => make_strings(osc.fine_tune * 100.0, " cents"),
-                    VolumeEnv(param) | PitchEnv(param) => {
-                        let envelope = match osc_param {
-                            VolumeEnv(_) => osc.vol_adsr,
-                            PitchEnv(_) => osc.pitch_adsr,
-                            _ => unreachable!(),
-                        };
-                        match param {
-                            Attack => duration_strings(envelope.attack),
-                            Hold => duration_strings(envelope.hold),
-                            Decay => duration_strings(envelope.decay),
-                            Sustain => make_strings(envelope.sustain * 100.0, "%"),
-                            Release => duration_strings(envelope.release),
-                            Multiply => make_strings(envelope.multiply * 100.0, "%"),
-                        }
-                    }
-
+                    VolumeEnv(param) => envelope_strings(osc.vol_adsr, param),
                     VolLFOAmplitude => make_strings(osc.vol_lfo.amplitude * 100.0, "%"),
                     VolLFOPeriod => duration_strings(osc.vol_lfo.period),
+                    PitchEnv(param) => envelope_strings(osc.pitch_adsr, param),
                     PitchLFOAmplitude => make_strings(osc.pitch_lfo.amplitude * 100.0, "%"),
                     PitchLFOPeriod => duration_strings(osc.pitch_lfo.period),
                     FilterType => (biquad_to_string(osc.filter_params.filter), "".to_string()),
@@ -377,6 +394,12 @@ impl RawParameters {
                 }
             }
             ParameterType::OSC2Mod => (format!("{}", params.osc_2_mod), "".to_string()),
+            ParameterType::ModBank(ModBankType::Env1(param)) => {
+                envelope_strings(params.mod_bank.env_1, param)
+            }
+            ParameterType::ModBank(ModBankType::Env2(param)) => {
+                envelope_strings(params.mod_bank.env_2, param)
+            }
         }
     }
 }
@@ -405,6 +428,8 @@ impl PluginParameters for RawParameters {
                 ParameterType::OSC1(param) => format!("OSC 1 {}", param),
                 ParameterType::OSC2(param) => format!("OSC 2 {}", param),
                 ParameterType::OSC2Mod => "OSC 2 ON/OFF".to_string(),
+                ParameterType::ModBank(ModBankType::Env1(param)) => format!("ADSR 1 {}", param),
+                ParameterType::ModBank(ModBankType::Env2(param)) => format!("ADSR 2 {}", param),
             }
         } else {
             "".to_string()
@@ -452,6 +477,7 @@ impl Default for RawParameters {
             osc_2: RawOSC::default(OSCType::OSC2),
             master_vol: RawParameters::get_default(ParameterType::MasterVolume).into(),
             osc_2_mod: RawParameters::get_default(ParameterType::OSC2Mod).into(),
+            mod_bank: RawModBank::default(),
             host: Default::default(),
             notify: Arc::new(tokio::sync::Notify::new()),
         }
@@ -505,7 +531,6 @@ impl RawOSC {
     }
 
     fn get_default(param: OSCParameterType, _osc: OSCType) -> f32 {
-        use EnvelopeParam::*;
         use OSCParameterType::*;
         match param {
             Volume => 0.5, // 100%
@@ -515,20 +540,10 @@ impl RawOSC {
             Warp => 0.5,
             CoarseTune => 0.5, // 0 semitones
             FineTune => 0.5,   // 0 cents
-            VolumeEnv(Attack) => 0.1,
-            VolumeEnv(Hold) => 0.0,
-            VolumeEnv(Decay) => 0.2,
-            VolumeEnv(Sustain) => 0.5,
-            VolumeEnv(Release) => 0.3,
-            VolumeEnv(Multiply) => 1.0, // +100%
+            VolumeEnv(param) => EnvelopeParam::get_default_vol(param),
             VolLFOAmplitude => 0.0,
             VolLFOPeriod => 0.5,
-            PitchEnv(Attack) => 1.0 / 10000.0,
-            PitchEnv(Hold) => 0.0,
-            PitchEnv(Decay) => 0.2,
-            PitchEnv(Sustain) => 0.0,  // 0%
-            PitchEnv(Multiply) => 0.5, // 0%
-            PitchEnv(Release) => 1.0 / 10000.0,
+            PitchEnv(param) => EnvelopeParam::get_default(param),
             PitchLFOAmplitude => 0.0,
             PitchLFOPeriod => 0.5,
             FilterType => 0.0, // Low Pass
@@ -548,12 +563,12 @@ impl RawOSC {
             warp: RawOSC::get_default(Warp, osc).into(),
             coarse_tune: RawOSC::get_default(CoarseTune, osc).into(),
             fine_tune: RawOSC::get_default(FineTune, osc).into(),
-            vol_adsr: RawEnvelope::get_default(VolumeEnv, osc),
+            vol_adsr: RawEnvelope::default_vol(),
             vol_lfo: RawLFO {
                 period: RawOSC::get_default(VolLFOPeriod, osc).into(),
                 amount: RawOSC::get_default(VolLFOAmplitude, osc).into(),
             },
-            pitch_adsr: RawEnvelope::get_default(PitchEnv, osc),
+            pitch_adsr: RawEnvelope::default(),
             pitch_lfo: RawLFO {
                 period: RawOSC::get_default(PitchLFOPeriod, osc).into(),
                 amount: RawOSC::get_default(PitchLFOAmplitude, osc).into(),
@@ -566,18 +581,50 @@ impl RawOSC {
     }
 }
 
+// Represents a bank of LFO and envelope modulators.
+#[derive(Debug)]
+pub struct RawModBank {
+    pub env_1: RawEnvelope,
+    pub env_2: RawEnvelope,
+}
+
+impl Default for RawModBank {
+    fn default() -> Self {
+        RawModBank {
+            env_1: RawEnvelope::default(),
+            env_2: RawEnvelope::default(),
+        }
+    }
+}
+
+from_into_int! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum ModBankType {
+        Env1(EnvelopeParam),
+        Env2(EnvelopeParam),
+    }
+}
+
+pub enum ModulationSend {
+    Amplitude,
+    Pitch,
+    Warp,
+    FilterFreq,
+}
+
 // Convience struct, represents parameters that are part of an envelope
+#[derive(Debug)]
 pub struct RawEnvelope {
-    attack: AtomicFloat,
-    hold: AtomicFloat,
-    decay: AtomicFloat,
-    sustain: AtomicFloat,
-    release: AtomicFloat,
-    multiply: AtomicFloat,
+    pub attack: AtomicFloat,
+    pub hold: AtomicFloat,
+    pub decay: AtomicFloat,
+    pub sustain: AtomicFloat,
+    pub release: AtomicFloat,
+    pub multiply: AtomicFloat,
 }
 
 impl RawEnvelope {
-    fn get_ref(&self, param: EnvelopeParam) -> &AtomicFloat {
+    pub fn get_ref(&self, param: EnvelopeParam) -> &AtomicFloat {
         match param {
             EnvelopeParam::Attack => &self.attack,
             EnvelopeParam::Hold => &self.hold,
@@ -587,15 +634,27 @@ impl RawEnvelope {
             EnvelopeParam::Multiply => &self.multiply,
         }
     }
-    fn get_default(param: impl Fn(EnvelopeParam) -> OSCParameterType, osc: OSCType) -> RawEnvelope {
-        use EnvelopeParam::*;
+    fn default_vol() -> RawEnvelope {
         RawEnvelope {
-            attack: RawOSC::get_default(param(Attack), osc).into(),
-            hold: RawOSC::get_default(param(Hold), osc).into(),
-            decay: RawOSC::get_default(param(Decay), osc).into(),
-            sustain: RawOSC::get_default(param(Sustain), osc).into(),
-            release: RawOSC::get_default(param(Release), osc).into(),
-            multiply: RawOSC::get_default(param(Multiply), osc).into(),
+            attack: EnvelopeParam::get_default_vol(EnvelopeParam::Attack).into(),
+            hold: EnvelopeParam::get_default_vol(EnvelopeParam::Hold).into(),
+            decay: EnvelopeParam::get_default_vol(EnvelopeParam::Decay).into(),
+            sustain: EnvelopeParam::get_default_vol(EnvelopeParam::Sustain).into(),
+            release: EnvelopeParam::get_default_vol(EnvelopeParam::Release).into(),
+            multiply: EnvelopeParam::get_default_vol(EnvelopeParam::Multiply).into(),
+        }
+    }
+}
+
+impl Default for RawEnvelope {
+    fn default() -> Self {
+        RawEnvelope {
+            attack: EnvelopeParam::get_default(EnvelopeParam::Attack).into(),
+            hold: EnvelopeParam::get_default(EnvelopeParam::Hold).into(),
+            decay: EnvelopeParam::get_default(EnvelopeParam::Decay).into(),
+            sustain: EnvelopeParam::get_default(EnvelopeParam::Sustain).into(),
+            release: EnvelopeParam::get_default(EnvelopeParam::Release).into(),
+            multiply: EnvelopeParam::get_default(EnvelopeParam::Multiply).into(),
         }
     }
 }
@@ -664,6 +723,30 @@ from_into_int! {
         Multiply,
     }
 }
+
+impl EnvelopeParam {
+    pub fn get_default(param: EnvelopeParam) -> f32 {
+        match param {
+            EnvelopeParam::Attack => 1.0 / 10000.0,
+            EnvelopeParam::Decay => 0.2,
+            EnvelopeParam::Hold => 0.0,
+            EnvelopeParam::Sustain => 1.0, // 100%
+            EnvelopeParam::Release => 1.0 / 10000.0,
+            EnvelopeParam::Multiply => 0.5, // 0%
+        }
+    }
+
+    pub fn get_default_vol(param: EnvelopeParam) -> f32 {
+        match param {
+            EnvelopeParam::Attack => 0.1,
+            EnvelopeParam::Hold => 0.0,
+            EnvelopeParam::Decay => 0.2,
+            EnvelopeParam::Sustain => 0.5,
+            EnvelopeParam::Release => 0.3,
+            EnvelopeParam::Multiply => 1.0, // +100%
+        }
+    }
+}
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OSCType {
     OSC1,
@@ -729,6 +812,7 @@ from_into_int! {
         OSC1(OSCParameterType),
         OSC2Mod,
         OSC2(OSCParameterType),
+        ModBank(ModBankType),
     }
 }
 

@@ -86,6 +86,7 @@ impl Application for UIFrontEnd {
     fn update(&mut self, message: Self::Message) -> Command<Self::Message> {
         self.main_tab.update(message, self.params.as_ref());
         self.preset_tab.update(message, self.params.as_ref());
+        self.modulation_tab.update(message, self.params.as_ref());
         // Make the VST host update its own parameter display. This is needed
         // so the host actually has updates with GUI.
         match message {
