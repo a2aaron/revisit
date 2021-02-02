@@ -86,6 +86,9 @@ impl Application for UIFrontEnd {
 
     /// React to an incoming message
     fn update(&mut self, message: Self::Message) -> Command<Self::Message> {
+        // TODO: look into moving message handling code out of the update functions
+        // for the tabs. It seems like it's bizarrely messy to do it there.
+        // Tabs don't really need to know about what messages have happened anyways.
         self.main_tab.update(message, self.params.as_ref());
         self.preset_tab.update(message, self.params.as_ref());
         self.modulation_tab.update(self.params.as_ref());

@@ -9,13 +9,17 @@ mod ui_tabs;
 
 use std::{convert::TryFrom, sync::Arc};
 
-use params::{CountedEnum, ModulationType, OSCParams, ParameterType, Parameters, RawParameters};
+use params::{
+    CountedEnum, Envelope, ModulationBank, ModulationSend, ModulationType, OSCParams,
+    ParameterType, Parameters, RawParameters,
+};
 use sound_gen::{
     normalize_U7, normalize_pitch_bend, to_pitch_envelope, to_pitch_multiplier,
-    NormalizedPitchbend, NoteShape, Oscillator, SampleRate,
+    NormalizedPitchbend, NoteShape, NoteState, Oscillator, SampleRate,
 };
 use ui::UIFrontEnd;
 
+use derive_more::Add;
 use iced_baseview::Application;
 use vst::{
     api::{Events, Supported},
@@ -75,6 +79,11 @@ struct OSCGroup {
 }
 
 impl OSCGroup {
+    /// Get the next sample from the osc group, applying modulation parameters as
+    /// well.
+    /// Note that the `i` argument is the interframe sample number (which sample
+    /// within a frame we are at). This is used by `osc: Oscillator` to do
+    /// interframe note event handling.
     fn next_sample(
         &mut self,
         params: &OSCParams,
@@ -82,8 +91,29 @@ impl OSCGroup {
         i: usize,
         pitch_bend: f32,
         (mod_type, modulation): (ModulationType, f32),
+        mod_bank: &ModulationBank,
         apply_filter: bool,
     ) -> f32 {
+        // TODO: consider merging ModulationValues with the rest of the modulation
+        // calculations in this block of code. Some notes
+        // 1. You probably need to commit to storing either the post-multiplied
+        //    or the pre-multiplied values (WITH the semi-tone amount) in the
+        //    pitch variable. This probably means making more pitch field?
+        //    Also, some modulations have additional weird offsets applied
+        //    EX: AmpMod and VolLFO both are plus one'd and VolLFO is clamped at
+        //    zero. Tis is easy to do but will be annoying to generalize.
+        //    Also, how do we handle LFOs in the mod bank? (i think this should
+        //    handled at from_mod_bank time)
+        //    You need to probably store pre-multiplied values for each of the
+        //    various modulation values.
+
+        let mod_bank = ModulationValues::from_mod_bank(
+            mod_bank,
+            self.osc.time,
+            self.osc.note_state,
+            sample_rate,
+        );
+
         // Compute volume from parameters, ADSR, LFO, and AmpMod
         let vol_env = params
             .vol_adsr
@@ -106,7 +136,11 @@ impl OSCGroup {
         // signal to be inverted, which isn't what we want (instead it should
         // just have zero volume). We don't do this for the AmpMod because inverting
         // the signal allows for more interesting audio.
-        let total_volume = params.volume * vol_env * (1.0 + vol_lfo).max(0.0) * (1.0 + vol_mod);
+        let total_volume = params.volume
+            * vol_env
+            * (1.0 + vol_lfo).max(0.0)
+            * (1.0 + vol_mod)
+            * (1.0 - mod_bank.amplitude);
 
         // Compute note pitch multiplier from ADSR and envelope
         let pitch_env = params
@@ -121,6 +155,7 @@ impl OSCGroup {
         let pitch_fine = to_pitch_multiplier(params.fine_tune, 1);
         let pitch_bend = to_pitch_multiplier(pitch_bend, 12);
         let note_pitch = to_pitch_multiplier(pitch_env + pitch_lfo, 24);
+        let mod_bank_pitch = to_pitch_multiplier(mod_bank.pitch, 24);
 
         let fm_mod = if mod_type == ModulationType::FreqMod {
             to_pitch_multiplier(modulation, 24)
@@ -129,11 +164,12 @@ impl OSCGroup {
         };
 
         // The final pitch multiplier, post-FM
-        // Note pitch consists of the applied pitch bend, pitch ADSR, and pitch
-        // LFOs applied to it, with a max range of 12 semis.
+        // Note pitch consists of the applied pitch bend, pitch ADSR, pitch LFOs
+        // applied to it, with a max range of 12 semis.
         // Fine and course pitchbend come from the parameters.
-        // And the FM Mod comes from the modulation value.
-        let pitch = note_pitch * pitch_bend * pitch_coarse * pitch_fine * fm_mod;
+        // The FM Mod comes from the modulation value.
+        // Mod bank pitch comes from the mod bank.
+        let pitch = note_pitch * pitch_bend * pitch_coarse * pitch_fine * fm_mod * mod_bank_pitch;
 
         let warp_mod = if mod_type == ModulationType::WarpMod {
             modulation
@@ -160,12 +196,55 @@ impl OSCGroup {
         self.osc.next_sample(
             i,
             sample_rate,
-            params.shape.add(warp_mod),
+            params.shape.add(warp_mod).add(mod_bank.warp),
             vol_env,
             pitch,
-            phase_mod + params.phase,
+            phase_mod + params.phase + mod_bank.phase,
             filter_params,
         ) * total_volume
+    }
+}
+
+#[derive(Debug, Default, Add)]
+struct ModulationValues {
+    amplitude: f32,
+    pitch: f32, // pre-multiplied pitch bend value
+    phase: f32,
+    warp: f32,
+    filter_freq: f32,
+}
+
+impl ModulationValues {
+    fn from_value(value: f32, send: ModulationSend) -> ModulationValues {
+        let (mut amplitude, mut pitch, mut phase, mut warp, mut filter_freq) =
+            (0.0, 0.0, 0.0, 0.0, 0.0);
+        match send {
+            ModulationSend::Amplitude => amplitude = value,
+            ModulationSend::Phase => phase = value,
+            ModulationSend::Pitch => pitch = value,
+            ModulationSend::Warp => warp = value,
+            ModulationSend::FilterFreq => filter_freq = value,
+        }
+        ModulationValues {
+            amplitude,
+            pitch,
+            phase,
+            warp,
+            filter_freq,
+        }
+    }
+
+    fn from_mod_bank(
+        mod_bank: &ModulationBank,
+        time: usize,
+        note_state: NoteState,
+        sample_rate: SampleRate,
+    ) -> ModulationValues {
+        let env_1 = mod_bank.env_1.get(time, note_state, sample_rate);
+        let env_2 = mod_bank.env_2.get(time, note_state, sample_rate);
+
+        ModulationValues::from_value(env_1, mod_bank.env_1_send)
+            + ModulationValues::from_value(env_2, mod_bank.env_2_send)
     }
 }
 
@@ -263,6 +342,7 @@ impl Plugin for Revisit {
                     i,
                     pitch_bends[i],
                     (ModulationType::Mix, 0.0),
+                    &params.mod_bank,
                     params.osc_2_mod == ModulationType::Mix,
                 );
 
@@ -272,6 +352,7 @@ impl Plugin for Revisit {
                     i,
                     pitch_bends[i],
                     (params.osc_2_mod, osc_2),
+                    &params.mod_bank,
                     true,
                 );
 

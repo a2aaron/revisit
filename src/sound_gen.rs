@@ -27,9 +27,10 @@ pub struct Oscillator {
     // The current angle of the oscillator. This should be updated every sample
     angle: Angle,
     // The time, in samples, that this oscillator has run since the last note on
-    // event
+    // event. This is NOT an interframe sample number!
     pub time: usize,
     // The current state of the oscillator (held, released, etc)
+    // TODO: this shold almost certainly go in SoundGenerator
     pub note_state: NoteState,
     // The per-sample filter applied to the output
     filter: DirectForm1<f32>,
@@ -261,6 +262,8 @@ impl FilterParams {
 /// Released, and are either removed if the release time on the note expires or
 /// become Retrigger if the note is retriggered during the release time.
 /// Retriggered notes become Held after a few samples automatically.
+/// TODO: Note states should really not track the volume of the note. That should
+/// be tracked on a per envelope basis, I think.
 #[derive(Debug, Clone, Copy)]
 pub enum NoteState {
     /// The note is not being held down, but no previous NoteOn or NoteOff exists

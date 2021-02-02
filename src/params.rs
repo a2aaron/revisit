@@ -174,10 +174,14 @@ impl From<&RawOSC> for OSCParams {
     }
 }
 
+// TODO: This is slightly wrong! ModulationSends also need to specify which
+// oscillator they are going to send to! Otherwise this will just apply to all
+// of the oscillators, which is not what you want! (likely just use a tuple
+// of ModulationSend and OSCType)
 pub struct ModulationBank {
-    env_1: Envelope,
+    pub env_1: Envelope,
     pub env_1_send: ModulationSend,
-    env_2: Envelope,
+    pub env_2: Envelope,
     pub env_2_send: ModulationSend,
 }
 
@@ -193,6 +197,9 @@ impl From<&RawModBank> for ModulationBank {
 }
 
 /// An ADSR envelope.
+/// TODO: You need to add some kind of state tracking for this. This is because
+/// you will get unpleasent clicks in the envelope wave as the note state transitions
+/// from Held to Release (the value will instantly jump back to 1.0 and go to zero)
 #[derive(Debug, Clone, Copy)]
 pub struct Envelope {
     // In seconds
@@ -630,6 +637,8 @@ impl Default for RawModBank {
 }
 
 from_into_int! {
+    /// An enum which represents particular modulator, and then a particular
+    /// parameter within that modulator.
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub enum ModBankParameter {
         Env1(EnvelopeParam),
@@ -638,6 +647,10 @@ from_into_int! {
 }
 
 from_into_int! {
+    /// A fieldless version of the ModBankParameter enum. This is used to refer to
+    /// an entire modulator (independent of the specific parameters). Also, you need
+    /// to use this in the ParameterType enum, otherwise from_into_int generates too
+    /// many parameters.
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub enum ModBankType {
         Env1,
@@ -645,6 +658,7 @@ from_into_int! {
     }
 }
 
+/// The location to send a modulation value in the ModulationBank
 #[derive(Debug, Display, Clone, Copy, PartialEq, Eq, VariantCount)]
 pub enum ModulationSend {
     Amplitude,
