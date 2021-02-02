@@ -277,10 +277,14 @@ impl RawParameters {
             ParameterType::OSC2Mod => &self.osc_2_mod,
             ParameterType::OSC1(param) => self.osc_1.get_ref(param),
             ParameterType::OSC2(param) => self.osc_2.get_ref(param),
-            ParameterType::ModBank(ModBankType::Env1(param)) => self.mod_bank.env_1.get_ref(param),
-            ParameterType::ModBank(ModBankType::Env2(param)) => self.mod_bank.env_2.get_ref(param),
-            ParameterType::ModBankSend(ModBankType::Env1(_)) => &self.mod_bank.env_1_send,
-            ParameterType::ModBankSend(ModBankType::Env2(_)) => &self.mod_bank.env_2_send,
+            ParameterType::ModBank(ModBankParameter::Env1(param)) => {
+                self.mod_bank.env_1.get_ref(param)
+            }
+            ParameterType::ModBank(ModBankParameter::Env2(param)) => {
+                self.mod_bank.env_2.get_ref(param)
+            }
+            ParameterType::ModBankSend(ModBankType::Env1) => &self.mod_bank.env_1_send,
+            ParameterType::ModBankSend(ModBankType::Env2) => &self.mod_bank.env_2_send,
         }
     }
 
@@ -312,10 +316,14 @@ impl RawParameters {
             ParameterType::OSC2Mod => 0.0, // Mix
             ParameterType::OSC1(param) => RawOSC::get_default(param, OSCType::OSC1),
             ParameterType::OSC2(param) => RawOSC::get_default(param, OSCType::OSC2),
-            ParameterType::ModBank(ModBankType::Env1(param)) => EnvelopeParam::get_default(param),
-            ParameterType::ModBank(ModBankType::Env2(param)) => EnvelopeParam::get_default(param),
-            ParameterType::ModBankSend(ModBankType::Env1(_)) => 0.0, // Amplitude
-            ParameterType::ModBankSend(ModBankType::Env2(_)) => 0.0, // Amplitude
+            ParameterType::ModBank(ModBankParameter::Env1(param)) => {
+                EnvelopeParam::get_default(param)
+            }
+            ParameterType::ModBank(ModBankParameter::Env2(param)) => {
+                EnvelopeParam::get_default(param)
+            }
+            ParameterType::ModBankSend(ModBankType::Env1) => 0.0, // Amplitude
+            ParameterType::ModBankSend(ModBankType::Env2) => 0.0, // Amplitude
         }
     }
 
@@ -402,16 +410,16 @@ impl RawParameters {
                 }
             }
             ParameterType::OSC2Mod => (format!("{}", params.osc_2_mod), "".to_string()),
-            ParameterType::ModBank(ModBankType::Env1(param)) => {
+            ParameterType::ModBank(ModBankParameter::Env1(param)) => {
                 envelope_strings(params.mod_bank.env_1, param)
             }
-            ParameterType::ModBank(ModBankType::Env2(param)) => {
+            ParameterType::ModBank(ModBankParameter::Env2(param)) => {
                 envelope_strings(params.mod_bank.env_2, param)
             }
-            ParameterType::ModBankSend(ModBankType::Env1(_)) => {
+            ParameterType::ModBankSend(ModBankType::Env1) => {
                 (format!("{}", params.mod_bank.env_1_send), "".to_string())
             }
-            ParameterType::ModBankSend(ModBankType::Env2(_)) => {
+            ParameterType::ModBankSend(ModBankType::Env2) => {
                 (format!("{}", params.mod_bank.env_2_send), "".to_string())
             }
         }
@@ -442,10 +450,14 @@ impl PluginParameters for RawParameters {
                 ParameterType::OSC1(param) => format!("OSC 1 {}", param),
                 ParameterType::OSC2(param) => format!("OSC 2 {}", param),
                 ParameterType::OSC2Mod => "OSC 2 ON/OFF".to_string(),
-                ParameterType::ModBank(ModBankType::Env1(param)) => format!("ADSR 1 {}", param),
-                ParameterType::ModBank(ModBankType::Env2(param)) => format!("ADSR 2 {}", param),
-                ParameterType::ModBankSend(ModBankType::Env1(_)) => "ADSR 1 Send".to_string(),
-                ParameterType::ModBankSend(ModBankType::Env2(_)) => "ADSR 2 Send".to_string(),
+                ParameterType::ModBank(ModBankParameter::Env1(param)) => {
+                    format!("ADSR 1 {}", param)
+                }
+                ParameterType::ModBank(ModBankParameter::Env2(param)) => {
+                    format!("ADSR 2 {}", param)
+                }
+                ParameterType::ModBankSend(ModBankType::Env1) => "ADSR 1 Send".to_string(),
+                ParameterType::ModBankSend(ModBankType::Env2) => "ADSR 2 Send".to_string(),
             }
         } else {
             "".to_string()
@@ -619,9 +631,17 @@ impl Default for RawModBank {
 
 from_into_int! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    pub enum ModBankType {
+    pub enum ModBankParameter {
         Env1(EnvelopeParam),
         Env2(EnvelopeParam),
+    }
+}
+
+from_into_int! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum ModBankType {
+        Env1,
+        Env2,
     }
 }
 
@@ -866,7 +886,7 @@ from_into_int! {
         OSC2Mod,
         OSC2(OSCParameterType),
         ModBankSend(ModBankType),
-        ModBank(ModBankType),
+        ModBank(ModBankParameter),
     }
 }
 

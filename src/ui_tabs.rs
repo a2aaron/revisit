@@ -16,9 +16,9 @@ use iced_native::{layout, mouse, Widget};
 
 use crate::{
     params::{
-        biquad_to_string, to_filter_type, EnvelopeParam, ModBankType, ModulationSend,
-        ModulationType, OSCParameterType, OSCType, ParameterType, RawEnvelope, RawOSC,
-        RawParameters,
+        biquad_to_string, to_filter_type, EnvelopeParam, ModBankParameter, ModBankType,
+        ModulationSend, ModulationType, OSCParameterType, OSCType, ParameterType, RawEnvelope,
+        RawOSC, RawParameters,
     },
     sound_gen::NoteShape,
     ui::Message,
@@ -243,12 +243,8 @@ impl ModulationTab {
         let send_1 = params.mod_bank.env_1_send.get().into();
         let send_2 = params.mod_bank.env_2_send.get().into();
         column(vec![
-            // TODO: The EnvelopeParam::Attack is silly--this should really have
-            // its own fieldless enum.
-            self.env_1
-                .widgets(send_1, ModBankType::Env1(EnvelopeParam::Attack), "ENV 1"),
-            self.env_2
-                .widgets(send_2, ModBankType::Env2(EnvelopeParam::Attack), "ENV 2"),
+            self.env_1.widgets(send_1, ModBankType::Env1, "ENV 1"),
+            self.env_2.widgets(send_2, ModBankType::Env2, "ENV 2"),
         ])
         .into()
     }
@@ -756,8 +752,8 @@ impl EnvKnobGroup {
         ));
 
         let param = match param {
-            ModBankType::Env1(_) => ModBankType::Env1,
-            ModBankType::Env2(_) => ModBankType::Env2,
+            ModBankType::Env1 => ModBankParameter::Env1,
+            ModBankType::Env2 => ModBankParameter::Env2,
         };
 
         let attack = widget!(
@@ -990,9 +986,9 @@ fn widget_name(param: ParameterType) -> String {
             FilterGain => "Gain".to_string(),
         },
         ParameterType::OSC2Mod => "OSC 2 Mod".to_string(),
-        ParameterType::ModBank(ModBankType::Env1(param)) => widget_name_env(param),
-        ParameterType::ModBank(ModBankType::Env2(param)) => widget_name_env(param),
-        ParameterType::ModBankSend(ModBankType::Env1(_)) => "Send 1".to_string(),
-        ParameterType::ModBankSend(ModBankType::Env2(_)) => "Send 2".to_string(),
+        ParameterType::ModBank(ModBankParameter::Env1(param)) => widget_name_env(param),
+        ParameterType::ModBank(ModBankParameter::Env2(param)) => widget_name_env(param),
+        ParameterType::ModBankSend(ModBankType::Env1) => "Send 1".to_string(),
+        ParameterType::ModBankSend(ModBankType::Env2) => "Send 2".to_string(),
     }
 }
