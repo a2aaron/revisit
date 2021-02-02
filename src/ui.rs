@@ -89,12 +89,13 @@ impl Application for UIFrontEnd {
         self.main_tab.update(message, self.params.as_ref());
         self.preset_tab.update(message, self.params.as_ref());
         self.modulation_tab.update(self.params.as_ref());
-        // Make the VST host update its own parameter display. This is needed
-        // so the host actually has updates with GUI.
         match message {
             Message::ModBankSendChanged(mod_bank, mod_send) => {
                 self.params
                     .set(mod_send.into(), ParameterType::ModBankSend(mod_bank));
+                // Make the VST host update its own parameter display. This is needed
+                // so the host actually updates with GUI.
+                self.params.host.update_display()
             }
             Message::OSC2ModChanged(_) | Message::ParameterChanged(_, _) => {
                 self.params.host.update_display()

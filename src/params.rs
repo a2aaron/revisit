@@ -185,9 +185,9 @@ impl From<&RawModBank> for ModulationBank {
     fn from(params: &RawModBank) -> Self {
         ModulationBank {
             env_1: Envelope::from(&params.env_1),
-            env_1_send: ModulationSend::Amplitude,
+            env_1_send: ModulationSend::from(params.env_1_send.get()),
             env_2: Envelope::from(&params.env_2),
-            env_2_send: ModulationSend::Amplitude,
+            env_2_send: ModulationSend::from(params.env_2_send.get()),
         }
     }
 }
