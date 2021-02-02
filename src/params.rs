@@ -176,14 +176,18 @@ impl From<&RawOSC> for OSCParams {
 
 pub struct ModulationBank {
     env_1: Envelope,
+    pub env_1_send: ModulationSend,
     env_2: Envelope,
+    pub env_2_send: ModulationSend,
 }
 
 impl From<&RawModBank> for ModulationBank {
     fn from(params: &RawModBank) -> Self {
         ModulationBank {
             env_1: Envelope::from(&params.env_1),
+            env_1_send: ModulationSend::Amplitude,
             env_2: Envelope::from(&params.env_2),
+            env_2_send: ModulationSend::Amplitude,
         }
     }
 }
@@ -267,7 +271,7 @@ pub struct RawParameters {
 }
 
 impl RawParameters {
-    fn get_ref(&self, parameter: ParameterType) -> &AtomicFloat {
+    pub fn get_ref(&self, parameter: ParameterType) -> &AtomicFloat {
         match parameter {
             ParameterType::MasterVolume => &self.master_vol,
             ParameterType::OSC2Mod => &self.osc_2_mod,
@@ -275,6 +279,8 @@ impl RawParameters {
             ParameterType::OSC2(param) => self.osc_2.get_ref(param),
             ParameterType::ModBank(ModBankType::Env1(param)) => self.mod_bank.env_1.get_ref(param),
             ParameterType::ModBank(ModBankType::Env2(param)) => self.mod_bank.env_2.get_ref(param),
+            ParameterType::ModBankSend(ModBankType::Env1(_)) => &self.mod_bank.env_1_send,
+            ParameterType::ModBankSend(ModBankType::Env2(_)) => &self.mod_bank.env_2_send,
         }
     }
 
@@ -308,6 +314,8 @@ impl RawParameters {
             ParameterType::OSC2(param) => RawOSC::get_default(param, OSCType::OSC2),
             ParameterType::ModBank(ModBankType::Env1(param)) => EnvelopeParam::get_default(param),
             ParameterType::ModBank(ModBankType::Env2(param)) => EnvelopeParam::get_default(param),
+            ParameterType::ModBankSend(ModBankType::Env1(_)) => 0.0, // Amplitude
+            ParameterType::ModBankSend(ModBankType::Env2(_)) => 0.0, // Amplitude
         }
     }
 
@@ -400,6 +408,12 @@ impl RawParameters {
             ParameterType::ModBank(ModBankType::Env2(param)) => {
                 envelope_strings(params.mod_bank.env_2, param)
             }
+            ParameterType::ModBankSend(ModBankType::Env1(_)) => {
+                (format!("{}", params.mod_bank.env_1_send), "".to_string())
+            }
+            ParameterType::ModBankSend(ModBankType::Env2(_)) => {
+                (format!("{}", params.mod_bank.env_2_send), "".to_string())
+            }
         }
     }
 }
@@ -430,6 +444,8 @@ impl PluginParameters for RawParameters {
                 ParameterType::OSC2Mod => "OSC 2 ON/OFF".to_string(),
                 ParameterType::ModBank(ModBankType::Env1(param)) => format!("ADSR 1 {}", param),
                 ParameterType::ModBank(ModBankType::Env2(param)) => format!("ADSR 2 {}", param),
+                ParameterType::ModBankSend(ModBankType::Env1(_)) => "ADSR 1 Send".to_string(),
+                ParameterType::ModBankSend(ModBankType::Env2(_)) => "ADSR 2 Send".to_string(),
             }
         } else {
             "".to_string()
@@ -585,7 +601,9 @@ impl RawOSC {
 #[derive(Debug)]
 pub struct RawModBank {
     pub env_1: RawEnvelope,
+    pub env_1_send: AtomicFloat,
     pub env_2: RawEnvelope,
+    pub env_2_send: AtomicFloat,
 }
 
 impl Default for RawModBank {
@@ -593,6 +611,8 @@ impl Default for RawModBank {
         RawModBank {
             env_1: RawEnvelope::default(),
             env_2: RawEnvelope::default(),
+            env_1_send: AtomicFloat::default(),
+            env_2_send: AtomicFloat::default(),
         }
     }
 }
@@ -605,11 +625,42 @@ from_into_int! {
     }
 }
 
+#[derive(Debug, Display, Clone, Copy, PartialEq, Eq, VariantCount)]
 pub enum ModulationSend {
     Amplitude,
+    Phase,
     Pitch,
     Warp,
+    #[display(fmt = "Filter Frequency")]
     FilterFreq,
+}
+
+impl From<f32> for ModulationSend {
+    fn from(x: f32) -> Self {
+        if x < 1.0 / 5.0 {
+            ModulationSend::Amplitude
+        } else if x < 2.0 / 5.0 {
+            ModulationSend::Phase
+        } else if x < 3.0 / 5.0 {
+            ModulationSend::Pitch
+        } else if x < 4.0 / 5.0 {
+            ModulationSend::Warp
+        } else {
+            ModulationSend::FilterFreq
+        }
+    }
+}
+
+impl From<ModulationSend> for f32 {
+    fn from(x: ModulationSend) -> Self {
+        match x {
+            ModulationSend::Amplitude => 0.0 / 4.0,
+            ModulationSend::Phase => 1.0 / 4.0,
+            ModulationSend::Pitch => 2.0 / 4.0,
+            ModulationSend::Warp => 3.0 / 4.0,
+            ModulationSend::FilterFreq => 1.0,
+        }
+    }
 }
 
 // Convience struct, represents parameters that are part of an envelope
@@ -730,7 +781,7 @@ impl EnvelopeParam {
             EnvelopeParam::Attack => 1.0 / 10000.0,
             EnvelopeParam::Decay => 0.2,
             EnvelopeParam::Hold => 0.0,
-            EnvelopeParam::Sustain => 1.0, // 100%
+            EnvelopeParam::Sustain => 0.0, // 0%
             EnvelopeParam::Release => 1.0 / 10000.0,
             EnvelopeParam::Multiply => 0.5, // 0%
         }
@@ -753,13 +804,15 @@ pub enum OSCType {
     OSC2,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, VariantCount)]
-pub enum ModulationType {
-    Mix,
-    AmpMod,
-    FreqMod,
-    PhaseMod,
-    WarpMod,
+from_into_int! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, VariantCount)]
+    pub enum ModulationType {
+        Mix,
+        AmpMod,
+        FreqMod,
+        PhaseMod,
+        WarpMod,
+    }
 }
 
 impl From<ModulationType> for f32 {
@@ -812,6 +865,7 @@ from_into_int! {
         OSC1(OSCParameterType),
         OSC2Mod,
         OSC2(OSCParameterType),
+        ModBankSend(ModBankType),
         ModBank(ModBankType),
     }
 }

@@ -10,13 +10,15 @@ use tokio::sync::Notify;
 use vst::{editor::Editor, host::Host};
 
 use crate::{
-    params::{ModulationType, ParameterType, RawParameters},
+    params::{ModBankType, ModulationSend, ModulationType, ParameterType, RawParameters},
     ui_tabs::{MainTab, ModulationTab, PresetTab, Tabs},
 };
 
 /// A GUI message.
 #[derive(Debug, Clone, Copy)]
 pub enum Message {
+    /// This indicates that a modulation bank has had its send parameter changed.
+    ModBankSendChanged(ModBankType, ModulationSend),
     /// This indicates that the GUI had changed the ModulationType parameter
     OSC2ModChanged(ModulationType),
     /// These indicate that the GUI has changed a parameter via a knob
@@ -86,13 +88,18 @@ impl Application for UIFrontEnd {
     fn update(&mut self, message: Self::Message) -> Command<Self::Message> {
         self.main_tab.update(message, self.params.as_ref());
         self.preset_tab.update(message, self.params.as_ref());
-        self.modulation_tab.update(message, self.params.as_ref());
+        self.modulation_tab.update(self.params.as_ref());
         // Make the VST host update its own parameter display. This is needed
         // so the host actually has updates with GUI.
         match message {
+            Message::ModBankSendChanged(mod_bank, mod_send) => {
+                self.params
+                    .set(mod_send.into(), ParameterType::ModBankSend(mod_bank));
+            }
             Message::OSC2ModChanged(_) | Message::ParameterChanged(_, _) => {
                 self.params.host.update_display()
             }
+            // Do nothing on force redraws--the tabs structs handle the read from the params
             Message::ForceRedraw => (),
             Message::ChangeTab(tab) => self.selected_tab = tab,
         }

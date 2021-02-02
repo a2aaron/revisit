@@ -16,8 +16,9 @@ use iced_native::{layout, mouse, Widget};
 
 use crate::{
     params::{
-        biquad_to_string, to_filter_type, EnvelopeParam, ModBankType, ModulationType,
-        OSCParameterType, OSCType, ParameterType, RawEnvelope, RawOSC, RawParameters,
+        biquad_to_string, to_filter_type, EnvelopeParam, ModBankType, ModulationSend,
+        ModulationType, OSCParameterType, OSCType, ParameterType, RawEnvelope, RawOSC,
+        RawParameters,
     },
     sound_gen::NoteShape,
     ui::Message,
@@ -144,9 +145,13 @@ impl MainTab {
                     // This is definitely unreachable because OSC2Mod handling is
                     // done by the OSC2ModChanged message
                     ParameterType::OSC2Mod => unreachable!(),
+                    // Also unreachable, this is handled by ModBankSendChanged
+                    ParameterType::ModBankSend(_) => unreachable!(),
                     // Don't do anything special for these parameter types.
                     ParameterType::MasterVolume => (),
-                    ParameterType::ModBank(_) => (),
+                    ParameterType::ModBank(_) => {
+                        // TODO!
+                    }
                 }
             }
             // The host has changed a parameter, or a redraw was requested
@@ -161,7 +166,9 @@ impl MainTab {
                 self.osc_1.update(&params.osc_1);
                 self.osc_2.update(&params.osc_2);
             }
+            // Handled by the top level ui struct
             Message::ChangeTab(_) => (),
+            Message::ModBankSendChanged(_, _) => (),
         }
     }
 
@@ -172,11 +179,24 @@ impl MainTab {
         params: &RawParameters,
     ) -> iced::Element<'_, Message> {
         let master_vol_widget = widget!(VSlider, &mut self.master_vol, ParameterType::MasterVolume);
-
+        let selected = match ModulationType::from(params.osc_2_mod.get()) {
+            ModulationType::Mix => 0,
+            ModulationType::AmpMod => 1,
+            ModulationType::FreqMod => 2,
+            ModulationType::PhaseMod => 3,
+            ModulationType::WarpMod => 4,
+        };
         // TODO: Consider a smarter way for messages that doesn't involve always casting to f32
         let osc_2_mod = iced::Element::new(ModTypeSelector::new(
-            params.osc_2_mod.get().into(),
+            selected,
             vec!["Mix", "AM", "FM", "PM", "Warp"],
+            vec![
+                Message::OSC2ModChanged(ModulationType::Mix),
+                Message::OSC2ModChanged(ModulationType::AmpMod),
+                Message::OSC2ModChanged(ModulationType::FreqMod),
+                Message::OSC2ModChanged(ModulationType::PhaseMod),
+                Message::OSC2ModChanged(ModulationType::WarpMod),
+            ],
         ));
 
         let master_pane = master_vol_widget;
@@ -209,7 +229,7 @@ impl ModulationTab {
         }
     }
 
-    pub fn update(&mut self, _message: Message, params: &RawParameters) {
+    pub fn update(&mut self, params: &RawParameters) {
         self.env_1.update(&params.mod_bank.env_1);
         self.env_2.update(&params.mod_bank.env_2);
     }
@@ -218,18 +238,19 @@ impl ModulationTab {
         &mut self,
         _screen_width: u32,
         _screen_height: u32,
-        _params: &RawParameters,
+        params: &RawParameters,
     ) -> iced::Element<'_, Message> {
-        column()
-            .push(
-                self.env_1
-                    .widgets(ModBankType::Env1(EnvelopeParam::Attack), "ENV 1"),
-            )
-            .push(
-                self.env_2
-                    .widgets(ModBankType::Env2(EnvelopeParam::Attack), "ENV 2"),
-            )
-            .into()
+        let send_1 = params.mod_bank.env_1_send.get().into();
+        let send_2 = params.mod_bank.env_2_send.get().into();
+        column(vec![
+            // TODO: The EnvelopeParam::Attack is silly--this should really have
+            // its own fieldless enum.
+            self.env_1
+                .widgets(send_1, ModBankType::Env1(EnvelopeParam::Attack), "ENV 1"),
+            self.env_2
+                .widgets(send_2, ModBankType::Env2(EnvelopeParam::Attack), "ENV 2"),
+        ])
+        .into()
     }
 }
 
@@ -523,44 +544,26 @@ impl OSCKnobs {
 }
 
 struct ModTypeSelector {
+    // What message to send based on the currently selected element
+    messages: Vec<Message>,
     text: Vec<&'static str>,
     text_size: f32,
     // Which element is currently selected
-    pub selected: ModulationType,
+    pub selected: usize,
     width: iced::Length,
     height: iced::Length,
 }
 
 impl ModTypeSelector {
-    fn new(selected: ModulationType, text: Vec<&'static str>) -> ModTypeSelector {
+    fn new(selected: usize, text: Vec<&'static str>, messages: Vec<Message>) -> ModTypeSelector {
         ModTypeSelector {
             text,
             text_size: 15.0,
             selected,
+            messages,
             width: iced::Length::Units(200),
             height: iced::Length::Units(20),
         }
-    }
-}
-
-fn to_mod_type(x: usize) -> ModulationType {
-    match x {
-        0 => ModulationType::Mix,
-        1 => ModulationType::AmpMod,
-        2 => ModulationType::FreqMod,
-        3 => ModulationType::PhaseMod,
-        4 => ModulationType::WarpMod,
-        _ => unreachable!(),
-    }
-}
-
-fn to_usize(x: ModulationType) -> usize {
-    match x {
-        ModulationType::Mix => 0,
-        ModulationType::AmpMod => 1,
-        ModulationType::FreqMod => 2,
-        ModulationType::PhaseMod => 3,
-        ModulationType::WarpMod => 4,
     }
 }
 
@@ -603,7 +606,7 @@ impl<B: Backend> Widget<Message, Renderer<B>> for ModTypeSelector {
         };
 
         for (i, rect) in rects.iter().enumerate() {
-            if self.selected == to_mod_type(i) {
+            if self.selected == i {
                 stroke = stroke.with_color(BLACK_GREEN);
             } else {
                 stroke = stroke.with_color(GREY);
@@ -612,7 +615,7 @@ impl<B: Backend> Widget<Message, Renderer<B>> for ModTypeSelector {
             let text = iced_graphics::canvas::Text {
                 content: self.text[i].to_string(),
                 position: Point::new(((i as f32) + 0.5) * rect.width, rect.height / 2.0),
-                color: if self.selected == to_mod_type(i) {
+                color: if self.selected == i {
                     BLACK_GREEN
                 } else {
                     GREY
@@ -626,7 +629,7 @@ impl<B: Backend> Widget<Message, Renderer<B>> for ModTypeSelector {
         }
 
         let rounded_rect = Primitive::Quad {
-            bounds: rects[to_usize(self.selected)],
+            bounds: rects[self.selected],
             background: Background::Color(GREEN_TRANS),
             border_radius: 3.0,
             border_width: 1.0,
@@ -669,15 +672,8 @@ impl<B: Backend> Widget<Message, Renderer<B>> for ModTypeSelector {
                 let squares = split_rect_horiz(bounds, self.text.len());
                 for (i, square) in squares.iter().enumerate() {
                     if square.contains(cursor_position) {
-                        self.selected = to_mod_type(i);
-                        match i {
-                            0 => messages.push(Message::OSC2ModChanged(ModulationType::Mix)),
-                            1 => messages.push(Message::OSC2ModChanged(ModulationType::AmpMod)),
-                            2 => messages.push(Message::OSC2ModChanged(ModulationType::FreqMod)),
-                            3 => messages.push(Message::OSC2ModChanged(ModulationType::PhaseMod)),
-                            4 => messages.push(Message::OSC2ModChanged(ModulationType::WarpMod)),
-                            _ => unreachable!(),
-                        }
+                        self.selected = i;
+                        messages.push(self.messages[i]);
                         break;
                     }
                 }
@@ -732,11 +728,38 @@ impl EnvKnobGroup {
 
     /// Make a widget group out of the EnvKnobGroup
     /// TODO: Don't use ModBankType here
-    pub fn widgets(&mut self, param: ModBankType, title: &str) -> iced::Element<'_, Message> {
+    pub fn widgets(
+        &mut self,
+        send: ModulationSend,
+        param: ModBankType,
+        title: &str,
+    ) -> iced::Element<'_, Message> {
+        let selected = match send {
+            ModulationSend::Amplitude => 0,
+            ModulationSend::Phase => 1,
+            ModulationSend::Pitch => 2,
+            ModulationSend::Warp => 3,
+            ModulationSend::FilterFreq => 4,
+        };
+
+        // TODO: Consider a smarter way for messages that doesn't involve always casting to f32
+        let selector = iced::Element::new(ModTypeSelector::new(
+            selected,
+            vec!["Amp", "Phase", "Pitch", "Warp", "Filter Freq"],
+            vec![
+                Message::ModBankSendChanged(param, ModulationSend::Amplitude),
+                Message::ModBankSendChanged(param, ModulationSend::Phase),
+                Message::ModBankSendChanged(param, ModulationSend::Pitch),
+                Message::ModBankSendChanged(param, ModulationSend::Warp),
+                Message::ModBankSendChanged(param, ModulationSend::FilterFreq),
+            ],
+        ));
+
         let param = match param {
             ModBankType::Env1(_) => ModBankType::Env1,
             ModBankType::Env2(_) => ModBankType::Env2,
         };
+
         let attack = widget!(
             Knob,
             &mut self.attack,
@@ -767,7 +790,10 @@ impl EnvKnobGroup {
             &mut self.multiply,
             ParameterType::ModBank(param(EnvelopeParam::Multiply))
         );
-        knob_row(vec![attack, hold, decay, sustain, release, multiply], title)
+        knob_row(
+            vec![selector, attack, hold, decay, sustain, release, multiply],
+            title,
+        )
     }
 }
 
@@ -788,7 +814,7 @@ fn make_pane_with_checkbox<'a>(
         iced::widget::Space::new(iced::Length::Shrink, iced::Length::Shrink).into()
     });
 
-    let mut pane = column().push(
+    let mut pane = column(vec![]).push(
         row(vec![
             iced::Text::new(title)
                 .vertical_alignment(VerticalAlignment::Center)
@@ -850,8 +876,8 @@ fn row(widgets: Vec<Element<'_, Message>>) -> Row<'_, Message> {
 }
 
 /// Make an empty column with better default spacing.
-fn column<'a>() -> Column<'a, Message> {
-    Column::new().spacing(5)
+fn column(widgets: Vec<Element<'_, Message>>) -> Column<'_, Message> {
+    Column::with_children(widgets).spacing(5)
 }
 
 /// Convience function to make a `NormalParam` using a `RawParameters`. The
@@ -966,5 +992,7 @@ fn widget_name(param: ParameterType) -> String {
         ParameterType::OSC2Mod => "OSC 2 Mod".to_string(),
         ParameterType::ModBank(ModBankType::Env1(param)) => widget_name_env(param),
         ParameterType::ModBank(ModBankType::Env2(param)) => widget_name_env(param),
+        ParameterType::ModBankSend(ModBankType::Env1(_)) => "Send 1".to_string(),
+        ParameterType::ModBankSend(ModBankType::Env2(_)) => "Send 2".to_string(),
     }
 }
