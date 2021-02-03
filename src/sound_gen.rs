@@ -62,26 +62,12 @@ impl Oscillator {
         phase_mod: f32,
     ) -> f32 {
         // Get the raw signal
-        let mut value = shape.get((self.angle + phase_mod) % 1.0);
+        let value = shape.get((self.angle + phase_mod) % 1.0);
 
         // Update the angle. Each sample is 1.0 / sample_rate apart for a
         // complete waveform. We also multiply by pitch to advance the right amount
         // We also constrain the angle between 0 and 1, as this reduces
         // roundoff error.
-        let angle_delta = pitch / sample_rate;
-        self.angle = (self.angle + angle_delta) % 1.0;
-
-        value
-    }
-
-    // Return the next sample from the oscillator, but without applying any
-    // envelopes or filters. This also ignores the set frequency of the oscillator
-    // and just uses pitch.
-    pub fn next_sample_raw(&mut self, pitch: f32, shape: NoteShape, sample_rate: f32) -> f32 {
-        // Get the raw signal
-        let mut value = shape.get(self.angle);
-
-        // Update the angle.
         let angle_delta = pitch / sample_rate;
         self.angle = (self.angle + angle_delta) % 1.0;
 

@@ -262,10 +262,6 @@ impl Envelope {
         sample_rate: SampleRate,
     ) {
         self.lerp_from = self.get(params, time, note_state, sample_rate);
-        // info!(
-        //     "{:#?}, {:?}, {:?}, {:?}",
-        //     params, time, note_state, sample_rate
-        // );
     }
 }
 

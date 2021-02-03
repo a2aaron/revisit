@@ -177,9 +177,11 @@ impl SoundGenerator {
             }
         }
 
+        let osc_2_is_mix = params.osc_2_mod == ModulationType::Mix;
         let osc_2 = self.osc_2.next_sample(
             &params.osc_2,
             sample_rate,
+            if osc_2_is_mix { self.vel } else { 1.0 },
             self.note_pitch,
             i,
             self.samples_since_note_on,
@@ -187,12 +189,13 @@ impl SoundGenerator {
             pitch_bend,
             (ModulationType::Mix, 0.0),
             &params.mod_bank,
-            params.osc_2_mod == ModulationType::Mix,
+            osc_2_is_mix,
         );
 
         let osc_1 = self.osc_1.next_sample(
             &params.osc_1,
             sample_rate,
+            self.vel,
             self.note_pitch,
             i,
             self.samples_since_note_on,
@@ -270,6 +273,7 @@ impl OSCGroup {
         &mut self,
         params: &OSCParams,
         sample_rate: f32,
+        base_vel: f32,
         base_note: f32,
         i: FrameDelta,
         samples_since_note_on: usize,
@@ -308,10 +312,11 @@ impl OSCGroup {
             sample_rate,
         );
 
-        let vol_lfo = self.volume_lfo.next_sample_raw(
-            1.0 / params.vol_lfo.period,
-            NoteShape::Sine,
+        let vol_lfo = self.volume_lfo.next_sample(
             sample_rate,
+            NoteShape::Sine,
+            1.0 / params.vol_lfo.period,
+            0.0, // no phase mod
         ) * params.vol_lfo.amplitude;
 
         let vol_mod = if mod_type == ModulationType::AmpMod {
@@ -325,7 +330,8 @@ impl OSCGroup {
         // signal to be inverted, which isn't what we want (instead it should
         // just have zero volume). We don't do this for the AmpMod because inverting
         // the signal allows for more interesting audio.
-        let total_volume = params.volume
+        let total_volume = base_vel
+            * params.volume
             * vol_env
             * (1.0 + vol_lfo).max(0.0)
             * (1.0 + vol_mod)
@@ -338,10 +344,11 @@ impl OSCGroup {
             note_state,
             sample_rate,
         );
-        let pitch_lfo = self.pitch_lfo.next_sample_raw(
-            1.0 / params.pitch_lfo.period,
-            NoteShape::Sine,
+        let pitch_lfo = self.pitch_lfo.next_sample(
             sample_rate,
+            NoteShape::Sine,
+            1.0 / params.pitch_lfo.period,
+            1.0,
         ) * params.pitch_lfo.amplitude;
         let pitch_coarse = to_pitch_multiplier(1.0, params.coarse_tune);
         let pitch_fine = to_pitch_multiplier(params.fine_tune, 1);
