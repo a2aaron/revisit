@@ -1,12 +1,8 @@
 use std::{convert::TryFrom, sync::Arc};
 
-use crate::sound_gen::{
-    ahds_env, ease_in_expo, ease_in_poly, lerp, FilterParams, NoteShape, NoteState, SampleRate,
-    RETRIGGER_TIME,
-};
+use crate::sound_gen::{ease_in_expo, ease_in_poly, Envelope, FilterParams, NoteShape};
 
 use derive_more::Display;
-use log::info;
 use variant_count::VariantCount;
 use vst::{
     host::Host,
@@ -209,59 +205,6 @@ impl From<&RawModBank> for ModulationBank {
             env_2: EnvelopeParams::from(&params.env_2),
             env_2_send: ModulationSend::from(params.env_2_send.get()),
         }
-    }
-}
-
-pub struct Envelope {
-    // The value to lerp from when in Retrigger or Release state
-    pub lerp_from: f32,
-}
-
-impl Envelope {
-    pub fn new() -> Envelope {
-        Envelope { lerp_from: 0.0 }
-    }
-
-    /// Get the current envelope value. `time` is how many samples it has been
-    /// since the start of the note
-    pub fn get(
-        &self,
-        params: &EnvelopeParams,
-        time: usize,
-        note_state: NoteState,
-        sample_rate: SampleRate,
-    ) -> f32 {
-        let attack = params.attack;
-        let hold = params.hold;
-        let decay = params.decay;
-        let sustain = params.sustain;
-        let release = params.release;
-
-        let value = match note_state {
-            NoteState::None => 0.0,
-            NoteState::Held => ahds_env(attack, hold, decay, sustain, time as f32 / sample_rate),
-            NoteState::Released { time: rel_time } => {
-                let time = (time - rel_time) as f32 / sample_rate;
-                lerp(self.lerp_from, 0.0, time / release)
-            }
-            NoteState::Retrigger { time: retrig_time } => {
-                // Forcibly decay over RETRIGGER_TIME.
-                let time = (time - retrig_time) as f32 / RETRIGGER_TIME as f32;
-                lerp(self.lerp_from, 0.0, time)
-            }
-        };
-        value * params.multiply
-    }
-
-    // Set self.lerp_from to the specified value using the arguments
-    pub fn remember(
-        &mut self,
-        params: &EnvelopeParams,
-        time: usize,
-        note_state: NoteState,
-        sample_rate: SampleRate,
-    ) {
-        self.lerp_from = self.get(params, time, note_state, sample_rate);
     }
 }
 
