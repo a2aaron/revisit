@@ -11,10 +11,11 @@ use wmidi::{PitchBend, U14, U7};
 
 const TAU: f32 = std::f32::consts::TAU;
 
-const RETRIGGER_TIME: usize = 88; // 88 samples is about 2 miliseconds.
+const RETRIGGER_TIME: SampleTime = 88; // 88 samples is about 2 miliseconds.
 
 /// An offset, in samples, from the start of the frame.
 type FrameDelta = usize;
+type SampleTime = usize;
 /// A value in range [0.0, 1.0] which denotes the position wihtin a wave cycle.
 type Angle = f32;
 /// The sample rate in Hz/seconds.
@@ -35,7 +36,7 @@ pub struct SoundGenerator {
     vel: f32,
     // The time, in samples, that this SoundGenerator has run since the last note on
     // event. This is NOT an interframe sample number!
-    samples_since_note_on: usize,
+    samples_since_note_on: SampleTime,
     // The current state of the SoundGenerator (held, released, etc)
     note_state: NoteState,
     // The per-sample filter applied to the output
@@ -68,8 +69,8 @@ impl SoundGenerator {
     /// it is in the release state and it is after the total release time.
     pub fn is_alive(&self, sample_rate: SampleRate, params: &Parameters) -> bool {
         match self.note_state {
-            NoteState::None | NoteState::Held | NoteState::Retrigger { time: _ } => true,
-            NoteState::Released { time: release_time } => {
+            NoteState::None | NoteState::Held | NoteState::Retrigger(_) => true,
+            NoteState::Released(release_time) => {
                 // The number of seconds it has been since release
                 let time = (self.samples_since_note_on - release_time) as f32 / sample_rate;
                 match params.osc_2_mod {
@@ -121,9 +122,7 @@ impl SoundGenerator {
 
                 self.note_state = match self.note_state {
                     NoteState::None => NoteState::Held,
-                    _ => NoteState::Retrigger {
-                        time: self.samples_since_note_on,
-                    },
+                    _ => NoteState::Retrigger(self.samples_since_note_on),
                 };
                 self.vel = note_on_vel;
                 self.next_note_on = None;
@@ -149,9 +148,7 @@ impl SoundGenerator {
                     self.note_state,
                 );
 
-                self.note_state = NoteState::Released {
-                    time: self.samples_since_note_on,
-                };
+                self.note_state = NoteState::Released(self.samples_since_note_on);
                 self.next_note_off = None;
             }
             _ => (),
@@ -159,10 +156,7 @@ impl SoundGenerator {
 
         // If it has been 10 samples in the retrigger state, switch back to
         // the held state. This also resets the time.
-        if let NoteState::Retrigger {
-            time: retrigger_time,
-        } = self.note_state
-        {
+        if let NoteState::Retrigger(retrigger_time) = self.note_state {
             if self.samples_since_note_on - retrigger_time > RETRIGGER_TIME {
                 self.note_state = NoteState::Held;
                 self.samples_since_note_on = 0;
@@ -264,7 +258,7 @@ impl OSCGroup {
         sample_rate: f32,
         base_vel: f32,
         base_note: f32,
-        samples_since_note_on: usize,
+        samples_since_note_on: SampleTime,
         note_state: NoteState,
         pitch_bend: f32,
         (mod_type, modulation): (ModulationType, f32),
@@ -421,8 +415,8 @@ impl OSCGroup {
         &mut self,
         params: &OSCParams,
         mod_bank_params: &ModulationBank,
-        sample_rate: f32,
-        samples_since_note_on: usize,
+        sample_rate: SampleRate,
+        samples_since_note_on: SampleTime,
         note_state: NoteState,
     ) {
         self.vol_env.remember(
@@ -524,7 +518,7 @@ impl Envelope {
     fn get(
         &self,
         params: &EnvelopeParams,
-        time: usize,
+        time: SampleTime,
         note_state: NoteState,
         sample_rate: SampleRate,
     ) -> f32 {
@@ -537,11 +531,11 @@ impl Envelope {
         let value = match note_state {
             NoteState::None => 0.0,
             NoteState::Held => ahds_env(attack, hold, decay, sustain, time as f32 / sample_rate),
-            NoteState::Released { time: rel_time } => {
+            NoteState::Released(rel_time) => {
                 let time = (time - rel_time) as f32 / sample_rate;
                 lerp(self.lerp_from, 0.0, time / release)
             }
-            NoteState::Retrigger { time: retrig_time } => {
+            NoteState::Retrigger(retrig_time) => {
                 // Forcibly decay over RETRIGGER_TIME.
                 let time = (time - retrig_time) as f32 / RETRIGGER_TIME as f32;
                 lerp(self.lerp_from, 0.0, time)
@@ -550,11 +544,17 @@ impl Envelope {
         value * params.multiply
     }
 
-    // Set self.lerp_from to the specified value using the arguments
+    /// Set self.lerp_from to the specified value using the arguments. This needs
+    /// to be called JUST BEFORE transitioning from a Held to Released state or
+    /// from Released to Retrigger state.
+    /// In particular, if going from Held to Released, then `note_state` should
+    /// be Held and `time` should be the last sample of the Hold state.
+    /// And if going from Released to Retrigger, then `note_state` should be 
+    /// Released and `time` should be the last sample of the Released state.
     fn remember(
         &mut self,
         params: &EnvelopeParams,
-        time: usize,
+        time: SampleTime,
         note_state: NoteState,
         sample_rate: SampleRate,
     ) {
@@ -594,7 +594,7 @@ impl ModulationValues {
     fn from_mod_bank(
         mod_bank_envs: &ModBankEnvs,
         mod_bank: &ModulationBank,
-        time: usize,
+        time: SampleTime,
         note_state: NoteState,
         sample_rate: SampleRate,
     ) -> ModulationValues {
@@ -652,12 +652,12 @@ enum NoteState {
     None,
     /// The note is being held down
     Held,
-    /// The note has just been released. Time is in samples and denotes how many
+    /// The note has just been released. The field is in samples and denotes how many
     /// samples since the oscillator has started.
-    Released { time: usize },
+    Released(SampleTime),
     /// The note has just be retriggered during a release. Time is in samples
     /// since the oscillator has retriggered.
-    Retrigger { time: usize },
+    Retrigger(SampleTime),
 }
 
 /// The shape of a note. The associated f32 indicates the "warp" of the note.
