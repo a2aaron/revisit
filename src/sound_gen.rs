@@ -6,10 +6,10 @@ use crate::neighbor_pairs::NeighborPairsIter;
 
 const TAU: f32 = std::f32::consts::TAU;
 
-const RETRIGGER_TIME: usize = 88; // 88 samples is about 2 miliseconds.
+pub const RETRIGGER_TIME: usize = 88; // 88 samples is about 2 miliseconds.
 
 /// An offset, in samples, from the start of the frame.
-pub type FrameDelta = i32;
+pub type FrameDelta = usize;
 /// A value in range [0.0, 1.0] which denotes the position wihtin a wave cycle.
 pub type Angle = f32;
 /// The sample rate in Hz/seconds.
@@ -20,51 +20,12 @@ pub type NormalizedPitchbend = f32;
 
 #[derive(Debug)]
 pub struct Oscillator {
-    // The base pitch of the oscillator, in Hz
-    pitch: f32,
-    // The velocity of the oscillator
-    vel: f32,
-    // The current angle of the oscillator. This should be updated every sample
     angle: Angle,
-    // The time, in samples, that this oscillator has run since the last note on
-    // event. This is NOT an interframe sample number!
-    pub time: usize,
-    // The current state of the oscillator (held, released, etc)
-    // TODO: this shold almost certainly go in SoundGenerator
-    pub note_state: NoteState,
-    // The per-sample filter applied to the output
-    filter: DirectForm1<f32>,
-    // If Some(frame_delta, vel), then a note on event occurs at `frame_delta`
-    // with note velocity `vel`
-    note_on: Option<(FrameDelta, f32)>,
-    // If Some(frame_delta), then a note off event occurs at `frame_delta`
-    note_off: Option<FrameDelta>,
 }
 
 impl Oscillator {
-    pub fn new(pitch: f32, vel: f32, sample_rate: SampleRate) -> Oscillator {
-        Oscillator {
-            pitch,
-            vel,
-            angle: 0.0,
-            time: 0,
-            note_state: NoteState::None,
-            filter: DirectForm1::<f32>::new(
-                biquad::Coefficients::<f32>::from_params(
-                    biquad::Type::LowPass,
-                    sample_rate.hz(),
-                    (10000).hz(),
-                    Q_BUTTERWORTH_F32,
-                )
-                .unwrap(),
-            ),
-            note_on: None,
-            note_off: None,
-        }
-    }
-
-    pub fn new_from_note(note: Note, vel: f32, sample_rate: SampleRate) -> Oscillator {
-        Oscillator::new(Note::to_freq_f32(note), vel, sample_rate)
+    pub fn new() -> Oscillator {
+        Oscillator { angle: 0.0 }
     }
 
     /// Return the next sample from the oscillator
@@ -95,73 +56,13 @@ impl Oscillator {
     ///               is None, the filter is bypassed.
     pub fn next_sample(
         &mut self,
-        sample_num: usize,
         sample_rate: SampleRate,
         shape: NoteShape,
-        vol_env: f32,
         pitch: f32,
         phase_mod: f32,
-        filter_params: Option<FilterParams>,
     ) -> f32 {
-        // Only advance time if the note is being held down!
-        match self.note_state {
-            NoteState::None => (),
-            _ => self.time += 1,
-        }
-
-        // Handle note on event. If the note was previously not triggered (aka:
-        // this is the first time the note has been triggered), then the note
-        // transitions to the hold state. If this is a retrigger, then the note
-        // transitions to the retrigger state, with volume `vol`.
-        // Also, we set the note velocity to the appropriate new note velocity.
-        match self.note_on {
-            Some((note_on, note_on_vel)) if note_on as usize == sample_num => {
-                self.note_state = match self.note_state {
-                    NoteState::None => NoteState::Held,
-                    _ => NoteState::Retrigger {
-                        time: self.time,
-                        vol: vol_env,
-                    },
-                };
-                self.vel = note_on_vel;
-                self.note_on = None;
-            }
-            _ => (),
-        }
-
-        // Trigger note off events
-        match self.note_off {
-            Some(note_off) if note_off as usize == sample_num => {
-                self.note_state = NoteState::Released {
-                    time: self.time,
-                    vol: vol_env,
-                };
-                self.note_off = None;
-            }
-            _ => (),
-        }
-
-        // If it has been 10 samples in the retrigger state, switch back to
-        // the held state. This also resets the time.
-        if let NoteState::Retrigger {
-            time: retrigger_time,
-            vol: _,
-        } = self.note_state
-        {
-            if self.time - retrigger_time > RETRIGGER_TIME {
-                self.note_state = NoteState::Held;
-                self.time = 0;
-            }
-        }
-
         // Get the raw signal
         let mut value = shape.get((self.angle + phase_mod) % 1.0);
-
-        // Apply volume envelope and note velocity
-        value *= self.vel;
-
-        // The pitch of the note after applying pitch multipliers
-        let pitch = self.pitch * pitch;
 
         // Update the angle. Each sample is 1.0 / sample_rate apart for a
         // complete waveform. We also multiply by pitch to advance the right amount
@@ -170,24 +71,7 @@ impl Oscillator {
         let angle_delta = pitch / sample_rate;
         self.angle = (self.angle + angle_delta) % 1.0;
 
-        // Apply low pass filter if it exists
-        match filter_params {
-            Some(params) => {
-                let coefficents = FilterParams::into_coefficients(params, sample_rate);
-                self.filter.update_coefficients(coefficents);
-                let output = self.filter.run(value);
-                if output.is_finite() {
-                    output
-                } else {
-                    // If the output happens to be NaN or Infinity, output the
-                    // original  signal instead. Hopefully, this will "reset"
-                    // the filter on the next sample, instead of being filled
-                    // with garbage values.
-                    value
-                }
-            }
-            None => value,
-        }
+        value
     }
 
     // Return the next sample from the oscillator, but without applying any
@@ -197,36 +81,11 @@ impl Oscillator {
         // Get the raw signal
         let mut value = shape.get(self.angle);
 
-        // Apply note velocity
-        value *= self.vel;
-
         // Update the angle.
         let angle_delta = pitch / sample_rate;
         self.angle = (self.angle + angle_delta) % 1.0;
 
         value
-    }
-
-    /// Release the note
-    pub fn note_off(&mut self, frame_delta: i32) {
-        self.note_off = Some(frame_delta);
-    }
-
-    /// Trigger or Retrigger the note
-    pub fn note_on(&mut self, frame_delta: i32, vel: f32) {
-        self.note_on = Some((frame_delta, vel));
-    }
-
-    /// Returns true if the note is "alive" (playing audio). A note is dead if
-    /// it is in the release state and it is after the total release time.
-    pub fn is_alive(&self, sample_rate: SampleRate, release: f32) -> bool {
-        match self.note_state {
-            NoteState::None | NoteState::Held | NoteState::Retrigger { time: _, vol: _ } => true,
-            NoteState::Released {
-                time: release_time,
-                vol: _,
-            } => (self.time - release_time) as f32 / sample_rate < release,
-        }
     }
 }
 
@@ -272,14 +131,12 @@ pub enum NoteState {
     None,
     /// The note is being held down
     Held,
-    /// The note has just been released. Time is in seconds and denotes how many
-    /// samples since the oscillator has started. Vol is the volume that the
-    /// note was at when it was released (used for envelope purposes).
-    Released { time: usize, vol: f32 },
+    /// The note has just been released. Time is in samples and denotes how many
+    /// samples since the oscillator has started.
+    Released { time: usize },
     /// The note has just be retriggered during a release. Time is in samples
-    /// since the oscillator has retriggered. Vol is the volume that the
-    /// note was at when it was retriggered (used for envelope purposes).
-    Retrigger { time: usize, vol: f32 },
+    /// since the oscillator has retriggered.
+    Retrigger { time: usize },
 }
 
 /// The shape of a note. The associated f32 indicates the "warp" of the note.
@@ -477,51 +334,11 @@ pub fn to_pitch_multiplier(pitch_bend: NormalizedPitchbend, semitones: i32) -> f
     exponent.powf(pitch_bend)
 }
 
-/// Return the envelope value that the given ADSR would have at `time`.
-/// `time`        - number of samples since the start of the note
-/// `sample_rate` - in hz/second
-/// `note_state`  - affects where in the envelope the note is at
-/// Held - do normal attack/decay/sustain envelope
-/// Released - do release envelope, going from the released velocity to zero
-/// Retrigger - do short envelope from retrigger velocity to zero
-pub fn envelope(
-    ahdsr: (f32, f32, f32, f32, f32),
-    time: usize,
-    note_state: NoteState,
-    sample_rate: SampleRate,
-) -> f32 {
-    let attack = ahdsr.0;
-    let hold = ahdsr.1;
-    let decay = ahdsr.2;
-    let sustain = ahdsr.3;
-    let release = ahdsr.4;
-
-    match note_state {
-        NoteState::None => 0.0,
-        NoteState::Held => ahds_env(attack, hold, decay, sustain, time as f32 / sample_rate),
-        NoteState::Released {
-            time: rel_time,
-            vol,
-        } => {
-            let time = (time - rel_time) as f32 / sample_rate;
-            lerp(vol, 0.0, time / release)
-        }
-        NoteState::Retrigger {
-            time: retrig_time,
-            vol,
-        } => {
-            // Forcibly decay over RETRIGGER_TIME.
-            let time = (time - retrig_time) as f32 / RETRIGGER_TIME as f32;
-            lerp(vol, 0.0, time)
-        }
-    }
-}
-
 // Get the envelope value given attack, decay, and sustain values.
 // Attack, decay, and time are all in the same units (seconds usually)
 // Sustain is a value in range [0.0, 1.0]
 // Returned value is also in range [0.0, 1.0]
-fn ahds_env(attack: f32, hold: f32, decay: f32, sustain: f32, time: f32) -> f32 {
+pub fn ahds_env(attack: f32, hold: f32, decay: f32, sustain: f32, time: f32) -> f32 {
     if time < attack {
         // Attack
         time / attack
@@ -538,7 +355,7 @@ fn ahds_env(attack: f32, hold: f32, decay: f32, sustain: f32, time: f32) -> f32 
     }
 }
 
-fn lerp(start: f32, end: f32, x: f32) -> f32 {
+pub fn lerp(start: f32, end: f32, x: f32) -> f32 {
     (end - start) * x.clamp(0.0, 1.0) + start
 }
 

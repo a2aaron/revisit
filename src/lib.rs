@@ -9,13 +9,15 @@ mod ui_tabs;
 
 use std::{convert::TryFrom, sync::Arc};
 
+use biquad::{DirectForm1, ToHertz, Q_BUTTERWORTH_F32};
+use iced_graphics::canvas::Frame;
 use params::{
-    CountedEnum, Envelope, ModulationBank, ModulationSend, ModulationType, OSCParams,
-    ParameterType, Parameters, RawParameters,
+    CountedEnum, Envelope, EnvelopeParams, ModBankEnvs, ModulationBank, ModulationSend,
+    ModulationType, OSCParams, ParameterType, Parameters, RawParameters,
 };
 use sound_gen::{
-    normalize_U7, normalize_pitch_bend, to_pitch_envelope, to_pitch_multiplier,
-    NormalizedPitchbend, NoteShape, NoteState, Oscillator, SampleRate,
+    normalize_U7, normalize_pitch_bend, to_pitch_envelope, to_pitch_multiplier, FrameDelta,
+    NormalizedPitchbend, NoteShape, NoteState, Oscillator, SampleRate, RETRIGGER_TIME,
 };
 use ui::UIFrontEnd;
 
@@ -33,52 +35,232 @@ struct SoundGenerator {
     osc_1: OSCGroup,
     osc_2: OSCGroup,
     note: wmidi::Note,
+    // The pitch of the note this SoundGenerator is playing, ignoring all coarse
+    // detune and pitch bend effects. This is in hertz.
+    note_pitch: f32,
+    // The velocity of the note that this SoundGenerator is playing, ignoring all
+    // amplitude modulation effects. This is a 0.0 - 1.0 normalized value.
+    vel: f32,
+    // The time, in samples, that this SoundGenerator has run since the last note on
+    // event. This is NOT an interframe sample number!
+    samples_since_note_on: usize,
+    // The current state of the SoundGenerator (held, released, etc)
+    note_state: NoteState,
+    // The per-sample filter applied to the output
+    // filter: DirectForm1<f32>,
+    // If Some(frame_delta, vel), then a note on event occurs in the next frame
+    // at sample `frame_delta` samples into the the frame, and the note has a
+    // note velocity of `vel`
+    next_note_on: Option<(FrameDelta, f32)>,
+    // If Some(frame_delta), then the next note off event occurs in the next frame
+    // at `frame_delta` samples into the frame
+    next_note_off: Option<FrameDelta>,
 }
 
 impl SoundGenerator {
+    pub fn new(note: wmidi::Note, vel: f32, sample_rate: SampleRate) -> SoundGenerator {
+        SoundGenerator {
+            note,
+            note_pitch: wmidi::Note::to_freq_f32(note),
+            vel,
+            samples_since_note_on: 0,
+            note_state: NoteState::None,
+            osc_1: OSCGroup::new(sample_rate),
+            osc_2: OSCGroup::new(sample_rate),
+            next_note_on: None,
+            next_note_off: None,
+        }
+    }
+
+    /// Returns true if the note is "alive" (playing audio). A note is dead if
+    /// it is in the release state and it is after the total release time.
     fn is_alive(&self, sample_rate: SampleRate, params: &Parameters) -> bool {
-        match params.osc_2_mod {
-            // If we mix together the two sounds then we should only kill the note
-            // after both oscillators have died.
-            ModulationType::Mix => {
-                self.osc_1
-                    .osc
-                    .is_alive(sample_rate, params.osc_1.vol_adsr.release)
-                    || self
-                        .osc_2
-                        .osc
-                        .is_alive(sample_rate, params.osc_2.vol_adsr.release)
+        match self.note_state {
+            NoteState::None | NoteState::Held | NoteState::Retrigger { time: _ } => true,
+            NoteState::Released { time: release_time } => {
+                // The number of seconds it has been since release
+                let time = (self.samples_since_note_on - release_time) as f32 / sample_rate;
+                match params.osc_2_mod {
+                    // If we mix together the two sounds then we should only kill the note
+                    // after both oscillators have died.
+                    ModulationType::Mix => {
+                        time < params.osc_1.vol_adsr.release || time < params.osc_2.vol_adsr.release
+                    }
+                    _ => time < params.osc_1.vol_adsr.release,
+                }
             }
-            _ => self
-                .osc_1
-                .osc
-                .is_alive(sample_rate, params.osc_1.vol_adsr.release),
+        }
+    }
+
+    fn next_sample(
+        &mut self,
+        params: &Parameters,
+        i: FrameDelta,
+        sample_rate: SampleRate,
+        pitch_bend: f32,
+    ) -> (f32, f32) {
+        // Only advance time if the note is being held down.
+        match self.note_state {
+            NoteState::None => (),
+            _ => self.samples_since_note_on += 1,
+        }
+
+        // Handle note on event. If the note was previously not triggered (aka:
+        // this is the first time the note has been triggered), then the note
+        // transitions to the hold state. If this is a retrigger, then the note
+        // transitions to the retrigger state, with volume `vol`.
+        // Also, we set the note velocity to the appropriate new note velocity.
+        match self.next_note_on {
+            Some((note_on, note_on_vel)) if note_on == i => {
+                self.osc_1.note_state_changed(
+                    &params.osc_1,
+                    &params.mod_bank,
+                    sample_rate,
+                    self.samples_since_note_on,
+                    self.note_state,
+                );
+                self.osc_2.note_state_changed(
+                    &params.osc_2,
+                    &params.mod_bank,
+                    sample_rate,
+                    self.samples_since_note_on,
+                    self.note_state,
+                );
+
+                self.note_state = match self.note_state {
+                    NoteState::None => NoteState::Held,
+                    _ => NoteState::Retrigger {
+                        time: self.samples_since_note_on,
+                    },
+                };
+                self.vel = note_on_vel;
+                self.next_note_on = None;
+            }
+            _ => (),
+        }
+
+        // Trigger note off events
+        match self.next_note_off {
+            Some(note_off) if note_off == i => {
+                self.osc_1.note_state_changed(
+                    &params.osc_1,
+                    &params.mod_bank,
+                    sample_rate,
+                    self.samples_since_note_on,
+                    self.note_state,
+                );
+                self.osc_2.note_state_changed(
+                    &params.osc_2,
+                    &params.mod_bank,
+                    sample_rate,
+                    self.samples_since_note_on,
+                    self.note_state,
+                );
+
+                self.note_state = NoteState::Released {
+                    time: self.samples_since_note_on,
+                };
+                self.next_note_off = None;
+            }
+            _ => (),
+        }
+
+        // If it has been 10 samples in the retrigger state, switch back to
+        // the held state. This also resets the time.
+        if let NoteState::Retrigger {
+            time: retrigger_time,
+        } = self.note_state
+        {
+            if self.samples_since_note_on - retrigger_time > RETRIGGER_TIME {
+                self.note_state = NoteState::Held;
+                self.samples_since_note_on = 0;
+            }
+        }
+
+        let osc_2 = self.osc_2.next_sample(
+            &params.osc_2,
+            sample_rate,
+            self.note_pitch,
+            i,
+            self.samples_since_note_on,
+            self.note_state,
+            pitch_bend,
+            (ModulationType::Mix, 0.0),
+            &params.mod_bank,
+            params.osc_2_mod == ModulationType::Mix,
+        );
+
+        let osc_1 = self.osc_1.next_sample(
+            &params.osc_1,
+            sample_rate,
+            self.note_pitch,
+            i,
+            self.samples_since_note_on,
+            self.note_state,
+            pitch_bend,
+            (params.osc_2_mod, osc_2),
+            &params.mod_bank,
+            true,
+        );
+
+        fn pan_split(pan: f32) -> (f32, f32) {
+            let radians = (pan + 1.0) * std::f32::consts::PI / 4.0;
+            (radians.cos(), radians.sin())
+        }
+
+        if params.osc_2_mod == ModulationType::Mix {
+            let (osc_1_left, osc_1_right) = pan_split(params.osc_1.pan);
+            let (osc_2_left, osc_2_right) = pan_split(params.osc_2.pan);
+            let left = osc_1 * osc_1_left + osc_2 * osc_2_left;
+            let right = osc_1 * osc_1_right + osc_2 * osc_2_right;
+            (left, right)
+        } else {
+            let (pan_left, pan_right) = pan_split(params.osc_1.pan);
+            (osc_1 * pan_left, osc_1 * pan_right)
         }
     }
 
     fn note_on(&mut self, mix: ModulationType, frame_delta: i32, vel: f32) {
-        if mix == ModulationType::Mix {
-            self.osc_1.osc.note_on(frame_delta, vel);
-            self.osc_2.osc.note_on(frame_delta, vel);
-        } else {
-            self.osc_1.osc.note_on(frame_delta, vel);
-            self.osc_2.osc.note_on(frame_delta, 1.0);
-        }
+        self.next_note_on = Some((frame_delta as usize, vel));
     }
 
     fn note_off(&mut self, frame_delta: i32) {
-        self.osc_1.osc.note_off(frame_delta);
-        self.osc_2.osc.note_off(frame_delta);
+        self.next_note_off = Some(frame_delta as usize);
     }
 }
 
 struct OSCGroup {
     osc: Oscillator,
+    vol_env: Envelope,
+    pitch_env: Envelope,
+    mod_bank_envs: ModBankEnvs,
     volume_lfo: Oscillator,
     pitch_lfo: Oscillator,
+    // The state for the EQ/filters, applied after the signal is generated
+    filter: DirectForm1<f32>,
 }
 
 impl OSCGroup {
+    fn new(sample_rate: f32) -> OSCGroup {
+        OSCGroup {
+            osc: Oscillator::new(),
+            vol_env: Envelope::new(),
+            pitch_env: Envelope::new(),
+            mod_bank_envs: ModBankEnvs::new(),
+            volume_lfo: Oscillator::new(),
+            pitch_lfo: Oscillator::new(),
+            filter: DirectForm1::<f32>::new(
+                biquad::Coefficients::<f32>::from_params(
+                    biquad::Type::LowPass,
+                    sample_rate.hz(),
+                    (10000).hz(),
+                    Q_BUTTERWORTH_F32,
+                )
+                .unwrap(),
+            ),
+        }
+    }
+
     /// Get the next sample from the osc group, applying modulation parameters as
     /// well.
     /// Note that the `i` argument is the interframe sample number (which sample
@@ -88,7 +270,10 @@ impl OSCGroup {
         &mut self,
         params: &OSCParams,
         sample_rate: f32,
-        i: usize,
+        base_note: f32,
+        i: FrameDelta,
+        samples_since_note_on: usize,
+        note_state: NoteState,
         pitch_bend: f32,
         (mod_type, modulation): (ModulationType, f32),
         mod_bank: &ModulationBank,
@@ -108,16 +293,20 @@ impl OSCGroup {
         //    various modulation values.
 
         let mod_bank = ModulationValues::from_mod_bank(
+            &self.mod_bank_envs,
             mod_bank,
-            self.osc.time,
-            self.osc.note_state,
+            samples_since_note_on,
+            note_state,
             sample_rate,
         );
 
         // Compute volume from parameters, ADSR, LFO, and AmpMod
-        let vol_env = params
-            .vol_adsr
-            .get(self.osc.time, self.osc.note_state, sample_rate);
+        let vol_env = self.vol_env.get(
+            &params.vol_adsr,
+            samples_since_note_on,
+            note_state,
+            sample_rate,
+        );
 
         let vol_lfo = self.volume_lfo.next_sample_raw(
             1.0 / params.vol_lfo.period,
@@ -143,9 +332,12 @@ impl OSCGroup {
             * (1.0 - mod_bank.amplitude);
 
         // Compute note pitch multiplier from ADSR and envelope
-        let pitch_env = params
-            .pitch_adsr
-            .get(self.osc.time, self.osc.note_state, sample_rate);
+        let pitch_env = self.pitch_env.get(
+            &params.pitch_adsr,
+            samples_since_note_on,
+            note_state,
+            sample_rate,
+        );
         let pitch_lfo = self.pitch_lfo.next_sample_raw(
             1.0 / params.pitch_lfo.period,
             NoteShape::Sine,
@@ -154,7 +346,7 @@ impl OSCGroup {
         let pitch_coarse = to_pitch_multiplier(1.0, params.coarse_tune);
         let pitch_fine = to_pitch_multiplier(params.fine_tune, 1);
         let pitch_bend = to_pitch_multiplier(pitch_bend, 12);
-        let note_pitch = to_pitch_multiplier(pitch_env + pitch_lfo, 24);
+        let pitch_mods = to_pitch_multiplier(pitch_env + pitch_lfo, 24);
         let mod_bank_pitch = to_pitch_multiplier(mod_bank.pitch, 24);
 
         let fm_mod = if mod_type == ModulationType::FreqMod {
@@ -164,12 +356,19 @@ impl OSCGroup {
         };
 
         // The final pitch multiplier, post-FM
-        // Note pitch consists of the applied pitch bend, pitch ADSR, pitch LFOs
+        // Base note is the base note frequency, in hz
+        // Pitch mods consists of the applied pitch bend, pitch ADSR, pitch LFOs
         // applied to it, with a max range of 12 semis.
         // Fine and course pitchbend come from the parameters.
         // The FM Mod comes from the modulation value.
         // Mod bank pitch comes from the mod bank.
-        let pitch = note_pitch * pitch_bend * pitch_coarse * pitch_fine * fm_mod * mod_bank_pitch;
+        let pitch = base_note
+            * pitch_mods
+            * pitch_bend
+            * pitch_coarse
+            * pitch_fine
+            * fm_mod
+            * mod_bank_pitch;
 
         let warp_mod = if mod_type == ModulationType::WarpMod {
             modulation
@@ -194,14 +393,46 @@ impl OSCGroup {
 
         // Get next sample
         self.osc.next_sample(
-            i,
             sample_rate,
             params.shape.add(warp_mod).add(mod_bank.warp),
-            vol_env,
             pitch,
             phase_mod + params.phase + mod_bank.phase,
-            filter_params,
         ) * total_volume
+    }
+
+    /// Handle hold-to-release and release-to-retrigger state transitions
+    fn note_state_changed(
+        &mut self,
+        params: &OSCParams,
+        mod_bank_params: &ModulationBank,
+        sample_rate: f32,
+        samples_since_note_on: usize,
+        note_state: NoteState,
+    ) {
+        self.vol_env.remember(
+            &params.vol_adsr,
+            samples_since_note_on,
+            note_state,
+            sample_rate,
+        );
+        self.pitch_env.remember(
+            &params.pitch_adsr,
+            samples_since_note_on,
+            note_state,
+            sample_rate,
+        );
+        self.mod_bank_envs.env_1.remember(
+            &mod_bank_params.env_1,
+            samples_since_note_on,
+            note_state,
+            sample_rate,
+        );
+        self.mod_bank_envs.env_2.remember(
+            &mod_bank_params.env_2,
+            samples_since_note_on,
+            note_state,
+            sample_rate,
+        );
     }
 }
 
@@ -235,13 +466,18 @@ impl ModulationValues {
     }
 
     fn from_mod_bank(
+        mod_bank_envs: &ModBankEnvs,
         mod_bank: &ModulationBank,
         time: usize,
         note_state: NoteState,
         sample_rate: SampleRate,
     ) -> ModulationValues {
-        let env_1 = mod_bank.env_1.get(time, note_state, sample_rate);
-        let env_2 = mod_bank.env_2.get(time, note_state, sample_rate);
+        let env_1 = mod_bank_envs
+            .env_1
+            .get(&mod_bank.env_1, time, note_state, sample_rate);
+        let env_2 = mod_bank_envs
+            .env_2
+            .get(&mod_bank.env_2, time, note_state, sample_rate);
 
         ModulationValues::from_value(env_1, mod_bank.env_1_send)
             + ModulationValues::from_value(env_2, mod_bank.env_2_send)
@@ -279,11 +515,11 @@ impl Plugin for Revisit {
     }
 
     fn init(&mut self) {
-        // let result = simple_logging::log_to_file("revisit.log", LevelFilter::Info);
-        // if let Err(err) = result {
-        //     println!("Couldn't start logging! {}", err);
-        // }
-        // info!("Begin VST log");
+        let result = simple_logging::log_to_file("revisit.log", log::LevelFilter::Info);
+        if let Err(err) = result {
+            println!("Couldn't start logging! {}", err);
+        }
+        log::info!("Begin VST log");
     }
 
     fn get_info(&self) -> Info {
@@ -334,43 +570,9 @@ impl Plugin for Revisit {
 
         for gen in &mut self.notes {
             for i in 0..num_samples {
-                let (osc_1, osc_2) = (&mut gen.osc_1, &mut gen.osc_2);
-
-                let osc_2 = osc_2.next_sample(
-                    &params.osc_2,
-                    self.sample_rate,
-                    i,
-                    pitch_bends[i],
-                    (ModulationType::Mix, 0.0),
-                    &params.mod_bank,
-                    params.osc_2_mod == ModulationType::Mix,
-                );
-
-                let osc_1 = osc_1.next_sample(
-                    &params.osc_1,
-                    self.sample_rate,
-                    i,
-                    pitch_bends[i],
-                    (params.osc_2_mod, osc_2),
-                    &params.mod_bank,
-                    true,
-                );
-
-                fn pan_split(pan: f32) -> (f32, f32) {
-                    let radians = (pan + 1.0) * std::f32::consts::PI / 4.0;
-                    (radians.cos(), radians.sin())
-                }
-
-                if params.osc_2_mod == ModulationType::Mix {
-                    let (osc_1_left, osc_1_right) = pan_split(params.osc_1.pan);
-                    let (osc_2_left, osc_2_right) = pan_split(params.osc_2.pan);
-                    left_out[i] += osc_1 * osc_1_left + osc_2 * osc_2_left;
-                    right_out[i] += osc_1 * osc_1_right + osc_2 * osc_2_right;
-                } else {
-                    let (pan_left, pan_right) = pan_split(params.osc_1.pan);
-                    left_out[i] += osc_1 * pan_left;
-                    right_out[i] += osc_1 * pan_right;
-                }
+                let (left, right) = gen.next_sample(&params, i, self.sample_rate, pitch_bends[i]);
+                left_out[i] += left;
+                right_out[i] += right;
             }
         }
 
@@ -412,28 +614,7 @@ impl Plugin for Revisit {
                                 {
                                     osc
                                 } else {
-                                    self.notes.push(SoundGenerator {
-                                        osc_1: OSCGroup {
-                                            osc: Oscillator::new_from_note(
-                                                note,
-                                                vel,
-                                                self.sample_rate,
-                                            ),
-                                            volume_lfo: Oscillator::new(1.0, 1.0, self.sample_rate),
-                                            pitch_lfo: Oscillator::new(1.0, 1.0, self.sample_rate),
-                                        },
-                                        osc_2: OSCGroup {
-                                            osc: Oscillator::new_from_note(
-                                                note,
-                                                vel,
-                                                self.sample_rate,
-                                            ),
-                                            volume_lfo: Oscillator::new(1.0, 1.0, self.sample_rate),
-                                            pitch_lfo: Oscillator::new(1.0, 1.0, self.sample_rate),
-                                        },
-
-                                        note,
-                                    });
+                                    self.notes.push(SoundGenerator::new(note, vel, sample_rate));
                                     self.notes.last_mut().unwrap()
                                 };
 

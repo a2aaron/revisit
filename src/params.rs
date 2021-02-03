@@ -1,10 +1,12 @@
 use std::{convert::TryFrom, sync::Arc};
 
 use crate::sound_gen::{
-    ease_in_expo, ease_in_poly, envelope, FilterParams, NoteShape, NoteState, SampleRate,
+    ahds_env, ease_in_expo, ease_in_poly, lerp, FilterParams, NoteShape, NoteState, SampleRate,
+    RETRIGGER_TIME,
 };
 
 use derive_more::Display;
+use log::info;
 use variant_count::VariantCount;
 use vst::{
     host::Host,
@@ -134,9 +136,9 @@ pub struct OSCParams {
     pub coarse_tune: i32,
     // In [-1.0, 1.0] range
     pub fine_tune: f32,
-    pub vol_adsr: Envelope,
+    pub vol_adsr: EnvelopeParams,
     pub vol_lfo: LFO,
-    pub pitch_adsr: Envelope,
+    pub pitch_adsr: EnvelopeParams,
     pub pitch_lfo: LFO,
     pub filter_params: FilterParams,
 }
@@ -152,12 +154,12 @@ impl From<&RawOSC> for OSCParams {
             coarse_tune: ((params.coarse_tune.get() - 0.5) * 2.0 * 24.0) as i32,
             // In [-1.0, 1.0] range
             fine_tune: (params.fine_tune.get() - 0.5) * 2.0,
-            vol_adsr: Envelope::from(&params.vol_adsr),
+            vol_adsr: EnvelopeParams::from(&params.vol_adsr),
             vol_lfo: LFO {
                 amplitude: ease_in_expo(params.vol_lfo.amount.get()),
                 period: (ease_in_expo(params.vol_lfo.period.get()) * 10.0).max(0.001),
             },
-            pitch_adsr: Envelope::from(&params.pitch_adsr),
+            pitch_adsr: EnvelopeParams::from(&params.pitch_adsr),
             pitch_lfo: LFO {
                 amplitude: ease_in_expo(params.pitch_lfo.amount.get()) * 0.1,
                 period: (ease_in_expo(params.pitch_lfo.period.get()) * 10.0).max(0.001),
@@ -174,25 +176,96 @@ impl From<&RawOSC> for OSCParams {
     }
 }
 
+pub struct ModBankEnvs {
+    pub env_1: Envelope,
+    pub env_2: Envelope,
+}
+
+impl ModBankEnvs {
+    pub fn new() -> ModBankEnvs {
+        ModBankEnvs {
+            env_1: Envelope::new(),
+            env_2: Envelope::new(),
+        }
+    }
+}
+
 // TODO: This is slightly wrong! ModulationSends also need to specify which
 // oscillator they are going to send to! Otherwise this will just apply to all
 // of the oscillators, which is not what you want! (likely just use a tuple
 // of ModulationSend and OSCType)
 pub struct ModulationBank {
-    pub env_1: Envelope,
+    pub env_1: EnvelopeParams,
     pub env_1_send: ModulationSend,
-    pub env_2: Envelope,
+    pub env_2: EnvelopeParams,
     pub env_2_send: ModulationSend,
 }
 
 impl From<&RawModBank> for ModulationBank {
     fn from(params: &RawModBank) -> Self {
         ModulationBank {
-            env_1: Envelope::from(&params.env_1),
+            env_1: EnvelopeParams::from(&params.env_1),
             env_1_send: ModulationSend::from(params.env_1_send.get()),
-            env_2: Envelope::from(&params.env_2),
+            env_2: EnvelopeParams::from(&params.env_2),
             env_2_send: ModulationSend::from(params.env_2_send.get()),
         }
+    }
+}
+
+pub struct Envelope {
+    // The value to lerp from when in Retrigger or Release state
+    pub lerp_from: f32,
+}
+
+impl Envelope {
+    pub fn new() -> Envelope {
+        Envelope { lerp_from: 0.0 }
+    }
+
+    /// Get the current envelope value. `time` is how many samples it has been
+    /// since the start of the note
+    pub fn get(
+        &self,
+        params: &EnvelopeParams,
+        time: usize,
+        note_state: NoteState,
+        sample_rate: SampleRate,
+    ) -> f32 {
+        let attack = params.attack;
+        let hold = params.hold;
+        let decay = params.decay;
+        let sustain = params.sustain;
+        let release = params.release;
+
+        let value = match note_state {
+            NoteState::None => 0.0,
+            NoteState::Held => ahds_env(attack, hold, decay, sustain, time as f32 / sample_rate),
+            NoteState::Released { time: rel_time } => {
+                let time = (time - rel_time) as f32 / sample_rate;
+                lerp(self.lerp_from, 0.0, time / release)
+            }
+            NoteState::Retrigger { time: retrig_time } => {
+                // Forcibly decay over RETRIGGER_TIME.
+                let time = (time - retrig_time) as f32 / RETRIGGER_TIME as f32;
+                lerp(self.lerp_from, 0.0, time)
+            }
+        };
+        value * params.multiply
+    }
+
+    // Set self.lerp_from to the specified value using the arguments
+    pub fn remember(
+        &mut self,
+        params: &EnvelopeParams,
+        time: usize,
+        note_state: NoteState,
+        sample_rate: SampleRate,
+    ) {
+        self.lerp_from = self.get(params, time, note_state, sample_rate);
+        // info!(
+        //     "{:#?}, {:?}, {:?}, {:?}",
+        //     params, time, note_state, sample_rate
+        // );
     }
 }
 
@@ -201,7 +274,7 @@ impl From<&RawModBank> for ModulationBank {
 /// you will get unpleasent clicks in the envelope wave as the note state transitions
 /// from Held to Release (the value will instantly jump back to 1.0 and go to zero)
 #[derive(Debug, Clone, Copy)]
-pub struct Envelope {
+pub struct EnvelopeParams {
     // In seconds
     pub attack: f32,
     // In seconds
@@ -216,26 +289,7 @@ pub struct Envelope {
     pub multiply: f32,
 }
 
-impl Envelope {
-    /// Get the current envelope value. `time` is how many samples it has been
-    /// since the start of the note
-    pub fn get(&self, time: usize, note_state: NoteState, sample_rate: SampleRate) -> f32 {
-        envelope(
-            (
-                self.attack,
-                self.hold,
-                self.decay,
-                self.sustain,
-                self.release,
-            ),
-            time,
-            note_state,
-            sample_rate,
-        ) * self.multiply
-    }
-}
-
-impl From<&RawEnvelope> for Envelope {
+impl From<&RawEnvelope> for EnvelopeParams {
     fn from(params: &RawEnvelope) -> Self {
         // Apply exponetial scaling to input values.
         // This makes it easier to select small envelope lengths.
@@ -245,7 +299,7 @@ impl From<&RawEnvelope> for Envelope {
         let sustain = params.sustain.get();
         let release = ease_in_expo(params.release.get());
         let multiply = (params.multiply.get() - 0.5) * 2.0;
-        Envelope {
+        EnvelopeParams {
             // Clamp values to around 1 ms minimum.
             // This avoids division by zero problems.
             // Also prevents annoying clicking which is undesirable.
@@ -367,7 +421,7 @@ impl RawParameters {
             }
         }
 
-        fn envelope_strings(envelope: Envelope, param: EnvelopeParam) -> (String, String) {
+        fn envelope_strings(envelope: EnvelopeParams, param: EnvelopeParam) -> (String, String) {
             match param {
                 Attack => duration_strings(envelope.attack),
                 Hold => duration_strings(envelope.hold),
