@@ -9,15 +9,15 @@ mod ui_tabs;
 
 use std::{convert::TryFrom, sync::Arc};
 
-use biquad::{DirectForm1, ToHertz, Q_BUTTERWORTH_F32};
+use biquad::{Biquad, DirectForm1, ToHertz, Q_BUTTERWORTH_F32};
 use iced_graphics::canvas::Frame;
 use params::{
     CountedEnum, Envelope, EnvelopeParams, ModBankEnvs, ModulationBank, ModulationSend,
     ModulationType, OSCParams, ParameterType, Parameters, RawParameters,
 };
 use sound_gen::{
-    normalize_U7, normalize_pitch_bend, to_pitch_envelope, to_pitch_multiplier, FrameDelta,
-    NormalizedPitchbend, NoteShape, NoteState, Oscillator, SampleRate, RETRIGGER_TIME,
+    normalize_U7, normalize_pitch_bend, to_pitch_envelope, to_pitch_multiplier, FilterParams,
+    FrameDelta, NormalizedPitchbend, NoteShape, NoteState, Oscillator, SampleRate, RETRIGGER_TIME,
 };
 use ui::UIFrontEnd;
 
@@ -177,6 +177,8 @@ impl SoundGenerator {
             }
         }
 
+        // When osc_2 is not in mix mode, the note velocity is ignored (to make
+        // it easier to get a consistent sound)
         let osc_2_is_mix = params.osc_2_mod == ModulationType::Mix;
         let osc_2 = self.osc_2.next_sample(
             &params.osc_2,
@@ -223,7 +225,7 @@ impl SoundGenerator {
         }
     }
 
-    fn note_on(&mut self, mix: ModulationType, frame_delta: i32, vel: f32) {
+    fn note_on(&mut self, frame_delta: i32, vel: f32) {
         self.next_note_on = Some((frame_delta as usize, vel));
     }
 
@@ -399,12 +401,33 @@ impl OSCGroup {
         };
 
         // Get next sample
-        self.osc.next_sample(
+        let value = self.osc.next_sample(
             sample_rate,
             params.shape.add(warp_mod).add(mod_bank.warp),
             pitch,
             phase_mod + params.phase + mod_bank.phase,
-        ) * total_volume
+        );
+
+        // Apply filter (if desired)
+        let value = match filter_params {
+            Some(params) => {
+                let coefficents = FilterParams::into_coefficients(params, sample_rate);
+                self.filter.update_coefficients(coefficents);
+                let output = self.filter.run(value);
+                if output.is_finite() {
+                    output
+                } else {
+                    // If the output happens to be NaN or Infinity, output the
+                    // original  signal instead. Hopefully, this will "reset"
+                    // the filter on the next sample, instead of being filled
+                    // with garbage values.
+                    value
+                }
+            }
+            None => value,
+        };
+
+        value * total_volume
     }
 
     /// Handle hold-to-release and release-to-retrigger state transitions
@@ -625,7 +648,7 @@ impl Plugin for Revisit {
                                     self.notes.last_mut().unwrap()
                                 };
 
-                                gen.note_on(params.osc_2_mod, event.delta_frames, vel);
+                                gen.note_on(event.delta_frames, vel);
                             }
                             MidiMessage::NoteOff(_, note, _) => {
                                 // On note off, send note off

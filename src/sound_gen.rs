@@ -86,7 +86,7 @@ pub struct FilterParams {
 }
 
 impl FilterParams {
-    fn into_coefficients(
+    pub fn into_coefficients(
         params: FilterParams,
         sample_rate: SampleRate,
     ) -> biquad::Coefficients<f32> {
