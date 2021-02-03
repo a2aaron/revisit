@@ -92,6 +92,12 @@ impl SoundGenerator {
         sample_rate: SampleRate,
         pitch_bend: f32,
     ) -> (f32, f32) {
+        let context = NoteContext {
+            note_state: self.note_state,
+            sample_rate,
+            samples_since_note_on: self.samples_since_note_on,
+        };
+
         // Only advance time if the note is being held down.
         match self.note_state {
             NoteState::None => (),
@@ -105,20 +111,10 @@ impl SoundGenerator {
         // Also, we set the note velocity to the appropriate new note velocity.
         match self.next_note_on {
             Some((note_on, note_on_vel)) if note_on == i => {
-                self.osc_1.note_state_changed(
-                    &params.osc_1,
-                    &params.mod_bank,
-                    sample_rate,
-                    self.samples_since_note_on,
-                    self.note_state,
-                );
-                self.osc_2.note_state_changed(
-                    &params.osc_2,
-                    &params.mod_bank,
-                    sample_rate,
-                    self.samples_since_note_on,
-                    self.note_state,
-                );
+                self.osc_1
+                    .note_state_changed(&params.osc_1, &params.mod_bank, context);
+                self.osc_2
+                    .note_state_changed(&params.osc_2, &params.mod_bank, context);
 
                 self.note_state = match self.note_state {
                     NoteState::None => NoteState::Held,
@@ -133,20 +129,10 @@ impl SoundGenerator {
         // Trigger note off events
         match self.next_note_off {
             Some(note_off) if note_off == i => {
-                self.osc_1.note_state_changed(
-                    &params.osc_1,
-                    &params.mod_bank,
-                    sample_rate,
-                    self.samples_since_note_on,
-                    self.note_state,
-                );
-                self.osc_2.note_state_changed(
-                    &params.osc_2,
-                    &params.mod_bank,
-                    sample_rate,
-                    self.samples_since_note_on,
-                    self.note_state,
-                );
+                self.osc_1
+                    .note_state_changed(&params.osc_1, &params.mod_bank, context);
+                self.osc_2
+                    .note_state_changed(&params.osc_2, &params.mod_bank, context);
 
                 self.note_state = NoteState::Released(self.samples_since_note_on);
                 self.next_note_off = None;
@@ -168,11 +154,9 @@ impl SoundGenerator {
         let osc_2_is_mix = params.osc_2_mod == ModulationType::Mix;
         let osc_2 = self.osc_2.next_sample(
             &params.osc_2,
-            sample_rate,
+            context,
             if osc_2_is_mix { self.vel } else { 1.0 },
             self.note_pitch,
-            self.samples_since_note_on,
-            self.note_state,
             pitch_bend,
             (ModulationType::Mix, 0.0),
             &params.mod_bank,
@@ -181,11 +165,9 @@ impl SoundGenerator {
 
         let osc_1 = self.osc_1.next_sample(
             &params.osc_1,
-            sample_rate,
+            context,
             self.vel,
             self.note_pitch,
-            self.samples_since_note_on,
-            self.note_state,
             pitch_bend,
             (params.osc_2_mod, osc_2),
             &params.mod_bank,
@@ -255,16 +237,16 @@ impl OSCGroup {
     fn next_sample(
         &mut self,
         params: &OSCParams,
-        sample_rate: f32,
+        context: NoteContext,
         base_vel: f32,
         base_note: f32,
-        samples_since_note_on: SampleTime,
-        note_state: NoteState,
         pitch_bend: f32,
         (mod_type, modulation): (ModulationType, f32),
         mod_bank: &ModulationBank,
         apply_filter: bool,
     ) -> f32 {
+        let sample_rate = context.sample_rate;
+
         // TODO: consider merging ModulationValues with the rest of the modulation
         // calculations in this block of code. Some notes
         // 1. You probably need to commit to storing either the post-multiplied
@@ -278,24 +260,13 @@ impl OSCGroup {
         //    You need to probably store pre-multiplied values for each of the
         //    various modulation values.
 
-        let mod_bank = ModulationValues::from_mod_bank(
-            &self.mod_bank_envs,
-            mod_bank,
-            samples_since_note_on,
-            note_state,
-            sample_rate,
-        );
+        let mod_bank = ModulationValues::from_mod_bank(&self.mod_bank_envs, mod_bank, context);
 
         // Compute volume from parameters, ADSR, LFO, and AmpMod
-        let vol_env = self.vol_env.get(
-            &params.vol_adsr,
-            samples_since_note_on,
-            note_state,
-            sample_rate,
-        );
+        let vol_env = self.vol_env.get(&params.vol_adsr, context);
 
         let vol_lfo = self.volume_lfo.next_sample(
-            sample_rate,
+            context.sample_rate,
             NoteShape::Sine,
             1.0 / params.vol_lfo.period,
             0.0, // no phase mod
@@ -320,12 +291,7 @@ impl OSCGroup {
             * (1.0 - mod_bank.amplitude);
 
         // Compute note pitch multiplier from ADSR and envelope
-        let pitch_env = self.pitch_env.get(
-            &params.pitch_adsr,
-            samples_since_note_on,
-            note_state,
-            sample_rate,
-        );
+        let pitch_env = self.pitch_env.get(&params.pitch_adsr, context);
         let pitch_lfo = self.pitch_lfo.next_sample(
             sample_rate,
             NoteShape::Sine,
@@ -415,34 +381,16 @@ impl OSCGroup {
         &mut self,
         params: &OSCParams,
         mod_bank_params: &ModulationBank,
-        sample_rate: SampleRate,
-        samples_since_note_on: SampleTime,
-        note_state: NoteState,
+        context: NoteContext,
     ) {
-        self.vol_env.remember(
-            &params.vol_adsr,
-            samples_since_note_on,
-            note_state,
-            sample_rate,
-        );
-        self.pitch_env.remember(
-            &params.pitch_adsr,
-            samples_since_note_on,
-            note_state,
-            sample_rate,
-        );
-        self.mod_bank_envs.env_1.remember(
-            &mod_bank_params.env_1,
-            samples_since_note_on,
-            note_state,
-            sample_rate,
-        );
-        self.mod_bank_envs.env_2.remember(
-            &mod_bank_params.env_2,
-            samples_since_note_on,
-            note_state,
-            sample_rate,
-        );
+        self.vol_env.remember(&params.vol_adsr, context);
+        self.pitch_env.remember(&params.pitch_adsr, context);
+        self.mod_bank_envs
+            .env_1
+            .remember(&mod_bank_params.env_1, context);
+        self.mod_bank_envs
+            .env_2
+            .remember(&mod_bank_params.env_2, context);
     }
 }
 
@@ -503,6 +451,20 @@ impl Oscillator {
     }
 }
 
+/// Convience struct for holding the external state a particular note (when it was
+/// triggered, what state it is in, etc)
+/// This is mostly needed for doing envelope calculations.
+#[derive(Clone, Copy)]
+struct NoteContext {
+    /// The number of samples since the most recent note on event.
+    /// This value is expected to reset on Retrigger-Held state transitions.
+    samples_since_note_on: SampleTime,
+    /// The current state of the note being played.
+    note_state: NoteState,
+    /// The sample rate, in Hz/sec.
+    sample_rate: SampleRate,
+}
+
 pub struct Envelope {
     // The value to lerp from when in Retrigger or Release state
     lerp_from: f32,
@@ -515,18 +477,16 @@ impl Envelope {
 
     /// Get the current envelope value. `time` is how many samples it has been
     /// since the start of the note
-    fn get(
-        &self,
-        params: &EnvelopeParams,
-        time: SampleTime,
-        note_state: NoteState,
-        sample_rate: SampleRate,
-    ) -> f32 {
+    fn get(&self, params: &EnvelopeParams, context: NoteContext) -> f32 {
         let attack = params.attack;
         let hold = params.hold;
         let decay = params.decay;
         let sustain = params.sustain;
         let release = params.release;
+
+        let time = context.samples_since_note_on;
+        let note_state = context.note_state;
+        let sample_rate = context.sample_rate;
 
         let value = match note_state {
             NoteState::None => 0.0,
@@ -549,19 +509,17 @@ impl Envelope {
     /// from Released to Retrigger state.
     /// In particular, if going from Held to Released, then `note_state` should
     /// be Held and `time` should be the last sample of the Hold state.
-    /// And if going from Released to Retrigger, then `note_state` should be 
+    /// And if going from Released to Retrigger, then `note_state` should be
     /// Released and `time` should be the last sample of the Released state.
-    fn remember(
-        &mut self,
-        params: &EnvelopeParams,
-        time: SampleTime,
-        note_state: NoteState,
-        sample_rate: SampleRate,
-    ) {
-        self.lerp_from = self.get(params, time, note_state, sample_rate);
+    fn remember(&mut self, params: &EnvelopeParams, context: NoteContext) {
+        self.lerp_from = self.get(params, context);
     }
 }
 
+/// The modulation values for each of the various parameters that can be modulated
+/// These values need to be in normalized float format, where 0.0 means "no modulation"
+/// +1.0 means "max positive modulation", and -1.0 means "max negative modulation"
+/// It is acceptable for values to be outside the -1.0 - +1.0 range.
 #[derive(Debug, Default, Add)]
 struct ModulationValues {
     amplitude: f32,
@@ -594,16 +552,10 @@ impl ModulationValues {
     fn from_mod_bank(
         mod_bank_envs: &ModBankEnvs,
         mod_bank: &ModulationBank,
-        time: SampleTime,
-        note_state: NoteState,
-        sample_rate: SampleRate,
+        context: NoteContext,
     ) -> ModulationValues {
-        let env_1 = mod_bank_envs
-            .env_1
-            .get(&mod_bank.env_1, time, note_state, sample_rate);
-        let env_2 = mod_bank_envs
-            .env_2
-            .get(&mod_bank.env_2, time, note_state, sample_rate);
+        let env_1 = mod_bank_envs.env_1.get(&mod_bank.env_1, context);
+        let env_2 = mod_bank_envs.env_2.get(&mod_bank.env_2, context);
 
         ModulationValues::from_value(env_1, mod_bank.env_1_send)
             + ModulationValues::from_value(env_2, mod_bank.env_2_send)
