@@ -1,11 +1,11 @@
 use std::sync::Arc;
 use std::{ffi::c_void, hash::Hash};
 
+use futures::channel::mpsc::UnboundedSender;
 use iced::{button, futures, Column, Command, Subscription};
 
 use iced_baseview::{Application, WindowSubs};
 
-use log::info;
 use raw_window_handle::{HasRawWindowHandle, RawWindowHandle};
 use tokio::sync::Notify;
 use vst::{editor::Editor, host::Host};
@@ -43,7 +43,7 @@ pub struct UIFrontEnd {
     main_button_state: button::State,
     modulation_button_state: button::State,
     preset_button_state: button::State,
-    is_open: bool,
+    sender: Option<UnboundedSender<baseview::Event>>,
     // This is used so that the GUI can update the shared parameters object when
     // a GUI element is changed.
     params: std::sync::Arc<RawParameters>,
@@ -67,7 +67,7 @@ impl Application for UIFrontEnd {
             main_tab: MainTab::new(params.as_ref()),
             preset_tab: PresetTab::new(params.as_ref()),
             modulation_tab: ModulationTab::new(params.as_ref()),
-            is_open: false,
+            sender: None,
             selected_tab: Tabs::Main,
             main_button_state: button::State::new(),
             modulation_button_state: button::State::new(),
@@ -226,52 +226,56 @@ impl Editor for UIFrontEnd {
             },
             flags: (self.params.clone(), self.params.notify.clone()),
         };
-        iced_baseview::IcedWindow::<UIFrontEnd>::open_parented(&parent, settings);
-        self.is_open = true;
+        let sender = iced_baseview::IcedWindow::<UIFrontEnd>::open_parented(&parent, settings);
+        self.sender = Some(sender);
         true
     }
 
     fn idle(&mut self) {}
 
     fn close(&mut self) {
-        self.is_open = false;
+        self.sender = None;
     }
 
     fn is_open(&mut self) -> bool {
-        self.is_open
+        self.sender.is_some()
     }
 
     fn key_up(&mut self, keycode: vst::editor::KeyCode) -> bool {
-        // if let Some(handle) = &mut self.handle {
-        //     match keycode.key {
-        //         vst::editor::Key::Control | vst::editor::Key::Shift => {
-        //             if self.control_key == keyboard_types::KeyState::Down {
-        //                 let event = to_keyboard_event(keycode, keyboard_types::KeyState::Up);
-        //                 handle.send_baseview_event(baseview::Event::Keyboard(event));
-        //                 self.control_key = keyboard_types::KeyState::Up;
-        //                 return true;
-        //             }
-        //         }
-        //         _ => (),
-        //     }
-        // }
+        if let Some(sender) = &mut self.sender {
+            match keycode.key {
+                vst::editor::Key::Control | vst::editor::Key::Shift => {
+                    if self.control_key == keyboard_types::KeyState::Down {
+                        let event = to_keyboard_event(keycode, keyboard_types::KeyState::Up);
+                        sender
+                            .start_send(baseview::Event::Keyboard(event))
+                            .expect("Couldn't send message!");
+                        self.control_key = keyboard_types::KeyState::Up;
+                        return true;
+                    }
+                }
+                _ => (),
+            }
+        }
         false
     }
 
     fn key_down(&mut self, keycode: vst::editor::KeyCode) -> bool {
-        // if let Some(handle) = &mut self.handle {
-        //     match keycode.key {
-        //         vst::editor::Key::Control | vst::editor::Key::Shift => {
-        //             if self.control_key == keyboard_types::KeyState::Up {
-        //                 let event = to_keyboard_event(keycode, keyboard_types::KeyState::Down);
-        //                 handle.send_baseview_event(baseview::Event::Keyboard(event));
-        //                 self.control_key = keyboard_types::KeyState::Down;
-        //                 return true;
-        //             }
-        //         }
-        //         _ => (),
-        //     }
-        // }
+        if let Some(sender) = &mut self.sender {
+            match keycode.key {
+                vst::editor::Key::Control | vst::editor::Key::Shift => {
+                    if self.control_key == keyboard_types::KeyState::Up {
+                        let event = to_keyboard_event(keycode, keyboard_types::KeyState::Down);
+                        sender
+                            .start_send(baseview::Event::Keyboard(event))
+                            .expect("Couldn't send message!");
+                        self.control_key = keyboard_types::KeyState::Down;
+                        return true;
+                    }
+                }
+                _ => (),
+            }
+        }
         false
     }
 }

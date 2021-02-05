@@ -123,7 +123,6 @@ impl MainTab {
         let osc = match osc_type {
             OSCType::OSC1 => &mut self.osc_1,
             OSCType::OSC2 => &mut self.osc_2,
-            _ => unreachable!(),
         };
 
         match osc_param {
