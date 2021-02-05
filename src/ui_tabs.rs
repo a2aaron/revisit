@@ -108,67 +108,29 @@ impl MainTab {
         }
     }
 
-    pub fn update(&mut self, message: Message, params: &RawParameters) {
-        match message {
-            // The GUI has changed the modulation type
-            Message::OSC2ModChanged(mod_type) => {
-                // TODO: Consider using an actual parameter instead of RawParameters
-                params.osc_2_mod.set(mod_type.into());
-            }
-            // The GUI has changed a parameter via knob
-            Message::ParameterChanged(value, param) => {
-                // We set the parameter according to the changed value.
-                params.set(value, param);
+    pub fn force_redraw(&mut self, params: &RawParameters) {
+        // TODO : Don't use a RawParameters for this? Instead consider
+        // using a normal Parameter struct and letting the knobs have
+        // actual values instead of weird 0.0-1.0 normalized values.
+        // This is fine as it is right now though.
+        self.master_vol
+            .set_normal(params.get(ParameterType::MasterVolume).into());
+        self.osc_1.update(&params.osc_1);
+        self.osc_2.update(&params.osc_2);
+    }
 
-                // If the knob changed was a "snapping" knob, make sure the knob
-                // ends up appearing snapped.
-                match param {
-                    ParameterType::OSC1(osc_param) | ParameterType::OSC2(osc_param) => {
-                        let osc = match param {
-                            ParameterType::OSC1(_) => &mut self.osc_1,
-                            ParameterType::OSC2(_) => &mut self.osc_2,
-                            _ => unreachable!(),
-                        };
-                        match osc_param {
-                            OSCParameterType::CoarseTune => {
-                                osc.coarse_tune_range.snap_knob(&mut osc.coarse_tune.0)
-                            }
-                            OSCParameterType::Shape => {
-                                osc.note_shape_range.snap_knob(&mut osc.note_shape.0)
-                            }
-                            OSCParameterType::FilterType => {
-                                osc.filter_type_range.snap_knob(&mut osc.filter_type.0)
-                            }
-                            _ => (),
-                        }
-                    }
-                    // This is definitely unreachable because OSC2Mod handling is
-                    // done by the OSC2ModChanged message
-                    ParameterType::OSC2Mod => unreachable!(),
-                    // Also unreachable, this is handled by ModBankSendChanged
-                    ParameterType::ModBankSend(_) => unreachable!(),
-                    // Don't do anything special for these parameter types.
-                    ParameterType::MasterVolume => (),
-                    ParameterType::ModBank(_) => {
-                        // TODO!
-                    }
-                }
-            }
-            // The host has changed a parameter, or a redraw was requested
-            // We update the knobs based on the current parameter values
-            Message::ForceRedraw => {
-                // TODO : Don't use a RawParameters for this? Instead consider
-                // using a normal Parameter struct and letting the knobs have
-                // actual values instead of weird 0.0-1.0 normalized values.
-                // This is fine as it is right now though.
-                self.master_vol
-                    .set_normal(params.get(ParameterType::MasterVolume).into());
-                self.osc_1.update(&params.osc_1);
-                self.osc_2.update(&params.osc_2);
-            }
-            // Handled by the top level ui struct
-            Message::ChangeTab(_) => (),
-            Message::ModBankSendChanged(_, _) => (),
+    pub fn update_snapping_knobs(&mut self, osc_type: OSCType, osc_param: OSCParameterType) {
+        let osc = match osc_type {
+            OSCType::OSC1 => &mut self.osc_1,
+            OSCType::OSC2 => &mut self.osc_2,
+            _ => unreachable!(),
+        };
+
+        match osc_param {
+            OSCParameterType::CoarseTune => osc.coarse_tune_range.snap_knob(&mut osc.coarse_tune.0),
+            OSCParameterType::Shape => osc.note_shape_range.snap_knob(&mut osc.note_shape.0),
+            OSCParameterType::FilterType => osc.filter_type_range.snap_knob(&mut osc.filter_type.0),
+            _ => (),
         }
     }
 

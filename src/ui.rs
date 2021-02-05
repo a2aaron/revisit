@@ -3,14 +3,15 @@ use std::{ffi::c_void, hash::Hash};
 
 use iced::{button, futures, Column, Command, Subscription};
 
-use iced_baseview::{Application, Handle, WindowSubs};
+use iced_baseview::{Application, WindowSubs};
 
-use raw_window_handle::RawWindowHandle;
+use log::info;
+use raw_window_handle::{HasRawWindowHandle, RawWindowHandle};
 use tokio::sync::Notify;
 use vst::{editor::Editor, host::Host};
 
 use crate::{
-    params::{ModBankType, ModulationSend, ModulationType, ParameterType, RawParameters},
+    params::{ModBankType, ModulationSend, ModulationType, OSCType, ParameterType, RawParameters},
     ui_tabs::{MainTab, ModulationTab, PresetTab, Tabs},
 };
 
@@ -42,16 +43,10 @@ pub struct UIFrontEnd {
     main_button_state: button::State,
     modulation_button_state: button::State,
     preset_button_state: button::State,
-
+    is_open: bool,
     // This is used so that the GUI can update the shared parameters object when
     // a GUI element is changed.
     params: std::sync::Arc<RawParameters>,
-    // An `iced_baseview` handle. This is None if the GUI hasn't been opened
-    // and `Some(Handle)` otherwise. This is used for some small things, such as
-    // getting iced to run closing code when closing the window, as well as
-    // being able to pass in keyboard events, because some VST hosts capture the
-    // keyboard event.
-    handle: Option<Handle>,
     // This notifier gains a message whenever the VST host alters a parameter,
     // and is used to force redraws to keep the GUI in sync with the parameters.
     notifier: Arc<Notify>,
@@ -72,12 +67,12 @@ impl Application for UIFrontEnd {
             main_tab: MainTab::new(params.as_ref()),
             preset_tab: PresetTab::new(params.as_ref()),
             modulation_tab: ModulationTab::new(params.as_ref()),
+            is_open: false,
             selected_tab: Tabs::Main,
             main_button_state: button::State::new(),
             modulation_button_state: button::State::new(),
             preset_button_state: button::State::new(),
             params,
-            handle: None,
             notifier,
             control_key: keyboard_types::KeyState::Up,
         };
@@ -89,23 +84,68 @@ impl Application for UIFrontEnd {
         // TODO: look into moving message handling code out of the update functions
         // for the tabs. It seems like it's bizarrely messy to do it there.
         // Tabs don't really need to know about what messages have happened anyways.
-        self.main_tab.update(message, self.params.as_ref());
         self.preset_tab.update(message, self.params.as_ref());
         self.modulation_tab.update(self.params.as_ref());
         match message {
+            // The GUI has changed a parameter via knob
+            Message::ParameterChanged(value, param) => {
+                self.params.host.begin_edit(0); // TODO!!!
+
+                // We set the parameter according to the changed value.
+                self.params.set(value, param);
+
+                self.params.host.end_edit(0); // TODO!!!
+
+                // If the knob changed was a "snapping" knob, make sure the knob
+                // ends up appearing snapped.
+                match param {
+                    ParameterType::OSC1(osc_param) => {
+                        self.main_tab
+                            .update_snapping_knobs(OSCType::OSC1, osc_param);
+                    }
+                    ParameterType::OSC2(osc_param) => {
+                        self.main_tab
+                            .update_snapping_knobs(OSCType::OSC2, osc_param);
+                    }
+                    // This is definitely unreachable because OSC2Mod handling is
+                    // done by the OSC2ModChanged message
+                    ParameterType::OSC2Mod => unreachable!(),
+                    // Also unreachable, this is handled by ModBankSendChanged
+                    ParameterType::ModBankSend(_) => unreachable!(),
+                    // Don't do anything special for these parameter types.
+                    ParameterType::MasterVolume => (),
+                    ParameterType::ModBank(_) => {
+                        // TODO!
+                    }
+                }
+            }
+            // The GUI has changed the modulation type
+            Message::OSC2ModChanged(mod_type) => {
+                // TODO: Consider using an actual parameter instead of RawParameters
+                self.params.osc_2_mod.set(mod_type.into());
+            }
             Message::ModBankSendChanged(mod_bank, mod_send) => {
                 self.params
                     .set(mod_send.into(), ParameterType::ModBankSend(mod_bank));
-                // Make the VST host update its own parameter display. This is needed
-                // so the host actually updates with GUI.
-                self.params.host.update_display()
             }
-            Message::OSC2ModChanged(_) | Message::ParameterChanged(_, _) => {
-                self.params.host.update_display()
+            // The host has changed a parameter, or a redraw was requested
+            // We update the knobs based on the current parameter values
+            Message::ForceRedraw => {
+                match self.selected_tab {
+                    Tabs::Main => self.main_tab.force_redraw(self.params.as_ref()),
+                    _ => (), // TODO
+                }
             }
-            // Do nothing on force redraws--the tabs structs handle the read from the params
-            Message::ForceRedraw => (),
             Message::ChangeTab(tab) => self.selected_tab = tab,
+        }
+
+        // Make the VST host update its own parameter display. This is needed
+        // so the host actually updates with GUI.
+        match message {
+            Message::OSC2ModChanged(_)
+            | Message::ParameterChanged(_, _)
+            | Message::ModBankSendChanged(_, _) => self.params.host.update_display(),
+            _ => (),
         }
         Command::none()
     }
@@ -183,61 +223,55 @@ impl Editor for UIFrontEnd {
                 title: "Revisit".to_string(),
                 size: baseview::Size::new(self.size().0 as f64, self.size().1 as f64),
                 scale: baseview::WindowScalePolicy::SystemScaleFactor,
-                parent: baseview::Parent::WithParent(parent),
             },
             flags: (self.params.clone(), self.params.notify.clone()),
         };
-        if self.handle.is_none() {
-            let (handle, _) = iced_baseview::Runner::<UIFrontEnd>::open(settings);
-            self.handle = Some(handle);
-        }
+        iced_baseview::IcedWindow::<UIFrontEnd>::open_parented(&parent, settings);
+        self.is_open = true;
         true
     }
 
     fn idle(&mut self) {}
 
     fn close(&mut self) {
-        if let Some(handle) = &mut self.handle {
-            handle.request_window_close()
-        };
-        self.handle = None;
+        self.is_open = false;
     }
 
     fn is_open(&mut self) -> bool {
-        self.handle.is_some()
+        self.is_open
     }
 
     fn key_up(&mut self, keycode: vst::editor::KeyCode) -> bool {
-        if let Some(handle) = &mut self.handle {
-            match keycode.key {
-                vst::editor::Key::Control | vst::editor::Key::Shift => {
-                    if self.control_key == keyboard_types::KeyState::Down {
-                        let event = to_keyboard_event(keycode, keyboard_types::KeyState::Up);
-                        handle.send_baseview_event(baseview::Event::Keyboard(event));
-                        self.control_key = keyboard_types::KeyState::Up;
-                        return true;
-                    }
-                }
-                _ => (),
-            }
-        }
+        // if let Some(handle) = &mut self.handle {
+        //     match keycode.key {
+        //         vst::editor::Key::Control | vst::editor::Key::Shift => {
+        //             if self.control_key == keyboard_types::KeyState::Down {
+        //                 let event = to_keyboard_event(keycode, keyboard_types::KeyState::Up);
+        //                 handle.send_baseview_event(baseview::Event::Keyboard(event));
+        //                 self.control_key = keyboard_types::KeyState::Up;
+        //                 return true;
+        //             }
+        //         }
+        //         _ => (),
+        //     }
+        // }
         false
     }
 
     fn key_down(&mut self, keycode: vst::editor::KeyCode) -> bool {
-        if let Some(handle) = &mut self.handle {
-            match keycode.key {
-                vst::editor::Key::Control | vst::editor::Key::Shift => {
-                    if self.control_key == keyboard_types::KeyState::Up {
-                        let event = to_keyboard_event(keycode, keyboard_types::KeyState::Down);
-                        handle.send_baseview_event(baseview::Event::Keyboard(event));
-                        self.control_key = keyboard_types::KeyState::Down;
-                        return true;
-                    }
-                }
-                _ => (),
-            }
-        }
+        // if let Some(handle) = &mut self.handle {
+        //     match keycode.key {
+        //         vst::editor::Key::Control | vst::editor::Key::Shift => {
+        //             if self.control_key == keyboard_types::KeyState::Up {
+        //                 let event = to_keyboard_event(keycode, keyboard_types::KeyState::Down);
+        //                 handle.send_baseview_event(baseview::Event::Keyboard(event));
+        //                 self.control_key = keyboard_types::KeyState::Down;
+        //                 return true;
+        //             }
+        //         }
+        //         _ => (),
+        //     }
+        // }
         false
     }
 }
@@ -272,22 +306,30 @@ fn to_keyboard_event(
     }
 }
 
+struct WindowHandle(RawWindowHandle);
+
+unsafe impl HasRawWindowHandle for WindowHandle {
+    fn raw_window_handle(&self) -> RawWindowHandle {
+        self.0
+    }
+}
+
 #[cfg(target_os = "windows")]
-fn to_windows_handle(parent: *mut c_void) -> RawWindowHandle {
+fn to_windows_handle(parent: *mut c_void) -> WindowHandle {
     use raw_window_handle::windows::WindowsHandle;
     let mut handle = WindowsHandle::empty();
     handle.hwnd = parent;
     handle.hinstance = std::ptr::null_mut();
-    RawWindowHandle::Windows(handle)
+    WindowHandle(RawWindowHandle::Windows(handle))
 }
 
 #[cfg(target_os = "macos")]
-fn to_macos_handle(parent: *mut c_void) -> RawWindowHandle {
+fn to_macos_handle(parent: *mut c_void) -> WindowHandle {
     use raw_window_handle::macos::MacOSHandle;
     let mut handle = MacOSHandle::empty();
     handle.ns_view = parent;
     handle.ns_window = std::ptr::null_mut();
-    RawWindowHandle::MacOS(handle)
+    WindowHandle(RawWindowHandle::MacOS(handle))
 }
 
 /// A struct implementing `iced_native::Recipe`. This will send a

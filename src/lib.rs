@@ -180,7 +180,9 @@ impl Plugin for Revisit {
                         }
                     }
                 }
-                _ => println!("shut up clippy"),
+
+                vst::event::Event::SysEx(_) => (),
+                vst::event::Event::Deprecated(_) => (),
             }
         }
 
@@ -192,6 +194,7 @@ impl Plugin for Revisit {
 
     fn set_sample_rate(&mut self, rate: f32) {
         self.sample_rate = rate;
+        // self.params.host.end_edit();
     }
 
     // The raw parameters exposed to the host
