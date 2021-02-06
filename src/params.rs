@@ -1,6 +1,6 @@
 use std::convert::TryFrom;
 
-use crate::sound_gen::{ease_in_expo, ease_in_poly, Envelope, FilterParams, NoteShape};
+use crate::sound_gen::{ease_in_expo, Envelope, FilterParams, NoteShape};
 
 use derive_more::Display;
 use variant_count::VariantCount;
@@ -166,7 +166,7 @@ impl From<&RawOSC> for OSCParams {
                     (params.filter_gain.get() - 0.5) * 36.0,
                 ),
                 q_value: (params.filter_q.get() * 10.0).max(0.01),
-                freq: ease_in_poly(params.filter_freq.get(), 4).clamp(0.0, 1.0) * 22100.0,
+                freq: params.filter_freq.get(),
             },
         }
     }

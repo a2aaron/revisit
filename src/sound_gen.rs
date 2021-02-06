@@ -356,7 +356,8 @@ impl OSCGroup {
 
         // Apply filter (if desired)
         let value = match filter_params {
-            Some(params) => {
+            Some(mut params) => {
+                params.freq += mod_bank.filter_freq;
                 let coefficents = FilterParams::into_coefficients(params, sample_rate);
                 self.filter.update_coefficients(coefficents);
                 let output = self.filter.run(value);
@@ -567,8 +568,10 @@ impl ModulationValues {
 #[derive(Debug, Clone, Copy)]
 pub struct FilterParams {
     pub filter: biquad::Type<f32>,
-    /// in Hz. This value is clamped between 20 and 99% of the Nyquist frequency
+    /// in [0.0 - 1.0] float range. When turning into an actual Hertz value,
+    /// this value is clamped between 20 and 99% of the Nyquist frequency
     /// in order to prevent numerical instability at extremely high or low values
+    /// and/or blowing out the speakers.
     pub freq: f32,
     /// Must be non-negative. If it is negative, it will be clamped to zero
     pub q_value: f32,
@@ -579,10 +582,12 @@ impl FilterParams {
         params: FilterParams,
         sample_rate: SampleRate,
     ) -> biquad::Coefficients<f32> {
+        // convert normalized 0.0-1.0 to a frequency in Hertz
+        let freq = ease_in_poly(params.freq, 4).clamp(0.0, 1.0) * 22100.0;
         // avoid numerical instability encountered at very low
         // or high frequencies. Clamping at around 20 Hz also
         // avoids blowing out the speakers.
-        let freq = params.freq.clamp(20.0, sample_rate * 0.99 / 2.0).hz();
+        let freq = freq.clamp(20.0, sample_rate * 0.99 / 2.0).hz();
         let q_value = params.q_value.max(0.0);
         biquad::Coefficients::<f32>::from_params(params.filter, sample_rate.hz(), freq, q_value)
             .unwrap()
