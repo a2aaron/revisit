@@ -1,4 +1,4 @@
-use std::{convert::TryFrom, sync::Arc};
+use std::convert::TryFrom;
 
 use crate::sound_gen::{ease_in_expo, ease_in_poly, Envelope, FilterParams, NoteShape};
 
@@ -266,8 +266,11 @@ pub struct RawParameters {
     pub master_vol: AtomicFloat,
     pub osc_2_mod: AtomicFloat,
     pub mod_bank: RawModBank,
+    /// The host callback, used for communicating with the VST host
     pub host: HostCallback,
-    pub notify: Arc<tokio::sync::Notify>,
+    /// The sender that notifies the GUI thread to update due to the host
+    /// modifying a value. If this is None, then the GUI is closed/does not exist
+    pub sender: tokio::sync::broadcast::Sender<(ParameterType, f32)>,
 }
 
 impl RawParameters {
@@ -485,7 +488,9 @@ impl PluginParameters for RawParameters {
             }
 
             self.set(value, parameter);
-            self.notify.as_ref().notify_one();
+            // Notify the GUI to update its view
+            // TODO: Is it really okay to just ignore errors?
+            let _ = self.sender.send((parameter, value));
         }
     }
 
@@ -507,7 +512,7 @@ impl Default for RawParameters {
             osc_2_mod: RawParameters::get_default(ParameterType::OSC2Mod).into(),
             mod_bank: RawModBank::default(),
             host: Default::default(),
-            notify: Arc::new(tokio::sync::Notify::new()),
+            sender: tokio::sync::broadcast::channel(128).0, // TODO: what size of channel should this be?
         }
     }
 }
@@ -552,10 +557,6 @@ impl RawOSC {
             FilterQ => &self.filter_q,
             FilterGain => &self.filter_gain,
         }
-    }
-
-    pub fn get(&self, param: OSCParameterType) -> f32 {
-        self.get_ref(param).get()
     }
 
     fn get_default(param: OSCParameterType, _osc: OSCType) -> f32 {

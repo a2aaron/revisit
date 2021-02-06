@@ -7,11 +7,13 @@ use iced::{button, futures, Column, Command, Subscription};
 use iced_baseview::{Application, WindowSubs};
 
 use raw_window_handle::{HasRawWindowHandle, RawWindowHandle};
-use tokio::sync::Notify;
 use vst::{editor::Editor, host::Host};
 
 use crate::{
-    params::{ModBankType, ModulationSend, ModulationType, OSCType, ParameterType, RawParameters},
+    params::{
+        ModBankParameter, ModBankType, ModulationSend, ModulationType, OSCType, ParameterType,
+        RawParameters,
+    },
     ui_tabs::{MainTab, ModulationTab, PresetTab, Tabs},
 };
 
@@ -23,13 +25,13 @@ pub enum Message {
     /// This indicates that the GUI had changed the ModulationType parameter
     OSC2ModChanged(ModulationType),
     /// These indicate that the GUI has changed a parameter via a knob
-    ParameterChanged(f32, ParameterType),
+    ParameterChanged(ParameterType, f32),
     /// These are called to make the GUI update itself. Usually, this means that
     /// the host has changed a parameter, so the GUI should change to match.
     /// Note that this works because sending a message also causes `iced` to
     /// call `view` and do a screen update. If it didn't do that, then this won't
     /// work.
-    ForceRedraw,
+    ForceRedraw(ParameterType, f32),
     ChangeTab(Tabs),
 }
 
@@ -47,9 +49,6 @@ pub struct UIFrontEnd {
     // This is used so that the GUI can update the shared parameters object when
     // a GUI element is changed.
     params: std::sync::Arc<RawParameters>,
-    // This notifier gains a message whenever the VST host alters a parameter,
-    // and is used to force redraws to keep the GUI in sync with the parameters.
-    notifier: Arc<Notify>,
     // This just tracks if the control key is held down. This is needed because
     // the VST host captures keyboard events, so we we need to manually track
     // keydown/keyup events.
@@ -59,10 +58,10 @@ pub struct UIFrontEnd {
 impl Application for UIFrontEnd {
     type Message = Message;
     type Executor = iced_baseview::executor::Default;
-    type Flags = (Arc<RawParameters>, Arc<Notify>);
+    type Flags = Arc<RawParameters>;
 
-    fn new(flags: Self::Flags) -> (Self, Command<Self::Message>) {
-        let (params, notifier) = flags;
+    fn new(flag: Self::Flags) -> (Self, Command<Self::Message>) {
+        let params = flag;
         let ui = UIFrontEnd {
             main_tab: MainTab::new(params.as_ref()),
             preset_tab: PresetTab::new(params.as_ref()),
@@ -73,7 +72,6 @@ impl Application for UIFrontEnd {
             modulation_button_state: button::State::new(),
             preset_button_state: button::State::new(),
             params,
-            notifier,
             control_key: keyboard_types::KeyState::Up,
         };
         (ui, Command::none())
@@ -85,10 +83,9 @@ impl Application for UIFrontEnd {
         // for the tabs. It seems like it's bizarrely messy to do it there.
         // Tabs don't really need to know about what messages have happened anyways.
         self.preset_tab.update(message, self.params.as_ref());
-        self.modulation_tab.update(self.params.as_ref());
         match message {
             // The GUI has changed a parameter via knob
-            Message::ParameterChanged(value, param) => {
+            Message::ParameterChanged(param, value) => {
                 self.params.host.begin_edit(0); // TODO!!!
 
                 // We set the parameter according to the changed value.
@@ -130,12 +127,21 @@ impl Application for UIFrontEnd {
             }
             // The host has changed a parameter, or a redraw was requested
             // We update the knobs based on the current parameter values
-            Message::ForceRedraw => {
-                match self.selected_tab {
-                    Tabs::Main => self.main_tab.force_redraw(self.params.as_ref()),
-                    _ => (), // TODO
-                }
-            }
+            Message::ForceRedraw(param, value) => match param {
+                ParameterType::MasterVolume => self.main_tab.master_vol.set_normal(value.into()),
+                ParameterType::OSC2Mod => (),
+                ParameterType::OSC1(param) => self.main_tab.osc_1.set_knob(param, value),
+                ParameterType::OSC2(param) => self.main_tab.osc_2.set_knob(param, value),
+                ParameterType::ModBankSend(_) => (),
+                ParameterType::ModBank(param) => match param {
+                    ModBankParameter::Env1(param) => {
+                        self.modulation_tab.env_1.set_knob(param, value)
+                    }
+                    ModBankParameter::Env2(param) => {
+                        self.modulation_tab.env_2.set_knob(param, value)
+                    }
+                },
+            },
             Message::ChangeTab(tab) => self.selected_tab = tab,
         }
 
@@ -192,8 +198,8 @@ impl Application for UIFrontEnd {
         &self,
         _window_subs: &mut WindowSubs<Self::Message>,
     ) -> Subscription<Self::Message> {
-        let recipe = NotifyRecipe {
-            notifier: self.notifier.clone(),
+        let recipe = ReceiverRecipe {
+            receiver: self.params.sender.subscribe(),
         };
         Subscription::from_recipe(recipe)
     }
@@ -224,7 +230,7 @@ impl Editor for UIFrontEnd {
                 size: baseview::Size::new(self.size().0 as f64, self.size().1 as f64),
                 scale: baseview::WindowScalePolicy::SystemScaleFactor,
             },
-            flags: (self.params.clone(), self.params.notify.clone()),
+            flags: self.params.clone(),
         };
         let sender = iced_baseview::IcedWindow::<UIFrontEnd>::open_parented(&parent, settings);
         self.sender = Some(sender);
@@ -340,11 +346,11 @@ fn to_macos_handle(parent: *mut c_void) -> WindowHandle {
 /// `Message::ForceRedraw` whenever the `notifier` is recieves a notification.
 /// This struct is used to make the iced GUI update whenever the VST host alters
 /// a parameter (say, via an automation curve).
-struct NotifyRecipe {
-    notifier: Arc<Notify>,
+struct ReceiverRecipe {
+    receiver: tokio::sync::broadcast::Receiver<(ParameterType, f32)>,
 }
 
-impl<H, I> iced_native::subscription::Recipe<H, I> for NotifyRecipe
+impl<H, I> iced_native::subscription::Recipe<H, I> for ReceiverRecipe
 where
     H: std::hash::Hasher,
 {
@@ -369,12 +375,15 @@ where
         _: futures::stream::BoxStream<'static, I>,
     ) -> futures::stream::BoxStream<'static, Self::Output> {
         Box::pin(futures::stream::unfold(
-            self.notifier.clone(),
-            |notifier| async move {
-                // Wait for the notifier to recieve a notification before firing
+            self.receiver,
+            |mut receiver| async move {
+                // Wait for the receiver to recieve a notification before firing
                 // the message.
-                notifier.notified().await;
-                Some((Message::ForceRedraw, notifier))
+                let result = receiver.recv().await;
+                match result {
+                    Ok((param, value)) => Some((Message::ForceRedraw(param, value), receiver)),
+                    Err(_) => panic!("Reciever couldn't recieve"),
+                }
             },
         ))
     }

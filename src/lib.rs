@@ -9,6 +9,15 @@ mod ui_tabs;
 
 use std::{convert::TryFrom, sync::Arc};
 
+use iced_baseview::Application;
+use vst::{
+    api::{Events, Supported},
+    buffer::AudioBuffer,
+    editor::Editor,
+    plugin::{CanDo, Category, HostCallback, Info, Plugin, PluginParameters},
+};
+use wmidi::MidiMessage;
+
 use params::{
     CountedEnum, EnvelopeParams, ModBankEnvs, ModulationBank, ModulationSend, ModulationType,
     OSCParams, ParameterType, Parameters, RawParameters,
@@ -18,15 +27,6 @@ use sound_gen::{
     SoundGenerator,
 };
 use ui::UIFrontEnd;
-
-use iced_baseview::Application;
-use vst::{
-    api::{Events, Supported},
-    buffer::AudioBuffer,
-    editor::Editor,
-    plugin::{CanDo, Category, HostCallback, Info, Plugin, PluginParameters},
-};
-use wmidi::MidiMessage;
 
 /// The main plugin struct.
 struct Revisit {
@@ -194,7 +194,6 @@ impl Plugin for Revisit {
 
     fn set_sample_rate(&mut self, rate: f32) {
         self.sample_rate = rate;
-        // self.params.host.end_edit();
     }
 
     // The raw parameters exposed to the host
@@ -208,8 +207,7 @@ impl Plugin for Revisit {
             None
         } else {
             self.gui_initialized = true;
-            let notify = self.params.notify.clone();
-            let (editor, _) = UIFrontEnd::new((self.params.clone(), notify));
+            let (editor, _) = UIFrontEnd::new(self.params.clone());
             Some(Box::new(editor))
         }
     }

@@ -18,7 +18,7 @@ use crate::{
     params::{
         biquad_to_string, to_filter_type, EnvelopeParam, ModBankParameter, ModBankType,
         ModulationSend, ModulationType, OSCParameterType, OSCType, ParameterType, RawEnvelope,
-        RawOSC, RawParameters,
+        RawParameters,
     },
     sound_gen::NoteShape,
     ui::Message,
@@ -68,7 +68,7 @@ macro_rules! widget {
     (VSlider, $state:expr, $parameter:expr, $title:expr) => {
         with_label(
             VSlider::new($state, move |normal| {
-                Message::ParameterChanged(normal.as_f32(), $parameter)
+                Message::ParameterChanged($parameter, normal.as_f32())
             }),
             $title,
         );
@@ -77,7 +77,7 @@ macro_rules! widget {
     ($widget:ident, $state:expr, $parameter:expr, $title:expr) => {
         with_label(
             $widget::new($state, move |normal| {
-                Message::ParameterChanged(normal.as_f32(), $parameter)
+                Message::ParameterChanged($parameter, normal.as_f32())
             })
             .size(KNOB_SIZE),
             $title,
@@ -106,17 +106,6 @@ impl MainTab {
             osc_1: OSCKnobs::new(params, OSCType::OSC1),
             osc_2: OSCKnobs::new(params, OSCType::OSC2),
         }
-    }
-
-    pub fn force_redraw(&mut self, params: &RawParameters) {
-        // TODO : Don't use a RawParameters for this? Instead consider
-        // using a normal Parameter struct and letting the knobs have
-        // actual values instead of weird 0.0-1.0 normalized values.
-        // This is fine as it is right now though.
-        self.master_vol
-            .set_normal(params.get(ParameterType::MasterVolume).into());
-        self.osc_1.update(&params.osc_1);
-        self.osc_2.update(&params.osc_2);
     }
 
     pub fn update_snapping_knobs(&mut self, osc_type: OSCType, osc_param: OSCParameterType) {
@@ -178,8 +167,8 @@ impl MainTab {
 
 /// The tab which has all the various modulation envelopes/LFOs
 pub struct ModulationTab {
-    env_1: EnvKnobGroup,
-    env_2: EnvKnobGroup,
+    pub env_1: EnvKnobGroup,
+    pub env_2: EnvKnobGroup,
 }
 
 impl ModulationTab {
@@ -188,11 +177,6 @@ impl ModulationTab {
             env_1: EnvKnobGroup::new(&params.mod_bank.env_1),
             env_2: EnvKnobGroup::new(&params.mod_bank.env_2),
         }
-    }
-
-    pub fn update(&mut self, params: &RawParameters) {
-        self.env_1.update(&params.mod_bank.env_1);
-        self.env_2.update(&params.mod_bank.env_2);
     }
 
     pub fn view(
@@ -317,73 +301,6 @@ impl OSCKnobs {
         }
     }
 
-    /// Set the knob states using the `osc` reference provided.
-    /// This method is called whenever a ForceRedraw happens.
-    fn update(&mut self, osc: &RawOSC) {
-        fn set_knob(knob: &mut (knob::State, ParameterType), osc: &RawOSC) {
-            match knob.1 {
-                ParameterType::OSC1(param) | ParameterType::OSC2(param) => {
-                    knob.0.set_normal(osc.get(param).into())
-                }
-                _ => unreachable!("ParameterType must be an OSC1 or OSC2 variant"),
-            }
-        }
-
-        /// Sets a knob while also the TruncatingIntRange to snap the value to
-        /// the right spot.
-        fn set_knob_with_range(
-            knob: &mut (knob::State, ParameterType),
-            range: &TruncatingIntRange,
-            value: f32,
-        ) {
-            knob.0.set_normal(range.snap(value).into());
-        }
-
-        use OSCParameterType::*;
-        set_knob(&mut self.volume, osc);
-        set_knob(&mut self.pan, osc);
-        set_knob(&mut self.phase, osc);
-
-        set_knob_with_range(
-            &mut self.coarse_tune,
-            &self.coarse_tune_range,
-            osc.get(CoarseTune),
-        );
-
-        set_knob(&mut self.fine_tune, osc);
-        set_knob(&mut self.attack, osc);
-        set_knob(&mut self.hold, osc);
-        set_knob(&mut self.decay, osc);
-        set_knob(&mut self.sustain, osc);
-        set_knob(&mut self.release, osc);
-
-        set_knob(&mut self.vol_lfo_amplitude, osc);
-        set_knob(&mut self.vol_lfo_period, osc);
-
-        set_knob_with_range(&mut self.note_shape, &self.note_shape_range, osc.get(Shape));
-
-        set_knob(&mut self.note_warp, osc);
-
-        set_knob(&mut self.pitch_attack, osc);
-        set_knob(&mut self.pitch_hold, osc);
-        set_knob(&mut self.pitch_decay, osc);
-        set_knob(&mut self.pitch_multiply, osc);
-        set_knob(&mut self.pitch_release, osc);
-
-        set_knob(&mut self.pitch_lfo_amplitude, osc);
-        set_knob(&mut self.pitch_lfo_period, osc);
-
-        set_knob_with_range(
-            &mut self.filter_type,
-            &self.filter_type_range,
-            osc.get(FilterType),
-        );
-
-        set_knob(&mut self.filter_freq, osc);
-        set_knob(&mut self.filter_q, osc);
-        set_knob(&mut self.filter_gain, osc);
-    }
-
     /// Create the set of widget for a particular oscillator.
     /// `osc` is used to set what type of ParamterType is fired for the
     /// `ParameterChanged(f32, ParameterType)` messages. Ex: is `osc` is
@@ -406,7 +323,7 @@ impl OSCKnobs {
         ) -> Element<'a, Message> {
             let param = knob.1;
             let knob = Knob::new(&mut knob.0, move |normal| {
-                Message::ParameterChanged(normal.as_f32(), param)
+                Message::ParameterChanged(param, normal.as_f32())
             })
             .size(KNOB_SIZE);
             with_label(knob, title)
@@ -497,6 +414,60 @@ impl OSCKnobs {
             .padding(PANE_PADDING)
             .spacing(PANE_SPACING)
             .into()
+    }
+
+    pub fn set_knob(&mut self, param: OSCParameterType, value: f32) {
+        fn set_knob(knob: &mut (knob::State, ParameterType), value: f32) {
+            knob.0.set_normal(value.into())
+        }
+
+        /// Sets a knob while also the TruncatingIntRange to snap the value to
+        /// the right spot.
+        fn set_knob_with_range(
+            knob: &mut (knob::State, ParameterType),
+            range: &TruncatingIntRange,
+            value: f32,
+        ) {
+            knob.0.set_normal(range.snap(value).into());
+        }
+        use OSCParameterType::*;
+        match param {
+            Volume => set_knob(&mut self.volume, value),
+            Phase => set_knob(&mut self.phase, value),
+            Pan => set_knob(&mut self.pan, value),
+            Shape => set_knob_with_range(&mut self.note_shape, &self.note_shape_range, value),
+            Warp => set_knob(&mut self.note_warp, value),
+            FineTune => set_knob(&mut self.fine_tune, value),
+            CoarseTune => {
+                set_knob_with_range(&mut self.coarse_tune, &self.coarse_tune_range, value)
+            }
+            VolumeEnv(param) => match param {
+                EnvelopeParam::Attack => set_knob(&mut self.attack, value),
+                EnvelopeParam::Decay => set_knob(&mut self.decay, value),
+                EnvelopeParam::Hold => set_knob(&mut self.hold, value),
+                EnvelopeParam::Sustain => set_knob(&mut self.sustain, value),
+                EnvelopeParam::Release => set_knob(&mut self.release, value),
+                EnvelopeParam::Multiply => unreachable!(),
+            },
+            VolLFOAmplitude => set_knob(&mut self.vol_lfo_amplitude, value),
+            VolLFOPeriod => set_knob(&mut self.vol_lfo_period, value),
+            PitchEnv(param) => match param {
+                EnvelopeParam::Attack => set_knob(&mut self.pitch_attack, value),
+                EnvelopeParam::Decay => set_knob(&mut self.pitch_decay, value),
+                EnvelopeParam::Hold => set_knob(&mut self.pitch_hold, value),
+                EnvelopeParam::Sustain => unreachable!(),
+                EnvelopeParam::Release => set_knob(&mut self.pitch_release, value),
+                EnvelopeParam::Multiply => set_knob(&mut self.pitch_multiply, value),
+            },
+            PitchLFOAmplitude => set_knob(&mut self.pitch_lfo_amplitude, value),
+            PitchLFOPeriod => set_knob(&mut self.pitch_lfo_period, value),
+            FilterType => {
+                set_knob_with_range(&mut self.filter_type, &self.filter_type_range, value)
+            }
+            FilterFreq => set_knob(&mut self.filter_freq, value),
+            FilterQ => set_knob(&mut self.filter_q, value),
+            FilterGain => set_knob(&mut self.filter_gain, value),
+        }
     }
 }
 
@@ -642,7 +613,7 @@ impl<B: Backend> Widget<Message, Renderer<B>> for ModTypeSelector {
 }
 
 /// A group of knobs, arranged horizontally, reprsenting envelope knobs.
-struct EnvKnobGroup {
+pub struct EnvKnobGroup {
     attack: knob::State,
     hold: knob::State,
     decay: knob::State,
@@ -668,19 +639,6 @@ impl EnvKnobGroup {
             release: make_state(envelope, EnvelopeParam::Release),
             multiply: make_state(envelope, EnvelopeParam::Multiply),
         }
-    }
-
-    /// Set the internal knob states using the given raw envelope
-    fn update(&mut self, envelope: &RawEnvelope) {
-        fn set_knob(knob: &mut knob::State, envelope: &RawEnvelope, param: EnvelopeParam) {
-            knob.set_normal(envelope.get_ref(param).get().into())
-        }
-        set_knob(&mut self.attack, envelope, EnvelopeParam::Attack);
-        set_knob(&mut self.hold, envelope, EnvelopeParam::Hold);
-        set_knob(&mut self.decay, envelope, EnvelopeParam::Decay);
-        set_knob(&mut self.sustain, envelope, EnvelopeParam::Sustain);
-        set_knob(&mut self.release, envelope, EnvelopeParam::Release);
-        set_knob(&mut self.multiply, envelope, EnvelopeParam::Multiply);
     }
 
     /// Make a widget group out of the EnvKnobGroup
@@ -751,6 +709,18 @@ impl EnvKnobGroup {
             vec![selector, attack, hold, decay, sustain, release, multiply],
             title,
         )
+    }
+
+    pub fn set_knob(&mut self, param: EnvelopeParam, value: f32) {
+        let value = value.into();
+        match param {
+            EnvelopeParam::Attack => self.attack.set_normal(value),
+            EnvelopeParam::Decay => self.decay.set_normal(value),
+            EnvelopeParam::Hold => self.hold.set_normal(value),
+            EnvelopeParam::Sustain => self.sustain.set_normal(value),
+            EnvelopeParam::Release => self.release.set_normal(value),
+            EnvelopeParam::Multiply => self.multiply.set_normal(value),
+        }
     }
 }
 
