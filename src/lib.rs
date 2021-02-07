@@ -175,7 +175,7 @@ impl Plugin for Revisit {
                                 self.pitch_bend
                                     .push((normalize_pitch_bend(pitch_bend), event.delta_frames));
                             }
-                            _ => println!("shut up clippy"),
+                            _ => (),
                         }
                     }
                 }
@@ -187,6 +187,14 @@ impl Plugin for Revisit {
 
         // Sort pitch bend changes by delta_frame.
         self.pitch_bend.sort_unstable_by(|a, b| a.1.cmp(&b.1));
+    }
+
+    fn suspend(&mut self) {
+        // Turn all notes off (this is done so that notes do not "dangle", since
+        // its possible that noteoff won't ever be recieved).
+        for note in &mut self.notes {
+            note.note_off(0);
+        }
     }
 
     fn stop_process(&mut self) {}
