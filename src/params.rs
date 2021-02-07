@@ -207,6 +207,9 @@ impl RawParameters {
     }
 
     pub fn set(&self, value: f32, parameter: ParameterType) {
+        // These are needed so Ableton will notice parameter changes in the
+        // "Configure" window.
+        // TODO: investigate if I should send this only on mouseup/mousedown
         self.host.begin_edit(parameter.into());
 
         let update = match parameter {
@@ -517,23 +520,12 @@ impl RawOSC {
 }
 
 // Represents a bank of LFO and envelope modulators.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct RawModBank {
     pub env_1: RawEnvelope,
     pub env_1_send: AtomicFloat,
     pub env_2: RawEnvelope,
     pub env_2_send: AtomicFloat,
-}
-
-impl Default for RawModBank {
-    fn default() -> Self {
-        RawModBank {
-            env_1: RawEnvelope::default(),
-            env_2: RawEnvelope::default(),
-            env_1_send: AtomicFloat::default(),
-            env_2_send: AtomicFloat::default(),
-        }
-    }
 }
 
 /// An enum which represents particular modulator, and then a particular
@@ -730,12 +722,16 @@ pub enum OSCType {
     OSC2,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, VariantCount)]
+#[derive(Debug, Display, Clone, Copy, PartialEq, Eq, VariantCount)]
 pub enum ModulationType {
     Mix,
+    #[display(fmt = "Amp. Mod")]
     AmpMod,
+    #[display(fmt = "Freq. Mod")]
     FreqMod,
+    #[display(fmt = "Phase Mod")]
     PhaseMod,
+    #[display(fmt = "Warp Mod")]
     WarpMod,
 }
 
@@ -764,19 +760,6 @@ impl From<f32> for ModulationType {
             PhaseMod
         } else {
             WarpMod
-        }
-    }
-}
-
-impl std::fmt::Display for ModulationType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        use ModulationType::*;
-        match self {
-            Mix => write!(f, "Mix"),
-            AmpMod => write!(f, "Amp. Mod"),
-            FreqMod => write!(f, "Freq. Mod"),
-            PhaseMod => write!(f, "Phase Mod"),
-            WarpMod => write!(f, "Warp Mod"),
         }
     }
 }
