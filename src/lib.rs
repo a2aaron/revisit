@@ -19,8 +19,8 @@ use vst::{
 use wmidi::MidiMessage;
 
 use params::{
-    CountedEnum, EnvelopeParams, ModBankEnvs, ModulationBank, ModulationSend, ModulationType,
-    OSCParams, ParameterType, Parameters, RawParameters,
+    EnvelopeParams, ModBankEnvs, ModulationBank, ModulationSend, ModulationType, OSCParams,
+    ParameterType, Parameters, RawParameters,
 };
 use sound_gen::{
     normalize_U7, normalize_pitch_bend, to_pitch_envelope, NormalizedPitchbend, SampleRate,
@@ -75,7 +75,6 @@ impl Plugin for Revisit {
             unique_id: 413612,
             version: 1,
             category: Category::Synth,
-            // Subtract one here due to "error" type
             parameters: ParameterType::COUNT as i32,
             // No audio inputs
             inputs: 0,

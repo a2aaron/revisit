@@ -86,12 +86,8 @@ impl Application for UIFrontEnd {
         match message {
             // The GUI has changed a parameter via knob
             Message::ParameterChanged(param, value) => {
-                self.params.host.begin_edit(0); // TODO!!!
-
                 // We set the parameter according to the changed value.
                 self.params.set(value, param);
-
-                self.params.host.end_edit(0); // TODO!!!
 
                 // If the knob changed was a "snapping" knob, make sure the knob
                 // ends up appearing snapped.

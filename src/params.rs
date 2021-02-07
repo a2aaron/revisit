@@ -15,91 +15,6 @@ use vst::{
 // Low Shelf, High Shelf, Peaking EQ
 pub const FILTER_TYPE_VARIANT_COUNT: usize = 8;
 
-/// Trait which counts how many possible enum variants can exist. This includes
-/// recursively
-pub trait CountedEnum {
-    const COUNT: usize;
-}
-
-/// Implement TryFrom<i32> for the given enum
-/// SYNTAX:
-/// ```
-/// from_into_int! {
-///     #[derive(Copy, Clone)]
-///     pub enum MyEnum {
-///         A,
-///         B,
-///         C,
-///     }
-/// }
-/// ```
-/// This works with nested enums, so long as the leaf enums are simple and
-/// have no fields.
-/// Thank you to Cassie for providing this code!!!
-macro_rules! from_into_int {
-    // use of @count and @from allows the macro to use only certain rules without
-    // accidentally polluting the public namespace. @count gives how many
-    // variants of an enum exist, for a specific variant (either 1 if a variant
-    // has no fields, and $name::COUNT where $name is the name of the field)
-    // Simple case (variant with no field)
-    (@count) => { 1 };
-    // Complicated case (variant with subenum)
-    (@count $name:ident) => { $name::COUNT };
-    // @from handles generating the TryFrom code.
-    // $Name is the name of the enum, $i is the variable i: i32 as given by the
-    // TryFrom trait, and $base is the "current index" of this enum
-    // Base case -- No more tokens to consume
-    (@from $Name:ident $i:expr; $base:expr ;) => { Err($i) };
-    // Recursive case -- variant with no subenum.
-    (@from $Name:ident $i:expr; $base:expr ; $case:ident, $($rest:tt)*) => {
-        if $i < $base + 1 {
-            Ok($Name::$case)
-        } else {
-            from_into_int!(@from $Name $i; $base + 1; $($rest)*)
-        }
-    };
-    // Recursive case -- variant with a subenum
-    (@from $Name:ident $i:expr; $base:expr; $case:ident $inner:ident, $($rest:tt)*) => {
-        if $i < ($base + $inner::COUNT) {
-            Ok($Name::$case($inner::try_from($i - $base)?))
-        } else {
-            from_into_int!(@from $Name $i; $base + $inner::COUNT; $($rest)*)
-        }
-    };
-    // "Public" facing case--get the enum + any derives and relist them
-    // then implement the traits.
-    (
-        $(
-            #[$($attr:meta)+]
-        )*
-        pub enum $Name:ident {
-            $(
-                $case:ident $(($nested:ident))?,
-            )*
-        }
-    ) => {
-        $(#[$($attr)*])*
-        pub enum $Name {
-            $(
-                $case $(($nested))?,
-            )*
-        }
-
-        impl CountedEnum for $Name {
-            const COUNT: usize = 0 $(
-                + from_into_int!(@count $($nested)?)
-            )*;
-        }
-
-        impl std::convert::TryFrom<usize> for $Name {
-            type Error = usize;
-            fn try_from(i: usize) -> Result<Self, usize> {
-                from_into_int!(@from $Name i; 0 ; $($case $($nested)?,)*)
-            }
-        }
-    }
-}
-
 pub struct Parameters {
     pub osc_1: OSCParams,
     pub osc_2: OSCParams,
@@ -292,6 +207,8 @@ impl RawParameters {
     }
 
     pub fn set(&self, value: f32, parameter: ParameterType) {
+        self.host.begin_edit(parameter.into());
+
         let update = match parameter {
             parameter if parameter == ParameterType::OSC1(OSCParameterType::Warp) => {
                 let shape = self.get(parameter);
@@ -311,6 +228,8 @@ impl RawParameters {
         if update {
             self.host.update_display();
         }
+
+        self.host.end_edit(parameter.into());
     }
 
     pub fn get_default(parameter: ParameterType) -> f32 {
@@ -448,20 +367,7 @@ impl PluginParameters for RawParameters {
 
     fn get_parameter_name(&self, index: i32) -> String {
         if let Ok(param) = ParameterType::try_from(index) {
-            match param {
-                ParameterType::MasterVolume => "Master Volume".to_string(),
-                ParameterType::OSC1(param) => format!("OSC 1 {}", param),
-                ParameterType::OSC2(param) => format!("OSC 2 {}", param),
-                ParameterType::OSC2Mod => "OSC 2 ON/OFF".to_string(),
-                ParameterType::ModBank(ModBankParameter::Env1(param)) => {
-                    format!("ADSR 1 {}", param)
-                }
-                ParameterType::ModBank(ModBankParameter::Env2(param)) => {
-                    format!("ADSR 2 {}", param)
-                }
-                ParameterType::ModBankSend(ModBankType::Env1) => "ADSR 1 Send".to_string(),
-                ParameterType::ModBankSend(ModBankType::Env2) => "ADSR 2 Send".to_string(),
-            }
+            param.to_string()
         } else {
             "".to_string()
         }
@@ -630,26 +536,22 @@ impl Default for RawModBank {
     }
 }
 
-from_into_int! {
-    /// An enum which represents particular modulator, and then a particular
-    /// parameter within that modulator.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    pub enum ModBankParameter {
-        Env1(EnvelopeParam),
-        Env2(EnvelopeParam),
-    }
+/// An enum which represents particular modulator, and then a particular
+/// parameter within that modulator.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModBankParameter {
+    Env1(EnvelopeParam),
+    Env2(EnvelopeParam),
 }
 
-from_into_int! {
-    /// A fieldless version of the ModBankParameter enum. This is used to refer to
-    /// an entire modulator (independent of the specific parameters). Also, you need
-    /// to use this in the ParameterType enum, otherwise from_into_int generates too
-    /// many parameters.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    pub enum ModBankType {
-        Env1,
-        Env2,
-    }
+/// A fieldless version of the ModBankParameter enum. This is used to refer to
+/// an entire modulator (independent of the specific parameters). Also, you need
+/// to use this in the ParameterType enum, otherwise from_into_int generates too
+/// many parameters.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModBankType {
+    Env1,
+    Env2,
 }
 
 /// The location to send a modulation value in the ModulationBank
@@ -743,27 +645,25 @@ pub struct RawLFO {
     amount: AtomicFloat,
 }
 
-from_into_int! {
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    pub enum OSCParameterType {
-        Volume,
-        Phase,
-        Pan,
-        Shape,
-        Warp,
-        FineTune,
-        CoarseTune,
-        VolumeEnv(EnvelopeParam),
-        VolLFOAmplitude,
-        VolLFOPeriod,
-        PitchEnv(EnvelopeParam),
-        PitchLFOAmplitude,
-        PitchLFOPeriod,
-        FilterType,
-        FilterFreq,
-        FilterQ,
-        FilterGain,
-    }
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OSCParameterType {
+    Volume,
+    Phase,
+    Pan,
+    Shape,
+    Warp,
+    FineTune,
+    CoarseTune,
+    VolumeEnv(EnvelopeParam),
+    VolLFOAmplitude,
+    VolLFOPeriod,
+    PitchEnv(EnvelopeParam),
+    PitchLFOAmplitude,
+    PitchLFOPeriod,
+    FilterType,
+    FilterFreq,
+    FilterQ,
+    FilterGain,
 }
 
 impl std::fmt::Display for OSCParameterType {
@@ -791,16 +691,14 @@ impl std::fmt::Display for OSCParameterType {
     }
 }
 
-from_into_int! {
-    #[derive(Debug, Display, Clone, Copy, PartialEq, Eq)]
-    pub enum EnvelopeParam {
-        Attack,
-        Decay,
-        Hold,
-        Sustain,
-        Release,
-        Multiply,
-    }
+#[derive(Debug, Display, Clone, Copy, PartialEq, Eq)]
+pub enum EnvelopeParam {
+    Attack,
+    Decay,
+    Hold,
+    Sustain,
+    Release,
+    Multiply,
 }
 
 impl EnvelopeParam {
@@ -832,15 +730,13 @@ pub enum OSCType {
     OSC2,
 }
 
-from_into_int! {
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, VariantCount)]
-    pub enum ModulationType {
-        Mix,
-        AmpMod,
-        FreqMod,
-        PhaseMod,
-        WarpMod,
-    }
+#[derive(Debug, Clone, Copy, PartialEq, Eq, VariantCount)]
+pub enum ModulationType {
+    Mix,
+    AmpMod,
+    FreqMod,
+    PhaseMod,
+    WarpMod,
 }
 
 impl From<ModulationType> for f32 {
@@ -885,28 +781,15 @@ impl std::fmt::Display for ModulationType {
     }
 }
 
-from_into_int! {
-    /// The type of parameter.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    pub enum ParameterType {
-        MasterVolume,
-        OSC1(OSCParameterType),
-        OSC2Mod,
-        OSC2(OSCParameterType),
-        ModBankSend(ModBankType),
-        ModBank(ModBankParameter),
-    }
-}
-
-impl TryFrom<i32> for ParameterType {
-    type Error = usize;
-    fn try_from(i: i32) -> Result<Self, Self::Error> {
-        if i < 0 {
-            Err(413)
-        } else {
-            ParameterType::try_from(i as usize)
-        }
-    }
+/// The type of parameter.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ParameterType {
+    MasterVolume,
+    OSC1(OSCParameterType),
+    OSC2Mod,
+    OSC2(OSCParameterType),
+    ModBankSend(ModBankType),
+    ModBank(ModBankParameter),
 }
 
 impl From<(OSCParameterType, OSCType)> for ParameterType {
@@ -945,3 +828,127 @@ pub fn biquad_to_string(x: biquad::Type<f32>) -> String {
         biquad::Type::PeakingEQ(_) => "Peaking EQ".to_string(),
     }
 }
+
+macro_rules! table {
+    ($macro:ident) => {
+        $macro! {
+        //  variant                                                                                 idx    name
+            ParameterType::MasterVolume,                                                              0,   "Master Volume";
+            ParameterType::OSC1(OSCParameterType::Volume),                                            1,   "OSC 1 Volume";
+            ParameterType::OSC1(OSCParameterType::Phase),                                             2,   "OSC 1 Phase";
+            ParameterType::OSC1(OSCParameterType::Pan),                                               3,   "OSC 1 Pan";
+            ParameterType::OSC1(OSCParameterType::Shape),                                             4,   "OSC 1 Shape";
+            ParameterType::OSC1(OSCParameterType::Warp),                                              5,   "OSC 1 Warp";
+            ParameterType::OSC1(OSCParameterType::FineTune),                                          6,   "OSC 1 Fine Tune";
+            ParameterType::OSC1(OSCParameterType::CoarseTune),                                        7,   "OSC 1 Coarse Tune";
+            ParameterType::OSC1(OSCParameterType::VolumeEnv(EnvelopeParam::Attack)),                  8,   "OSC 1 Volume Attack";
+            ParameterType::OSC1(OSCParameterType::VolumeEnv(EnvelopeParam::Hold)),                    9,   "OSC 1 Volume Hold";
+            ParameterType::OSC1(OSCParameterType::VolumeEnv(EnvelopeParam::Decay)),                   10,  "OSC 1 Volume Decay";
+            ParameterType::OSC1(OSCParameterType::VolumeEnv(EnvelopeParam::Sustain)),                 11,  "OSC 1 Volume Sustain";
+            ParameterType::OSC1(OSCParameterType::VolumeEnv(EnvelopeParam::Release)),                 12,  "OSC 1 Volume Release";
+            ParameterType::OSC1(OSCParameterType::VolumeEnv(EnvelopeParam::Multiply)),                13,  "OSC 1 Volume Multiply";
+            ParameterType::OSC1(OSCParameterType::VolLFOAmplitude),                                   14,  "OSC 1 VolLFOAmplitude";
+            ParameterType::OSC1(OSCParameterType::VolLFOPeriod),                                      15,  "OSC 1 VolLFOPeriod";
+            ParameterType::OSC1(OSCParameterType::PitchEnv(EnvelopeParam::Attack)),                   16,  "OSC 1 Pitch Attack";
+            ParameterType::OSC1(OSCParameterType::PitchEnv(EnvelopeParam::Hold)),                     17,  "OSC 1 Pitch Hold";
+            ParameterType::OSC1(OSCParameterType::PitchEnv(EnvelopeParam::Decay)),                    18,  "OSC 1 Pitch Decay";
+            ParameterType::OSC1(OSCParameterType::PitchEnv(EnvelopeParam::Sustain)),                  19,  "OSC 1 Pitch Sustain";
+            ParameterType::OSC1(OSCParameterType::PitchEnv(EnvelopeParam::Release)),                  20,  "OSC 1 Pitch Release";
+            ParameterType::OSC1(OSCParameterType::PitchEnv(EnvelopeParam::Multiply)),                 21,  "OSC 1 Pitch Multiply";
+            ParameterType::OSC1(OSCParameterType::PitchLFOAmplitude),                                 22,  "OSC 1 PitchLFOAmplitude";
+            ParameterType::OSC1(OSCParameterType::PitchLFOPeriod),                                    23,  "OSC 1 PitchLFOPeriod";
+            ParameterType::OSC1(OSCParameterType::FilterType),                                        24,  "OSC 1 FilterType";
+            ParameterType::OSC1(OSCParameterType::FilterFreq),                                        25,  "OSC 1 FilterFreq";
+            ParameterType::OSC1(OSCParameterType::FilterQ),                                           26,  "OSC 1 FilterQ";
+            ParameterType::OSC1(OSCParameterType::FilterGain),                                        27,  "OSC 1 FilterGain";
+            ParameterType::OSC2Mod,                                                                   28,  "OSC 2 Mod";
+            ParameterType::OSC2(OSCParameterType::Volume),                                            29,  "OSC 2 Volume";
+            ParameterType::OSC2(OSCParameterType::Phase),                                             30,  "OSC 2 Phase";
+            ParameterType::OSC2(OSCParameterType::Pan),                                               31,  "OSC 2 Pan";
+            ParameterType::OSC2(OSCParameterType::Shape),                                             32,  "OSC 2 Shape";
+            ParameterType::OSC2(OSCParameterType::Warp),                                              33,  "OSC 2 Warp";
+            ParameterType::OSC2(OSCParameterType::FineTune),                                          34,  "OSC 2 Fine Tune";
+            ParameterType::OSC2(OSCParameterType::CoarseTune),                                        35,  "OSC 2 Coarse Tune";
+            ParameterType::OSC2(OSCParameterType::VolumeEnv(EnvelopeParam::Attack)),                  36,  "OSC 2 Volume Attack";
+            ParameterType::OSC2(OSCParameterType::VolumeEnv(EnvelopeParam::Hold)),                    37,  "OSC 2 Volume Hold";
+            ParameterType::OSC2(OSCParameterType::VolumeEnv(EnvelopeParam::Decay)),                   38,  "OSC 2 Volume Decay";
+            ParameterType::OSC2(OSCParameterType::VolumeEnv(EnvelopeParam::Sustain)),                 39,  "OSC 2 Volume Sustain";
+            ParameterType::OSC2(OSCParameterType::VolumeEnv(EnvelopeParam::Release)),                 40,  "OSC 2 Volume Release";
+            ParameterType::OSC2(OSCParameterType::VolumeEnv(EnvelopeParam::Multiply)),                41,  "OSC 2 Volume Multiply";
+            ParameterType::OSC2(OSCParameterType::VolLFOAmplitude),                                   42,  "OSC 2 VolLFOAmplitude";
+            ParameterType::OSC2(OSCParameterType::VolLFOPeriod),                                      43,  "OSC 2 VolLFOPeriod";
+            ParameterType::OSC2(OSCParameterType::PitchEnv(EnvelopeParam::Attack)),                   44,  "OSC 2 Pitch Attack";
+            ParameterType::OSC2(OSCParameterType::PitchEnv(EnvelopeParam::Hold)),                     45,  "OSC 2 Pitch Hold";
+            ParameterType::OSC2(OSCParameterType::PitchEnv(EnvelopeParam::Decay)),                    46,  "OSC 2 Pitch Decay";
+            ParameterType::OSC2(OSCParameterType::PitchEnv(EnvelopeParam::Sustain)),                  47,  "OSC 2 Pitch Sustain";
+            ParameterType::OSC2(OSCParameterType::PitchEnv(EnvelopeParam::Release)),                  48,  "OSC 2 Pitch Release";
+            ParameterType::OSC2(OSCParameterType::PitchEnv(EnvelopeParam::Multiply)),                 49,  "OSC 2 Pitch Multiply";
+            ParameterType::OSC2(OSCParameterType::PitchLFOAmplitude),                                 50,  "OSC 2 PitchLFOAmplitude";
+            ParameterType::OSC2(OSCParameterType::PitchLFOPeriod),                                    51,  "OSC 2 PitchLFOPeriod";
+            ParameterType::OSC2(OSCParameterType::FilterType),                                        52,  "OSC 2 FilterType";
+            ParameterType::OSC2(OSCParameterType::FilterFreq),                                        53,  "OSC 2 FilterFreq";
+            ParameterType::OSC2(OSCParameterType::FilterQ),                                           54,  "OSC 2 FilterQ";
+            ParameterType::OSC2(OSCParameterType::FilterGain),                                        55,  "OSC 2 FilterGain";
+            ParameterType::ModBank(ModBankParameter::Env1(EnvelopeParam::Attack)),                    56,  "Mod Bank Env 1 Attack";
+            ParameterType::ModBank(ModBankParameter::Env1(EnvelopeParam::Hold)),                      57,  "Mod Bank Env 1 Hold";
+            ParameterType::ModBank(ModBankParameter::Env1(EnvelopeParam::Decay)),                     58,  "Mod Bank Env 1 Decay";
+            ParameterType::ModBank(ModBankParameter::Env1(EnvelopeParam::Sustain)),                   59,  "Mod Bank Env 1 Sustain";
+            ParameterType::ModBank(ModBankParameter::Env1(EnvelopeParam::Release)),                   60,  "Mod Bank Env 1 Release";
+            ParameterType::ModBank(ModBankParameter::Env1(EnvelopeParam::Multiply)),                  61,  "Mod Bank Env 1 Multiply";
+            ParameterType::ModBank(ModBankParameter::Env2(EnvelopeParam::Attack)),                    62,  "Mod Bank Env 2 Attack";
+            ParameterType::ModBank(ModBankParameter::Env2(EnvelopeParam::Hold)),                      63,  "Mod Bank Env 2 Hold";
+            ParameterType::ModBank(ModBankParameter::Env2(EnvelopeParam::Decay)),                     64,  "Mod Bank Env 2 Decay";
+            ParameterType::ModBank(ModBankParameter::Env2(EnvelopeParam::Sustain)),                   65,  "Mod Bank Env 2 Sustain";
+            ParameterType::ModBank(ModBankParameter::Env2(EnvelopeParam::Release)),                   66,  "Mod Bank Env 2 Release";
+            ParameterType::ModBank(ModBankParameter::Env2(EnvelopeParam::Multiply)),                  67,  "Mod Bank Env 2 Multiply";
+            ParameterType::ModBankSend(ModBankType::Env1),                                            68,  "Mod Bank Env 1 Send";
+            ParameterType::ModBankSend(ModBankType::Env2),                                            69,  "Mod Bank Env 2 Send";
+        }
+    };
+}
+
+impl ParameterType {
+    pub const COUNT: usize = 70;
+}
+
+macro_rules! impl_display {
+     ($($variant:pat, $idx:expr, $name:expr;)*) => {
+        impl std::fmt::Display for ParameterType {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                match self {
+                    $($variant => write!(f, $name),)*
+                }
+            }
+        }
+    };
+}
+
+macro_rules! impl_from_i32 {
+    ($($variant:expr, $idx:expr, $_:expr;)*) => {
+        impl TryFrom<i32> for ParameterType {
+            type Error = ();
+            fn try_from(x: i32) -> Result<Self, Self::Error> {
+                match x {
+                    $($idx => Ok($variant),)*
+                    _ => Err(()),
+                }
+            }
+        }
+    }
+}
+
+macro_rules! impl_into_i32 {
+    ($($variant:pat, $idx:expr, $_:expr;)*) => {
+        impl From<ParameterType> for i32 {
+            fn from(x: ParameterType) -> i32 {
+                match x {
+                    $($variant => $idx,)*
+                }
+            }
+        }
+    };
+}
+
+table! {impl_from_i32}
+table! {impl_into_i32}
+table! {impl_display}
