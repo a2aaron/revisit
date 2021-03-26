@@ -1,4 +1,4 @@
-use crate::neighbor_pairs::NeighborPairsIter;
+use crate::{neighbor_pairs::NeighborPairsIter, params::OSCType};
 use crate::{
     EnvelopeParams, ModBankEnvs, ModulationBank, ModulationSend, ModulationType, OSCParams,
     Parameters,
@@ -58,8 +58,8 @@ impl SoundGenerator {
             vel,
             samples_since_note_on: 0,
             note_state: NoteState::None,
-            osc_1: OSCGroup::new(sample_rate),
-            osc_2: OSCGroup::new(sample_rate),
+            osc_1: OSCGroup::new(sample_rate, OSCType::OSC1),
+            osc_2: OSCGroup::new(sample_rate, OSCType::OSC2),
             next_note_on: None,
             next_note_off: None,
         }
@@ -207,12 +207,14 @@ struct OSCGroup {
     mod_bank_envs: ModBankEnvs,
     volume_lfo: Oscillator,
     pitch_lfo: Oscillator,
+    // The OSC that this OSCGroup belongs to.
+    osc_type: OSCType,
     // The state for the EQ/filters, applied after the signal is generated
     filter: DirectForm1<f32>,
 }
 
 impl OSCGroup {
-    fn new(sample_rate: f32) -> OSCGroup {
+    fn new(sample_rate: f32, osc_type: OSCType) -> OSCGroup {
         OSCGroup {
             osc: Oscillator::new(),
             vol_env: Envelope::new(),
@@ -229,6 +231,7 @@ impl OSCGroup {
                 )
                 .unwrap(),
             ),
+            osc_type,
         }
     }
 
@@ -269,7 +272,8 @@ impl OSCGroup {
         //    You need to probably store pre-multiplied values for each of the
         //    various modulation values.
 
-        let mod_bank = ModulationValues::from_mod_bank(&self.mod_bank_envs, mod_bank, context);
+        let mod_bank =
+            ModulationValues::from_mod_bank(&self.mod_bank_envs, mod_bank, context, self.osc_type);
 
         // Compute volume from parameters, ADSR, LFO, and AmpMod
         let vol_env = self.vol_env.get(&params.vol_adsr, context);
@@ -548,12 +552,22 @@ impl ModulationValues {
         mod_bank_envs: &ModBankEnvs,
         mod_bank: &ModulationBank,
         context: NoteContext,
+        osc_type: OSCType,
     ) -> ModulationValues {
-        let env_1 = mod_bank_envs.env_1.get(&mod_bank.env_1, context);
-        let env_2 = mod_bank_envs.env_2.get(&mod_bank.env_2, context);
+        let env_1 = if mod_bank.env_1_send.osc == osc_type {
+            mod_bank_envs.env_1.get(&mod_bank.env_1, context)
+        } else {
+            0.0
+        };
 
-        ModulationValues::from_value(env_1, mod_bank.env_1_send)
-            + ModulationValues::from_value(env_2, mod_bank.env_2_send)
+        let env_2 = if mod_bank.env_2_send.osc == osc_type {
+            mod_bank_envs.env_2.get(&mod_bank.env_2, context)
+        } else {
+            0.0
+        };
+
+        ModulationValues::from_value(env_1, mod_bank.env_1_send.mod_type)
+            + ModulationValues::from_value(env_2, mod_bank.env_2_send.mod_type)
     }
 }
 

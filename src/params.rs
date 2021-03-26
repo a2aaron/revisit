@@ -101,24 +101,34 @@ impl ModBankEnvs {
     }
 }
 
-// TODO: This is slightly wrong! ModulationSends also need to specify which
-// oscillator they are going to send to! Otherwise this will just apply to all
-// of the oscillators, which is not what you want! (likely just use a tuple
-// of ModulationSend and OSCType)
 pub struct ModulationBank {
     pub env_1: EnvelopeParams,
-    pub env_1_send: ModulationSend,
+    pub env_1_send: ModBankSend,
     pub env_2: EnvelopeParams,
-    pub env_2_send: ModulationSend,
+    pub env_2_send: ModBankSend,
 }
 
 impl From<&RawModBank> for ModulationBank {
     fn from(params: &RawModBank) -> Self {
         ModulationBank {
             env_1: EnvelopeParams::from(&params.env_1),
-            env_1_send: ModulationSend::from(params.env_1_send.get()),
+            env_1_send: ModBankSend::from((params.env_1_send.get(), params.env_1_send_to.get())),
             env_2: EnvelopeParams::from(&params.env_2),
-            env_2_send: ModulationSend::from(params.env_2_send.get()),
+            env_2_send: ModBankSend::from((params.env_2_send.get(), params.env_2_send_to.get())),
+        }
+    }
+}
+
+pub struct ModBankSend {
+    pub mod_type: ModulationSend,
+    pub osc: OSCType,
+}
+
+impl From<(f32, f32)> for ModBankSend {
+    fn from(x: (f32, f32)) -> Self {
+        ModBankSend {
+            mod_type: ModulationSend::from(x.0),
+            osc: OSCType::from(x.1),
         }
     }
 }
@@ -167,6 +177,7 @@ impl From<&RawEnvelope> for EnvelopeParams {
     }
 }
 
+#[allow(clippy::upper_case_acronyms)]
 pub struct LFO {
     pub amplitude: f32,
     // In seconds
@@ -341,12 +352,20 @@ impl RawParameters {
             ParameterType::ModBank(ModBankParameter::Env2(param)) => {
                 envelope_strings(params.mod_bank.env_2, param)
             }
-            ParameterType::ModBankSend(ModBankType::Env1) => {
-                (format!("{}", params.mod_bank.env_1_send), "".to_string())
-            }
-            ParameterType::ModBankSend(ModBankType::Env2) => {
-                (format!("{}", params.mod_bank.env_2_send), "".to_string())
-            }
+            ParameterType::ModBankSend(ModBankType::Env1) => (
+                format!(
+                    "{} to {}",
+                    params.mod_bank.env_1_send.mod_type, params.mod_bank.env_1_send.osc
+                ),
+                "".to_string(),
+            ),
+            ParameterType::ModBankSend(ModBankType::Env2) => (
+                format!(
+                    "{} to {}",
+                    params.mod_bank.env_2_send.mod_type, params.mod_bank.env_2_send.osc
+                ),
+                "".to_string(),
+            ),
         }
     }
 }
@@ -520,12 +539,27 @@ impl RawOSC {
 }
 
 // Represents a bank of LFO and envelope modulators.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct RawModBank {
     pub env_1: RawEnvelope,
     pub env_1_send: AtomicFloat,
+    pub env_1_send_to: AtomicFloat,
     pub env_2: RawEnvelope,
     pub env_2_send: AtomicFloat,
+    pub env_2_send_to: AtomicFloat,
+}
+
+impl Default for RawModBank {
+    fn default() -> Self {
+        RawModBank {
+            env_1: RawEnvelope::default(),
+            env_1_send: AtomicFloat::default(),
+            env_1_send_to: AtomicFloat::default(),
+            env_2: RawEnvelope::default(),
+            env_2_send: AtomicFloat::default(),
+            env_2_send_to: AtomicFloat::from(1.0),
+        }
+    }
 }
 
 /// An enum which represents particular modulator, and then a particular
@@ -716,10 +750,20 @@ impl EnvelopeParam {
         }
     }
 }
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Display, Clone, Copy, PartialEq, Eq)]
 pub enum OSCType {
     OSC1,
     OSC2,
+}
+
+impl From<f32> for OSCType {
+    fn from(x: f32) -> Self {
+        if x < 0.5 {
+            OSCType::OSC1
+        } else {
+            OSCType::OSC2
+        }
+    }
 }
 
 #[derive(Debug, Display, Clone, Copy, PartialEq, Eq, VariantCount)]
