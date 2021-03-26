@@ -19,7 +19,7 @@ derive_more = "0.99.11"
 biquad = "0.4.0" # { git = "https://github.com/a2aaron/biquad-rs", branch = "master" }
 
 # for GUI
-iced = { version = "0.2", features = ["image"] }
+iced = { version = "0.2" }
 iced_audio = "0.6.1" # { git = "https://github.com/a2aaron/iced_audio", branch = "main" }
 iced_baseview = { git = "https://github.com/BillyDM/iced_baseview", branch = "main" }
 iced_native = "0.3.0"
