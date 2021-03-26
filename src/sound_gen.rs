@@ -232,8 +232,17 @@ impl OSCGroup {
         }
     }
 
-    /// Get the next sample from the osc group, applying modulation parameters as
-    /// well.
+    /// Get the next sample from the osc group, applying modulation parameters
+    /// as well.
+    /// base_vel - The velocity of the note. This is affected by volume
+    ///            modulation.
+    /// base_note - The base pitch, in Hz, of the note
+    /// pitch_bend - A [-1.0, 1.0] range value
+    /// (mod_type, modulation) - Indicates what modulation type, if any, to
+    ///                          apply to the signal. This is from OSC 2
+    /// mod_bank - the various mod_bank envelopes and LFOs that also modulate
+    ///            the signal
+    /// apply_filter - if true, apply the current filter.
     fn next_sample(
         &mut self,
         params: &OSCParams,
@@ -406,31 +415,14 @@ impl Oscillator {
     }
 
     /// Return the next sample from the oscillator
-    /// sample_num - which sample within the frame it is. This is used to do
-    ///              proper sub-frame handling of note events.
     /// sample_rate - the sample rate of the note. This is used to ensure that
     ///               the pitch of a note stays the same across sample rates
     /// shape - what noteshape to use for the signal
-    /// vol_env - the raw volume of the ADSR envelope. This is used so that
-    ///           notes properly transition to and from release states (ex: if
-    ///           the volume ADSR was previous at +0.5 volume, the release
-    ///           state should carry the note from +0.5 to 0.0 volume. This
-    ///           value is NOT used for the overal volume modifier. This value is
-    ///           needed because of how it interacts with the note state to allow
-    ///           for continious ADSR.
-    ///             
-    ///           The actual volume multiplier, should be seperated out because
-    ///           the volume multiplier includes more than just the vol ADSR.
-    ///           EX: amplitude LFO, amplitude modulation, etc, but these
-    ///           values should not be included in the note state. Note that
-    ///           the real multiplier is mainly applied in SoundGenerator
     /// pitch - the pitch multiplier to be applied to the base frequency of the
     ///         oscillator. This is a unitless value.
     /// phase_mod - how much to add to the current angle value to produce a
     ///             a phase offset. Units are 0.0-1.0 normalized angles (so
     ///             0.0 is zero radians, 1.0 is 2pi radians.)
-    /// filter_info - the filter parameters for the filter to be used. If this
-    ///               is None, the filter is bypassed.
     fn next_sample(
         &mut self,
         sample_rate: SampleRate,
