@@ -45,7 +45,7 @@ pub struct UIFrontEnd {
     main_button_state: button::State,
     modulation_button_state: button::State,
     preset_button_state: button::State,
-    sender: Option<UnboundedSender<baseview::Event>>,
+    sender: Option<iced_baseview::WindowHandle<Message>>,
     // This is used so that the GUI can update the shared parameters object when
     // a GUI element is changed.
     params: std::sync::Arc<RawParameters>,
@@ -250,7 +250,7 @@ impl Editor for UIFrontEnd {
                     if self.control_key == keyboard_types::KeyState::Down {
                         let event = to_keyboard_event(keycode, keyboard_types::KeyState::Up);
                         sender
-                            .start_send(baseview::Event::Keyboard(event))
+                            .send_baseview_event(baseview::Event::Keyboard(event))
                             .expect("Couldn't send message!");
                         self.control_key = keyboard_types::KeyState::Up;
                         return true;
@@ -269,7 +269,7 @@ impl Editor for UIFrontEnd {
                     if self.control_key == keyboard_types::KeyState::Up {
                         let event = to_keyboard_event(keycode, keyboard_types::KeyState::Down);
                         sender
-                            .start_send(baseview::Event::Keyboard(event))
+                            .send_baseview_event(baseview::Event::Keyboard(event))
                             .expect("Couldn't send message!");
                         self.control_key = keyboard_types::KeyState::Down;
                         return true;
