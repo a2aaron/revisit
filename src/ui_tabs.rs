@@ -30,6 +30,7 @@ const KNOB_SIZE: iced::Length = iced::Length::Units(29);
 const PANE_SPACING: u16 = 15;
 const PANE_PADDING: u16 = 15;
 const INTERPANE_SPACING: u16 = 15;
+const MOD_TYPE_SELECTOR_WIDTH: u16 = 200;
 
 const GREEN: iced::Color = iced::Color {
     r: 0.0,
@@ -140,6 +141,7 @@ impl MainTab {
         let osc_2_mod = iced::Element::new(ModTypeSelector::new(
             selected,
             vec!["Mix", "AM", "FM", "PM", "Warp"],
+            iced::Length::Units(MOD_TYPE_SELECTOR_WIDTH),
             vec![
                 Message::OSC2ModChanged(ModulationType::Mix),
                 Message::OSC2ModChanged(ModulationType::AmpMod),
@@ -191,6 +193,8 @@ impl ModulationTab {
             self.env_1.widgets(send_1, ModBankType::Env1, "ENV 1"),
             self.env_2.widgets(send_2, ModBankType::Env2, "ENV 2"),
         ])
+        .padding(PANE_PADDING)
+        .spacing(PANE_SPACING)
         .into()
     }
 }
@@ -483,13 +487,18 @@ struct ModTypeSelector {
 }
 
 impl ModTypeSelector {
-    fn new(selected: usize, text: Vec<&'static str>, messages: Vec<Message>) -> ModTypeSelector {
+    fn new(
+        selected: usize,
+        text: Vec<&'static str>,
+        width: iced::Length,
+        messages: Vec<Message>,
+    ) -> ModTypeSelector {
         ModTypeSelector {
             text,
             text_size: 15.0,
             selected,
             messages,
-            width: iced::Length::Units(200),
+            width,
             height: iced::Length::Units(20),
         }
     }
@@ -649,6 +658,25 @@ impl EnvKnobGroup {
         param: ModBankType,
         title: &str,
     ) -> iced::Element<'_, Message> {
+        /// Create a row of `knobs` with the title `title` and a selector next
+        /// to the title.
+        fn knob_row_with_selector<'a>(
+            selector: Element<'a, Message>,
+            knobs: Vec<Element<'a, Message>>,
+            title: &str,
+        ) -> Element<'a, Message> {
+            Column::new()
+                .push(row(vec![iced::Text::new(title).size(18).into(), selector]))
+                .push(
+                    Row::with_children(knobs)
+                        .align_items(Align::Center)
+                        .spacing(KNOB_SPACING),
+                )
+                .align_items(Align::Start)
+                .spacing(2)
+                .into()
+        }
+
         let selected = match send {
             ModulationSend::Amplitude => 0,
             ModulationSend::Phase => 1,
@@ -661,6 +689,7 @@ impl EnvKnobGroup {
         let selector = iced::Element::new(ModTypeSelector::new(
             selected,
             vec!["Amp", "Phase", "Pitch", "Warp", "Filter Freq"],
+            iced::Length::Units(300),
             vec![
                 Message::ModBankSendChanged(param, ModulationSend::Amplitude),
                 Message::ModBankSendChanged(param, ModulationSend::Phase),
@@ -705,8 +734,9 @@ impl EnvKnobGroup {
             &mut self.multiply,
             ParameterType::ModBank(param(EnvelopeParam::Multiply))
         );
-        knob_row(
-            vec![selector, attack, hold, decay, sustain, release, multiply],
+        knob_row_with_selector(
+            selector,
+            vec![attack, hold, decay, sustain, release, multiply],
             title,
         )
     }
