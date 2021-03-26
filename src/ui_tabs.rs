@@ -31,6 +31,7 @@ const PANE_SPACING: u16 = 15;
 const PANE_PADDING: u16 = 15;
 const INTERPANE_SPACING: u16 = 15;
 const MOD_TYPE_SELECTOR_WIDTH: u16 = 200;
+const MASTER_VOL_HEIGHT: u16 = 300;
 
 const GREEN: iced::Color = iced::Color {
     r: 0.0,
@@ -129,7 +130,14 @@ impl MainTab {
         screen_height: u32,
         params: &RawParameters,
     ) -> iced::Element<'_, Message> {
-        let master_vol_widget = widget!(VSlider, &mut self.master_vol, ParameterType::MasterVolume);
+        let master_vol_widget = with_label(
+            VSlider::new(&mut self.master_vol, move |normal| {
+                Message::ParameterChanged(ParameterType::MasterVolume, normal.as_f32())
+            })
+            .height(iced::Length::Units(MASTER_VOL_HEIGHT)),
+            &widget_name(ParameterType::MasterVolume),
+        );
+
         let selected = match ModulationType::from(params.osc_2_mod.get()) {
             ModulationType::Mix => 0,
             ModulationType::AmpMod => 1,

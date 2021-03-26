@@ -1,7 +1,6 @@
 use std::sync::Arc;
 use std::{ffi::c_void, hash::Hash};
 
-use futures::channel::mpsc::UnboundedSender;
 use iced::{button, futures, Column, Command, Subscription};
 
 use iced_baseview::{Application, WindowSubs};
@@ -16,6 +15,9 @@ use crate::{
     },
     ui_tabs::{MainTab, ModulationTab, PresetTab, Tabs},
 };
+
+const WINDOW_WIDTH: usize = 800;
+const WINDOW_HEIGHT: usize = 650;
 
 /// A GUI message.
 #[derive(Debug, Clone, Copy)]
@@ -203,7 +205,7 @@ impl Application for UIFrontEnd {
 
 impl Editor for UIFrontEnd {
     fn size(&self) -> (i32, i32) {
-        (800, 600)
+        (WINDOW_WIDTH as i32, WINDOW_HEIGHT as i32)
     }
 
     fn position(&self) -> (i32, i32) {
