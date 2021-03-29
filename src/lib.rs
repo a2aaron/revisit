@@ -1,6 +1,7 @@
 #[macro_use]
 extern crate vst;
 
+mod macros;
 mod neighbor_pairs;
 mod params;
 mod sound_gen;
