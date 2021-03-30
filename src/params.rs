@@ -1,6 +1,9 @@
 use std::convert::TryFrom;
 
-use crate::sound_gen::{ease_in_expo, Envelope, FilterParams, NoteShape};
+use crate::{
+    impl_display, impl_from_i32, impl_get_default, impl_into_i32,
+    sound_gen::{ease_in_expo, Envelope, FilterParams, NoteShape},
+};
 
 use derive_more::Display;
 use variant_count::VariantCount;
@@ -14,6 +17,22 @@ use vst::{
 // All Pass, Notch Filter
 // Low Shelf, High Shelf, Peaking EQ
 pub const FILTER_TYPE_VARIANT_COUNT: usize = 8;
+
+// Default values for volume envelope
+pub const DEFAULT_VOL_ATTACK: f32 = 0.1;
+pub const DEFAULT_VOL_HOLD: f32 = 0.0;
+pub const DEFAULT_VOL_DECAY: f32 = 0.2;
+pub const DEFAULT_VOL_SUSTAIN: f32 = 0.5;
+pub const DEFAULT_VOL_RELEASE: f32 = 0.3;
+pub const DEFAULT_VOL_MULTIPLY: f32 = 1.0; // +100%
+
+// Default values for modulation envelopes
+pub const DEFAULT_ATTACK: f32 = 0.00001;
+pub const DEFAULT_HOLD: f32 = 0.2;
+pub const DEFAULT_DECAY: f32 = 0.0;
+pub const DEFAULT_SUSTAIN: f32 = 0.0;
+pub const DEFAULT_RELEASE: f32 = 0.00001;
+pub const DEFAULT_MULTIPLY: f32 = 0.5; // +0%
 
 pub struct Parameters {
     pub osc_1: OSCParams,
@@ -244,23 +263,6 @@ impl RawParameters {
         }
 
         self.host.end_edit(parameter.into());
-    }
-
-    pub fn get_default(parameter: ParameterType) -> f32 {
-        match parameter {
-            ParameterType::MasterVolume => 0.33,
-            ParameterType::OSC2Mod => 0.0, // Mix
-            ParameterType::OSC1(param) => RawOSC::get_default(param, OSCType::OSC1),
-            ParameterType::OSC2(param) => RawOSC::get_default(param, OSCType::OSC2),
-            ParameterType::ModBank(ModBankParameter::Env1(param)) => {
-                EnvelopeParam::get_default(param)
-            }
-            ParameterType::ModBank(ModBankParameter::Env2(param)) => {
-                EnvelopeParam::get_default(param)
-            }
-            ParameterType::ModBankSend(ModBankType::Env1) => 0.0, // Amplitude
-            ParameterType::ModBankSend(ModBankType::Env2) => 0.0, // Amplitude
-        }
     }
 
     pub fn get(&self, parameter: ParameterType) -> f32 {
@@ -859,77 +861,82 @@ pub fn biquad_to_string(x: biquad::Type<f32>) -> String {
 macro_rules! table {
     ($macro:ident) => {
         $macro! {
-        //  variant                                                                                 idx    name
-            ParameterType::MasterVolume,                                                              0,   "Master Volume";
-            ParameterType::OSC1(OSCParameterType::Volume),                                            1,   "OSC 1 Volume";
-            ParameterType::OSC1(OSCParameterType::Phase),                                             2,   "OSC 1 Phase";
-            ParameterType::OSC1(OSCParameterType::Pan),                                               3,   "OSC 1 Pan";
-            ParameterType::OSC1(OSCParameterType::Shape),                                             4,   "OSC 1 Shape";
-            ParameterType::OSC1(OSCParameterType::Warp),                                              5,   "OSC 1 Warp";
-            ParameterType::OSC1(OSCParameterType::FineTune),                                          6,   "OSC 1 Fine Tune";
-            ParameterType::OSC1(OSCParameterType::CoarseTune),                                        7,   "OSC 1 Coarse Tune";
-            ParameterType::OSC1(OSCParameterType::VolumeEnv(EnvelopeParam::Attack)),                  8,   "OSC 1 Volume Attack";
-            ParameterType::OSC1(OSCParameterType::VolumeEnv(EnvelopeParam::Hold)),                    9,   "OSC 1 Volume Hold";
-            ParameterType::OSC1(OSCParameterType::VolumeEnv(EnvelopeParam::Decay)),                   10,  "OSC 1 Volume Decay";
-            ParameterType::OSC1(OSCParameterType::VolumeEnv(EnvelopeParam::Sustain)),                 11,  "OSC 1 Volume Sustain";
-            ParameterType::OSC1(OSCParameterType::VolumeEnv(EnvelopeParam::Release)),                 12,  "OSC 1 Volume Release";
-            ParameterType::OSC1(OSCParameterType::VolumeEnv(EnvelopeParam::Multiply)),                13,  "OSC 1 Volume Multiply";
-            ParameterType::OSC1(OSCParameterType::VolLFOAmplitude),                                   14,  "OSC 1 VolLFOAmplitude";
-            ParameterType::OSC1(OSCParameterType::VolLFOPeriod),                                      15,  "OSC 1 VolLFOPeriod";
-            ParameterType::OSC1(OSCParameterType::PitchEnv(EnvelopeParam::Attack)),                   16,  "OSC 1 Pitch Attack";
-            ParameterType::OSC1(OSCParameterType::PitchEnv(EnvelopeParam::Hold)),                     17,  "OSC 1 Pitch Hold";
-            ParameterType::OSC1(OSCParameterType::PitchEnv(EnvelopeParam::Decay)),                    18,  "OSC 1 Pitch Decay";
-            ParameterType::OSC1(OSCParameterType::PitchEnv(EnvelopeParam::Sustain)),                  19,  "OSC 1 Pitch Sustain";
-            ParameterType::OSC1(OSCParameterType::PitchEnv(EnvelopeParam::Release)),                  20,  "OSC 1 Pitch Release";
-            ParameterType::OSC1(OSCParameterType::PitchEnv(EnvelopeParam::Multiply)),                 21,  "OSC 1 Pitch Multiply";
-            ParameterType::OSC1(OSCParameterType::PitchLFOAmplitude),                                 22,  "OSC 1 PitchLFOAmplitude";
-            ParameterType::OSC1(OSCParameterType::PitchLFOPeriod),                                    23,  "OSC 1 PitchLFOPeriod";
-            ParameterType::OSC1(OSCParameterType::FilterType),                                        24,  "OSC 1 FilterType";
-            ParameterType::OSC1(OSCParameterType::FilterFreq),                                        25,  "OSC 1 FilterFreq";
-            ParameterType::OSC1(OSCParameterType::FilterQ),                                           26,  "OSC 1 FilterQ";
-            ParameterType::OSC1(OSCParameterType::FilterGain),                                        27,  "OSC 1 FilterGain";
-            ParameterType::OSC2Mod,                                                                   28,  "OSC 2 Mod";
-            ParameterType::OSC2(OSCParameterType::Volume),                                            29,  "OSC 2 Volume";
-            ParameterType::OSC2(OSCParameterType::Phase),                                             30,  "OSC 2 Phase";
-            ParameterType::OSC2(OSCParameterType::Pan),                                               31,  "OSC 2 Pan";
-            ParameterType::OSC2(OSCParameterType::Shape),                                             32,  "OSC 2 Shape";
-            ParameterType::OSC2(OSCParameterType::Warp),                                              33,  "OSC 2 Warp";
-            ParameterType::OSC2(OSCParameterType::FineTune),                                          34,  "OSC 2 Fine Tune";
-            ParameterType::OSC2(OSCParameterType::CoarseTune),                                        35,  "OSC 2 Coarse Tune";
-            ParameterType::OSC2(OSCParameterType::VolumeEnv(EnvelopeParam::Attack)),                  36,  "OSC 2 Volume Attack";
-            ParameterType::OSC2(OSCParameterType::VolumeEnv(EnvelopeParam::Hold)),                    37,  "OSC 2 Volume Hold";
-            ParameterType::OSC2(OSCParameterType::VolumeEnv(EnvelopeParam::Decay)),                   38,  "OSC 2 Volume Decay";
-            ParameterType::OSC2(OSCParameterType::VolumeEnv(EnvelopeParam::Sustain)),                 39,  "OSC 2 Volume Sustain";
-            ParameterType::OSC2(OSCParameterType::VolumeEnv(EnvelopeParam::Release)),                 40,  "OSC 2 Volume Release";
-            ParameterType::OSC2(OSCParameterType::VolumeEnv(EnvelopeParam::Multiply)),                41,  "OSC 2 Volume Multiply";
-            ParameterType::OSC2(OSCParameterType::VolLFOAmplitude),                                   42,  "OSC 2 VolLFOAmplitude";
-            ParameterType::OSC2(OSCParameterType::VolLFOPeriod),                                      43,  "OSC 2 VolLFOPeriod";
-            ParameterType::OSC2(OSCParameterType::PitchEnv(EnvelopeParam::Attack)),                   44,  "OSC 2 Pitch Attack";
-            ParameterType::OSC2(OSCParameterType::PitchEnv(EnvelopeParam::Hold)),                     45,  "OSC 2 Pitch Hold";
-            ParameterType::OSC2(OSCParameterType::PitchEnv(EnvelopeParam::Decay)),                    46,  "OSC 2 Pitch Decay";
-            ParameterType::OSC2(OSCParameterType::PitchEnv(EnvelopeParam::Sustain)),                  47,  "OSC 2 Pitch Sustain";
-            ParameterType::OSC2(OSCParameterType::PitchEnv(EnvelopeParam::Release)),                  48,  "OSC 2 Pitch Release";
-            ParameterType::OSC2(OSCParameterType::PitchEnv(EnvelopeParam::Multiply)),                 49,  "OSC 2 Pitch Multiply";
-            ParameterType::OSC2(OSCParameterType::PitchLFOAmplitude),                                 50,  "OSC 2 PitchLFOAmplitude";
-            ParameterType::OSC2(OSCParameterType::PitchLFOPeriod),                                    51,  "OSC 2 PitchLFOPeriod";
-            ParameterType::OSC2(OSCParameterType::FilterType),                                        52,  "OSC 2 FilterType";
-            ParameterType::OSC2(OSCParameterType::FilterFreq),                                        53,  "OSC 2 FilterFreq";
-            ParameterType::OSC2(OSCParameterType::FilterQ),                                           54,  "OSC 2 FilterQ";
-            ParameterType::OSC2(OSCParameterType::FilterGain),                                        55,  "OSC 2 FilterGain";
-            ParameterType::ModBank(ModBankParameter::Env1(EnvelopeParam::Attack)),                    56,  "Mod Bank Env 1 Attack";
-            ParameterType::ModBank(ModBankParameter::Env1(EnvelopeParam::Hold)),                      57,  "Mod Bank Env 1 Hold";
-            ParameterType::ModBank(ModBankParameter::Env1(EnvelopeParam::Decay)),                     58,  "Mod Bank Env 1 Decay";
-            ParameterType::ModBank(ModBankParameter::Env1(EnvelopeParam::Sustain)),                   59,  "Mod Bank Env 1 Sustain";
-            ParameterType::ModBank(ModBankParameter::Env1(EnvelopeParam::Release)),                   60,  "Mod Bank Env 1 Release";
-            ParameterType::ModBank(ModBankParameter::Env1(EnvelopeParam::Multiply)),                  61,  "Mod Bank Env 1 Multiply";
-            ParameterType::ModBank(ModBankParameter::Env2(EnvelopeParam::Attack)),                    62,  "Mod Bank Env 2 Attack";
-            ParameterType::ModBank(ModBankParameter::Env2(EnvelopeParam::Hold)),                      63,  "Mod Bank Env 2 Hold";
-            ParameterType::ModBank(ModBankParameter::Env2(EnvelopeParam::Decay)),                     64,  "Mod Bank Env 2 Decay";
-            ParameterType::ModBank(ModBankParameter::Env2(EnvelopeParam::Sustain)),                   65,  "Mod Bank Env 2 Sustain";
-            ParameterType::ModBank(ModBankParameter::Env2(EnvelopeParam::Release)),                   66,  "Mod Bank Env 2 Release";
-            ParameterType::ModBank(ModBankParameter::Env2(EnvelopeParam::Multiply)),                  67,  "Mod Bank Env 2 Multiply";
-            ParameterType::ModBankSend(ModBankType::Env1),                                            68,  "Mod Bank Env 1 Send";
-            ParameterType::ModBankSend(ModBankType::Env2),                                            69,  "Mod Bank Env 2 Send";
+        //  RawParameter identifier, ParameterType identifier
+            RawParameters,          ParameterType;
+        //  variant                                                                         name                          idx   default
+            ParameterType::MasterVolume,                                                    "Master Volume",              0,    0.33                    ;
+            ParameterType::OSC1(OSCParameterType::Volume),                                  "OSC 1 Volume",               1,    0.5                     ;
+            ParameterType::OSC1(OSCParameterType::Phase),                                   "OSC 1 Phase",                2,    0.0                     ;
+            ParameterType::OSC1(OSCParameterType::Pan),                                     "OSC 1 Pan",                  3,    0.5                     ;
+            ParameterType::OSC1(OSCParameterType::Shape),                                   "OSC 1 Shape",                4,    0.0                     ;
+            ParameterType::OSC1(OSCParameterType::Warp),                                    "OSC 1 Warp",                 5,    0.5                     ;
+            ParameterType::OSC1(OSCParameterType::FineTune),                                "OSC 1 Fine Tune",            6,    0.5                     ;
+            ParameterType::OSC1(OSCParameterType::CoarseTune),                              "OSC 1 Coarse Tune",          7,    0.5                     ;
+            ParameterType::OSC1(OSCParameterType::VolumeEnv(EnvelopeParam::Attack)),        "OSC 1 Volume Attack",        8,    DEFAULT_VOL_ATTACK      ;
+            ParameterType::OSC1(OSCParameterType::VolumeEnv(EnvelopeParam::Hold)),          "OSC 1 Volume Hold",          9,    DEFAULT_VOL_HOLD        ;
+            ParameterType::OSC1(OSCParameterType::VolumeEnv(EnvelopeParam::Decay)),         "OSC 1 Volume Decay",         10,   DEFAULT_VOL_DECAY       ;
+            ParameterType::OSC1(OSCParameterType::VolumeEnv(EnvelopeParam::Sustain)),       "OSC 1 Volume Sustain",       11,   DEFAULT_VOL_SUSTAIN     ;
+            ParameterType::OSC1(OSCParameterType::VolumeEnv(EnvelopeParam::Release)),       "OSC 1 Volume Release",       12,   DEFAULT_VOL_RELEASE     ;
+            ParameterType::OSC1(OSCParameterType::VolumeEnv(EnvelopeParam::Multiply)),      "OSC 1 Volume Multiply",      13,   DEFAULT_VOL_MULTIPLY    ;
+            ParameterType::OSC1(OSCParameterType::VolLFOAmplitude),                         "OSC 1 VolLFOAmplitude",      14,   0.0                     ;
+            ParameterType::OSC1(OSCParameterType::VolLFOPeriod),                            "OSC 1 VolLFOPeriod",         15,   0.5                     ;
+            ParameterType::OSC1(OSCParameterType::PitchEnv(EnvelopeParam::Attack)),         "OSC 1 Pitch Attack",         16,   DEFAULT_ATTACK          ;
+            ParameterType::OSC1(OSCParameterType::PitchEnv(EnvelopeParam::Hold)),           "OSC 1 Pitch Hold",           17,   DEFAULT_HOLD            ;
+            ParameterType::OSC1(OSCParameterType::PitchEnv(EnvelopeParam::Decay)),          "OSC 1 Pitch Decay",          18,   DEFAULT_DECAY           ;
+            ParameterType::OSC1(OSCParameterType::PitchEnv(EnvelopeParam::Sustain)),        "OSC 1 Pitch Sustain",        19,   DEFAULT_SUSTAIN         ;
+            ParameterType::OSC1(OSCParameterType::PitchEnv(EnvelopeParam::Release)),        "OSC 1 Pitch Release",        20,   DEFAULT_RELEASE         ;
+            ParameterType::OSC1(OSCParameterType::PitchEnv(EnvelopeParam::Multiply)),       "OSC 1 Pitch Multiply",       21,   DEFAULT_MULTIPLY        ;
+            ParameterType::OSC1(OSCParameterType::PitchLFOAmplitude),                       "OSC 1 PitchLFOAmplitude",    22,   0.0                     ;
+            ParameterType::OSC1(OSCParameterType::PitchLFOPeriod),                          "OSC 1 PitchLFOPeriod",       23,   0.5                     ;
+            ParameterType::OSC1(OSCParameterType::FilterType),                              "OSC 1 FilterType",           24,   0.0                     ;
+            ParameterType::OSC1(OSCParameterType::FilterFreq),                              "OSC 1 FilterFreq",           25,   1.0                     ;
+            ParameterType::OSC1(OSCParameterType::FilterQ),                                 "OSC 1 FilterQ",              26,   0.1                     ;
+            ParameterType::OSC1(OSCParameterType::FilterGain),                              "OSC 1 FilterGain",           27,   0.5                     ;
+
+            ParameterType::OSC2Mod,                                                         "OSC 2 Mod",                  28,   0.0                     ;
+
+            ParameterType::OSC2(OSCParameterType::Volume),                                  "OSC 2 Volume",               29,   0.5                     ;
+            ParameterType::OSC2(OSCParameterType::Phase),                                   "OSC 2 Phase",                30,   0.0                     ;
+            ParameterType::OSC2(OSCParameterType::Pan),                                     "OSC 2 Pan",                  31,   0.5                     ;
+            ParameterType::OSC2(OSCParameterType::Shape),                                   "OSC 2 Shape",                32,   0.0                     ;
+            ParameterType::OSC2(OSCParameterType::Warp),                                    "OSC 2 Warp",                 33,   0.5                     ;
+            ParameterType::OSC2(OSCParameterType::FineTune),                                "OSC 2 Fine Tune",            34,   0.5                     ;
+            ParameterType::OSC2(OSCParameterType::CoarseTune),                              "OSC 2 Coarse Tune",          35,   0.5                     ;
+            ParameterType::OSC2(OSCParameterType::VolumeEnv(EnvelopeParam::Attack)),        "OSC 2 Volume Attack",        36,   DEFAULT_VOL_ATTACK      ;
+            ParameterType::OSC2(OSCParameterType::VolumeEnv(EnvelopeParam::Hold)),          "OSC 2 Volume Hold",          37,   DEFAULT_VOL_HOLD        ;
+            ParameterType::OSC2(OSCParameterType::VolumeEnv(EnvelopeParam::Decay)),         "OSC 2 Volume Decay",         38,   DEFAULT_VOL_DECAY       ;
+            ParameterType::OSC2(OSCParameterType::VolumeEnv(EnvelopeParam::Sustain)),       "OSC 2 Volume Sustain",       39,   DEFAULT_VOL_SUSTAIN     ;
+            ParameterType::OSC2(OSCParameterType::VolumeEnv(EnvelopeParam::Release)),       "OSC 2 Volume Release",       40,   DEFAULT_VOL_RELEASE     ;
+            ParameterType::OSC2(OSCParameterType::VolumeEnv(EnvelopeParam::Multiply)),      "OSC 2 Volume Multiply",      41,   DEFAULT_VOL_MULTIPLY    ;
+            ParameterType::OSC2(OSCParameterType::VolLFOAmplitude),                         "OSC 2 VolLFOAmplitude",      42,   0.0                     ;
+            ParameterType::OSC2(OSCParameterType::VolLFOPeriod),                            "OSC 2 VolLFOPeriod",         43,   0.5                     ;
+            ParameterType::OSC2(OSCParameterType::PitchEnv(EnvelopeParam::Attack)),         "OSC 2 Pitch Attack",         44,   DEFAULT_ATTACK          ;
+            ParameterType::OSC2(OSCParameterType::PitchEnv(EnvelopeParam::Hold)),           "OSC 2 Pitch Hold",           45,   DEFAULT_HOLD            ;
+            ParameterType::OSC2(OSCParameterType::PitchEnv(EnvelopeParam::Decay)),          "OSC 2 Pitch Decay",          46,   DEFAULT_DECAY           ;
+            ParameterType::OSC2(OSCParameterType::PitchEnv(EnvelopeParam::Sustain)),        "OSC 2 Pitch Sustain",        47,   DEFAULT_SUSTAIN         ;
+            ParameterType::OSC2(OSCParameterType::PitchEnv(EnvelopeParam::Release)),        "OSC 2 Pitch Release",        48,   DEFAULT_RELEASE         ;
+            ParameterType::OSC2(OSCParameterType::PitchEnv(EnvelopeParam::Multiply)),       "OSC 2 Pitch Multiply",       49,   DEFAULT_MULTIPLY        ;
+            ParameterType::OSC2(OSCParameterType::PitchLFOAmplitude),                       "OSC 2 PitchLFOAmplitude",    50,   0.0                     ;
+            ParameterType::OSC2(OSCParameterType::PitchLFOPeriod),                          "OSC 2 PitchLFOPeriod",       51,   0.5                     ;
+            ParameterType::OSC2(OSCParameterType::FilterType),                              "OSC 2 FilterType",           52,   0.0                     ;
+            ParameterType::OSC2(OSCParameterType::FilterFreq),                              "OSC 2 FilterFreq",           53,   1.0                     ;
+            ParameterType::OSC2(OSCParameterType::FilterQ),                                 "OSC 2 FilterQ",              54,   0.1                     ;
+            ParameterType::OSC2(OSCParameterType::FilterGain),                              "OSC 2 FilterGain",           55,   0.5                     ;
+
+            ParameterType::ModBank(ModBankParameter::Env1(EnvelopeParam::Attack)),          "Mod Bank Env 1 Attack",      56,   DEFAULT_ATTACK          ;
+            ParameterType::ModBank(ModBankParameter::Env1(EnvelopeParam::Hold)),            "Mod Bank Env 1 Hold",        57,   DEFAULT_HOLD            ;
+            ParameterType::ModBank(ModBankParameter::Env1(EnvelopeParam::Decay)),           "Mod Bank Env 1 Decay",       58,   DEFAULT_DECAY           ;
+            ParameterType::ModBank(ModBankParameter::Env1(EnvelopeParam::Sustain)),         "Mod Bank Env 1 Sustain",     59,   DEFAULT_SUSTAIN         ;
+            ParameterType::ModBank(ModBankParameter::Env1(EnvelopeParam::Release)),         "Mod Bank Env 1 Release",     60,   DEFAULT_RELEASE         ;
+            ParameterType::ModBank(ModBankParameter::Env1(EnvelopeParam::Multiply)),        "Mod Bank Env 1 Multiply",    61,   DEFAULT_MULTIPLY        ;
+            ParameterType::ModBank(ModBankParameter::Env2(EnvelopeParam::Attack)),          "Mod Bank Env 2 Attack",      62,   DEFAULT_ATTACK          ;
+            ParameterType::ModBank(ModBankParameter::Env2(EnvelopeParam::Hold)),            "Mod Bank Env 2 Hold",        63,   DEFAULT_HOLD            ;
+            ParameterType::ModBank(ModBankParameter::Env2(EnvelopeParam::Decay)),           "Mod Bank Env 2 Decay",       64,   DEFAULT_DECAY           ;
+            ParameterType::ModBank(ModBankParameter::Env2(EnvelopeParam::Sustain)),         "Mod Bank Env 2 Sustain",     65,   DEFAULT_SUSTAIN         ;
+            ParameterType::ModBank(ModBankParameter::Env2(EnvelopeParam::Release)),         "Mod Bank Env 2 Release",     66,   DEFAULT_RELEASE         ;
+            ParameterType::ModBank(ModBankParameter::Env2(EnvelopeParam::Multiply)),        "Mod Bank Env 2 Multiply",    67,   DEFAULT_MULTIPLY        ;
+            ParameterType::ModBankSend(ModBankType::Env1),                                  "Mod Bank Env 1 Send",        68,   0.0                     ;
+            ParameterType::ModBankSend(ModBankType::Env2),                                  "Mod Bank Env 2 Send",        69,   0.0                     ;
         }
     };
 }
@@ -938,8 +945,7 @@ impl ParameterType {
     pub const COUNT: usize = 70;
 }
 
-use crate::{impl_display, impl_from_i32, impl_into_i32};
-
 table! {impl_from_i32}
 table! {impl_into_i32}
 table! {impl_display}
+table! {impl_get_default}
