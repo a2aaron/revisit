@@ -272,7 +272,7 @@ impl RawParameters {
         }
 
         match parameter {
-            ParameterType::MasterVolume => make_strings(self.master_vol.get() * 100.0, "%"),
+            ParameterType::MasterVolume => make_strings(params.master_vol * 100.0, "%"),
             ParameterType::OSC1(osc_param) | ParameterType::OSC2(osc_param) => {
                 let osc = match parameter {
                     ParameterType::OSC1(_) => &params.osc_1,
