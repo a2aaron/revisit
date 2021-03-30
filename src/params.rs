@@ -8,11 +8,7 @@ use crate::{
 
 use derive_more::Display;
 use variant_count::VariantCount;
-use vst::{
-    host::Host,
-    plugin::{HostCallback, PluginParameters},
-    util::AtomicFloat,
-};
+use vst::{host::Host, plugin::PluginParameters, util::AtomicFloat};
 
 // Low Pass, High Pass, Bandpass
 // All Pass, Notch Filter
@@ -46,11 +42,11 @@ pub struct Parameters {
 impl From<&RawParameters> for Parameters {
     fn from(params: &RawParameters) -> Self {
         Parameters {
-            osc_1: OSCParams::from(&params.osc_1),
-            osc_2: OSCParams::from(&params.osc_2),
+            osc_1: OSCParams::from(&params.get_osc_1()),
+            osc_2: OSCParams::from(&params.get_osc_2()),
             master_vol: params.master_vol.get(),
             osc_2_mod: params.osc_2_mod.get().into(),
-            mod_bank: ModulationBank::from(&params.mod_bank),
+            mod_bank: ModulationBank::from(&params.get_mod_bank()),
         }
     }
 }
@@ -77,31 +73,28 @@ pub struct OSCParams {
 impl From<&RawOSC> for OSCParams {
     fn from(params: &RawOSC) -> Self {
         OSCParams {
-            volume: params.volume.get() * 2.0,
-            shape: NoteShape::from_warp(params.shape.get(), params.warp.get()),
-            pan: (params.pan.get() - 0.5) * 2.0,
-            phase: params.phase.get(),
+            volume: params.volume * 2.0,
+            shape: NoteShape::from_warp(params.shape, params.warp),
+            pan: (params.pan - 0.5) * 2.0,
+            phase: params.phase,
             // In semi-tones
-            coarse_tune: ((params.coarse_tune.get() - 0.5) * 2.0 * 24.0) as i32,
+            coarse_tune: ((params.coarse_tune - 0.5) * 2.0 * 24.0) as i32,
             // In [-1.0, 1.0] range
-            fine_tune: (params.fine_tune.get() - 0.5) * 2.0,
+            fine_tune: (params.fine_tune - 0.5) * 2.0,
             vol_adsr: EnvelopeParams::from(&params.vol_adsr),
             vol_lfo: LFO {
-                amplitude: ease_in_expo(params.vol_lfo.amount.get()),
-                period: (ease_in_expo(params.vol_lfo.period.get()) * 10.0).max(0.001),
+                amplitude: ease_in_expo(params.vol_lfo.amount),
+                period: (ease_in_expo(params.vol_lfo.period) * 10.0).max(0.001),
             },
             pitch_adsr: EnvelopeParams::from(&params.pitch_adsr),
             pitch_lfo: LFO {
-                amplitude: ease_in_expo(params.pitch_lfo.amount.get()) * 0.1,
-                period: (ease_in_expo(params.pitch_lfo.period.get()) * 10.0).max(0.001),
+                amplitude: ease_in_expo(params.pitch_lfo.amount) * 0.1,
+                period: (ease_in_expo(params.pitch_lfo.period) * 10.0).max(0.001),
             },
             filter_params: FilterParams {
-                filter: to_filter_type(
-                    params.filter_type.get(),
-                    (params.filter_gain.get() - 0.5) * 36.0,
-                ),
-                q_value: (params.filter_q.get() * 10.0).max(0.01),
-                freq: params.filter_freq.get(),
+                filter: to_filter_type(params.filter_type, (params.filter_gain - 0.5) * 36.0),
+                q_value: (params.filter_q * 10.0).max(0.01),
+                freq: params.filter_freq,
             },
         }
     }
@@ -132,9 +125,9 @@ impl From<&RawModBank> for ModulationBank {
     fn from(params: &RawModBank) -> Self {
         ModulationBank {
             env_1: EnvelopeParams::from(&params.env_1),
-            env_1_send: ModBankSend::from((params.env_1_send.get(), params.env_1_send_to.get())),
+            env_1_send: ModBankSend::from((params.env_1_send, params.env_1_send_to)),
             env_2: EnvelopeParams::from(&params.env_2),
-            env_2_send: ModBankSend::from((params.env_2_send.get(), params.env_2_send_to.get())),
+            env_2_send: ModBankSend::from((params.env_2_send, params.env_2_send_to)),
         }
     }
 }
@@ -177,12 +170,12 @@ impl From<&RawEnvelope> for EnvelopeParams {
     fn from(params: &RawEnvelope) -> Self {
         // Apply exponetial scaling to input values.
         // This makes it easier to select small envelope lengths.
-        let attack = ease_in_expo(params.attack.get());
-        let hold = ease_in_expo(params.hold.get());
-        let decay = ease_in_expo(params.decay.get());
-        let sustain = params.sustain.get();
-        let release = ease_in_expo(params.release.get());
-        let multiply = (params.multiply.get() - 0.5) * 2.0;
+        let attack = ease_in_expo(params.attack);
+        let hold = ease_in_expo(params.hold);
+        let decay = ease_in_expo(params.decay);
+        let sustain = params.sustain;
+        let release = ease_in_expo(params.release);
+        let multiply = (params.multiply - 0.5) * 2.0;
         EnvelopeParams {
             // Clamp values to around 1 ms minimum.
             // This avoids division by zero problems.
@@ -204,51 +197,7 @@ pub struct LFO {
     pub period: f32,
 }
 
-/// The raw parameter values that a host DAW will set and modify.
-/// These are unscaled and are always in the [0.0, 1.0] range
-// pub struct RawParameters {
-//     pub osc_1: RawOSC,
-//     pub osc_2: RawOSC,
-//     pub master_vol: AtomicFloat,
-//     pub osc_2_mod: AtomicFloat,
-//     pub mod_bank: RawModBank,
-//     /// The host callback, used for communicating with the VST host
-//     pub host: HostCallback,
-//     /// The sender that notifies the GUI thread to update due to the host
-//     /// modifying a value. If this is None, then the GUI is closed/does not exist
-//     pub sender: tokio::sync::broadcast::Sender<(ParameterType, f32)>,
-// }
-
 impl RawParameters {
-    // pub fn new(host: HostCallback) -> Self {
-    //     RawParameters {
-    //         osc_1: RawOSC::default(OSCType::OSC1),
-    //         osc_2: RawOSC::default(OSCType::OSC2),
-    //         master_vol: RawParameters::get_default(ParameterType::MasterVolume).into(),
-    //         osc_2_mod: RawParameters::get_default(ParameterType::OSC2Mod).into(),
-    //         mod_bank: RawModBank::default(),
-    //         host,
-    //         sender: tokio::sync::broadcast::channel(128).0, // TODO: what size of channel should this be?
-    //     }
-    // }
-
-    // pub fn get_ref(&self, parameter: ParameterType) -> &AtomicFloat {
-    //     match parameter {
-    //         ParameterType::MasterVolume => &self.master_vol,
-    //         ParameterType::OSC2Mod => &self.osc_2_mod,
-    //         ParameterType::OSC1(param) => self.osc_1.get_ref(param),
-    //         ParameterType::OSC2(param) => self.osc_2.get_ref(param),
-    //         ParameterType::ModBank(ModBankParameter::Env1(param)) => {
-    //             self.mod_bank.env_1.get_ref(param)
-    //         }
-    //         ParameterType::ModBank(ModBankParameter::Env2(param)) => {
-    //             self.mod_bank.env_2.get_ref(param)
-    //         }
-    //         ParameterType::ModBankSend(ModBankType::Env1) => &self.mod_bank.env_1_send,
-    //         ParameterType::ModBankSend(ModBankType::Env2) => &self.mod_bank.env_2_send,
-    //     }
-    // }
-
     pub fn set(&self, value: f32, parameter: ParameterType) {
         // These are needed so Ableton will notice parameter changes in the
         // "Configure" window.
@@ -446,121 +395,35 @@ impl PluginParameters for RawParameters {
     }
 }
 
+/// Oscillator specific parameters. These are normalized f32 which should be
+/// baked by calling OSCParams::from()
 pub struct RawOSC {
-    pub volume: AtomicFloat,
-    pub shape: AtomicFloat,
-    pub pan: AtomicFloat,
-    pub phase: AtomicFloat,
-    pub warp: AtomicFloat,
-    pub coarse_tune: AtomicFloat,
-    pub fine_tune: AtomicFloat,
+    pub volume: f32,
+    pub shape: f32,
+    pub pan: f32,
+    pub phase: f32,
+    pub warp: f32,
+    pub coarse_tune: f32,
+    pub fine_tune: f32,
     pub vol_adsr: RawEnvelope,
     pub vol_lfo: RawLFO,
     pub pitch_adsr: RawEnvelope,
     pub pitch_lfo: RawLFO,
-    pub filter_type: AtomicFloat,
-    pub filter_freq: AtomicFloat,
-    pub filter_q: AtomicFloat,
-    pub filter_gain: AtomicFloat,
-}
-
-impl RawOSC {
-    pub fn get_ref(&self, param: OSCParameterType) -> &AtomicFloat {
-        use OSCParameterType::*;
-        match param {
-            Volume => &self.volume,
-            Phase => &self.phase,
-            Pan => &self.pan,
-            Shape => &self.shape,
-            Warp => &self.warp,
-            CoarseTune => &self.coarse_tune,
-            FineTune => &self.fine_tune,
-            VolumeEnv(param) => &self.vol_adsr.get_ref(param),
-            VolLFOAmplitude => &self.vol_lfo.amount,
-            VolLFOPeriod => &self.vol_lfo.period,
-            PitchEnv(param) => &self.pitch_adsr.get_ref(param),
-            PitchLFOAmplitude => &self.pitch_lfo.amount,
-            PitchLFOPeriod => &self.pitch_lfo.period,
-            FilterType => &self.filter_type,
-            FilterFreq => &self.filter_freq,
-            FilterQ => &self.filter_q,
-            FilterGain => &self.filter_gain,
-        }
-    }
-
-    fn get_default(param: OSCParameterType, _osc: OSCType) -> f32 {
-        use OSCParameterType::*;
-        match param {
-            Volume => 0.5, // 100%
-            Phase => 0.0,
-            Pan => 0.5,   // Center
-            Shape => 0.0, // Sine
-            Warp => 0.5,
-            CoarseTune => 0.5, // 0 semitones
-            FineTune => 0.5,   // 0 cents
-            VolumeEnv(param) => EnvelopeParam::get_default_vol(param),
-            VolLFOAmplitude => 0.0,
-            VolLFOPeriod => 0.5,
-            PitchEnv(param) => EnvelopeParam::get_default(param),
-            PitchLFOAmplitude => 0.0,
-            PitchLFOPeriod => 0.5,
-            FilterType => 0.0, // Low Pass
-            FilterFreq => 1.0, // 22khz
-            FilterQ => 0.1,
-            FilterGain => 0.5, // 0 dB
-        }
-    }
-
-    fn default(osc: OSCType) -> RawOSC {
-        use OSCParameterType::*;
-        RawOSC {
-            volume: RawOSC::get_default(Volume, osc).into(),
-            phase: RawOSC::get_default(Phase, osc).into(),
-            pan: RawOSC::get_default(Pan, osc).into(),
-            shape: RawOSC::get_default(Shape, osc).into(),
-            warp: RawOSC::get_default(Warp, osc).into(),
-            coarse_tune: RawOSC::get_default(CoarseTune, osc).into(),
-            fine_tune: RawOSC::get_default(FineTune, osc).into(),
-            vol_adsr: RawEnvelope::default_vol(),
-            vol_lfo: RawLFO {
-                period: RawOSC::get_default(VolLFOPeriod, osc).into(),
-                amount: RawOSC::get_default(VolLFOAmplitude, osc).into(),
-            },
-            pitch_adsr: RawEnvelope::default(),
-            pitch_lfo: RawLFO {
-                period: RawOSC::get_default(PitchLFOPeriod, osc).into(),
-                amount: RawOSC::get_default(PitchLFOAmplitude, osc).into(),
-            },
-            filter_type: RawOSC::get_default(FilterType, osc).into(),
-            filter_freq: RawOSC::get_default(FilterFreq, osc).into(),
-            filter_q: RawOSC::get_default(FilterQ, osc).into(),
-            filter_gain: RawOSC::get_default(FilterGain, osc).into(),
-        }
-    }
+    pub filter_type: f32,
+    pub filter_freq: f32,
+    pub filter_q: f32,
+    pub filter_gain: f32,
 }
 
 // Represents a bank of LFO and envelope modulators.
 #[derive(Debug)]
 pub struct RawModBank {
     pub env_1: RawEnvelope,
-    pub env_1_send: AtomicFloat,
-    pub env_1_send_to: AtomicFloat,
+    pub env_1_send: f32,
+    pub env_1_send_to: f32,
     pub env_2: RawEnvelope,
-    pub env_2_send: AtomicFloat,
-    pub env_2_send_to: AtomicFloat,
-}
-
-impl Default for RawModBank {
-    fn default() -> Self {
-        RawModBank {
-            env_1: RawEnvelope::default(),
-            env_1_send: AtomicFloat::default(),
-            env_1_send_to: AtomicFloat::default(),
-            env_2: RawEnvelope::default(),
-            env_2_send: AtomicFloat::default(),
-            env_2_send_to: AtomicFloat::from(1.0),
-        }
-    }
+    pub env_2_send: f32,
+    pub env_2_send_to: f32,
 }
 
 /// An enum which represents particular modulator, and then a particular
@@ -623,53 +486,30 @@ impl From<ModulationSend> for f32 {
 // Convience struct, represents parameters that are part of an envelope
 #[derive(Debug)]
 pub struct RawEnvelope {
-    pub attack: AtomicFloat,
-    pub hold: AtomicFloat,
-    pub decay: AtomicFloat,
-    pub sustain: AtomicFloat,
-    pub release: AtomicFloat,
-    pub multiply: AtomicFloat,
+    pub attack: f32,
+    pub hold: f32,
+    pub decay: f32,
+    pub sustain: f32,
+    pub release: f32,
+    pub multiply: f32,
 }
 
 impl RawEnvelope {
-    pub fn get_ref(&self, param: EnvelopeParam) -> &AtomicFloat {
+    pub fn get(&self, param: EnvelopeParam) -> f32 {
         match param {
-            EnvelopeParam::Attack => &self.attack,
-            EnvelopeParam::Hold => &self.hold,
-            EnvelopeParam::Decay => &self.decay,
-            EnvelopeParam::Sustain => &self.sustain,
-            EnvelopeParam::Release => &self.release,
-            EnvelopeParam::Multiply => &self.multiply,
-        }
-    }
-    fn default_vol() -> RawEnvelope {
-        RawEnvelope {
-            attack: EnvelopeParam::get_default_vol(EnvelopeParam::Attack).into(),
-            hold: EnvelopeParam::get_default_vol(EnvelopeParam::Hold).into(),
-            decay: EnvelopeParam::get_default_vol(EnvelopeParam::Decay).into(),
-            sustain: EnvelopeParam::get_default_vol(EnvelopeParam::Sustain).into(),
-            release: EnvelopeParam::get_default_vol(EnvelopeParam::Release).into(),
-            multiply: EnvelopeParam::get_default_vol(EnvelopeParam::Multiply).into(),
-        }
-    }
-}
-
-impl Default for RawEnvelope {
-    fn default() -> Self {
-        RawEnvelope {
-            attack: EnvelopeParam::get_default(EnvelopeParam::Attack).into(),
-            hold: EnvelopeParam::get_default(EnvelopeParam::Hold).into(),
-            decay: EnvelopeParam::get_default(EnvelopeParam::Decay).into(),
-            sustain: EnvelopeParam::get_default(EnvelopeParam::Sustain).into(),
-            release: EnvelopeParam::get_default(EnvelopeParam::Release).into(),
-            multiply: EnvelopeParam::get_default(EnvelopeParam::Multiply).into(),
+            EnvelopeParam::Attack => self.attack,
+            EnvelopeParam::Hold => self.hold,
+            EnvelopeParam::Decay => self.decay,
+            EnvelopeParam::Sustain => self.sustain,
+            EnvelopeParam::Release => self.release,
+            EnvelopeParam::Multiply => self.multiply,
         }
     }
 }
 
 pub struct RawLFO {
-    period: AtomicFloat,
-    amount: AtomicFloat,
+    period: f32,
+    amount: f32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -731,23 +571,12 @@ pub enum EnvelopeParam {
 impl EnvelopeParam {
     pub fn get_default(param: EnvelopeParam) -> f32 {
         match param {
-            EnvelopeParam::Attack => 1.0 / 10000.0,
-            EnvelopeParam::Decay => 0.2,
-            EnvelopeParam::Hold => 0.0,
-            EnvelopeParam::Sustain => 0.0, // 0%
-            EnvelopeParam::Release => 1.0 / 10000.0,
-            EnvelopeParam::Multiply => 0.5, // 0%
-        }
-    }
-
-    pub fn get_default_vol(param: EnvelopeParam) -> f32 {
-        match param {
-            EnvelopeParam::Attack => 0.1,
-            EnvelopeParam::Hold => 0.0,
-            EnvelopeParam::Decay => 0.2,
-            EnvelopeParam::Sustain => 0.5,
-            EnvelopeParam::Release => 0.3,
-            EnvelopeParam::Multiply => 1.0, // +100%
+            EnvelopeParam::Attack => DEFAULT_ATTACK,
+            EnvelopeParam::Decay => DEFAULT_DECAY,
+            EnvelopeParam::Hold => DEFAULT_HOLD,
+            EnvelopeParam::Sustain => DEFAULT_SUSTAIN,
+            EnvelopeParam::Release => DEFAULT_RELEASE,
+            EnvelopeParam::Multiply => DEFAULT_MULTIPLY,
         }
     }
 }
@@ -864,7 +693,7 @@ macro_rules! table {
             RawParameters,          ParameterType;
         //  variant                                                                         field_name                      name                          idx   default
             ParameterType::MasterVolume,                                                    master_vol,                     "Master Volume",              0,    0.33                    ;
-            ParameterType::OSC1(OSCParameterType::Volume),                                  osc_1_vol,                      "OSC 1 Volume",               1,    0.5                     ;
+            ParameterType::OSC1(OSCParameterType::Volume),                                  osc_1_volume,                   "OSC 1 Volume",               1,    0.5                     ;
             ParameterType::OSC1(OSCParameterType::Phase),                                   osc_1_phase,                    "OSC 1 Phase",                2,    0.0                     ;
             ParameterType::OSC1(OSCParameterType::Pan),                                     osc_1_pan,                      "OSC 1 Pan",                  3,    0.5                     ;
             ParameterType::OSC1(OSCParameterType::Shape),                                   osc_1_shape,                    "OSC 1 Shape",                4,    0.0                     ;
@@ -877,22 +706,22 @@ macro_rules! table {
             ParameterType::OSC1(OSCParameterType::VolumeEnv(EnvelopeParam::Sustain)),       osc_1_vol_env_sustain,          "OSC 1 Volume Sustain",       11,   DEFAULT_VOL_SUSTAIN     ;
             ParameterType::OSC1(OSCParameterType::VolumeEnv(EnvelopeParam::Release)),       osc_1_vol_env_release,          "OSC 1 Volume Release",       12,   DEFAULT_VOL_RELEASE     ;
             ParameterType::OSC1(OSCParameterType::VolumeEnv(EnvelopeParam::Multiply)),      osc_1_vol_env_multiply,         "OSC 1 Volume Multiply",      13,   DEFAULT_VOL_MULTIPLY    ;
-            ParameterType::OSC1(OSCParameterType::VolLFOAmplitude),                         osc_1_vol_LFO_amplitude,        "OSC 1 VolLFOAmplitude",      14,   0.0                     ;
-            ParameterType::OSC1(OSCParameterType::VolLFOPeriod),                            osc_1_vol_LFO_period,           "OSC 1 VolLFOPeriod",         15,   0.5                     ;
+            ParameterType::OSC1(OSCParameterType::VolLFOAmplitude),                         osc_1_vol_lfo_amplitude,        "OSC 1 VolLFOAmplitude",      14,   0.0                     ;
+            ParameterType::OSC1(OSCParameterType::VolLFOPeriod),                            osc_1_vol_lfo_period,           "OSC 1 VolLFOPeriod",         15,   0.5                     ;
             ParameterType::OSC1(OSCParameterType::PitchEnv(EnvelopeParam::Attack)),         osc_1_pitch_env_attack,         "OSC 1 Pitch Attack",         16,   DEFAULT_ATTACK          ;
             ParameterType::OSC1(OSCParameterType::PitchEnv(EnvelopeParam::Hold)),           osc_1_pitch_env_hold,           "OSC 1 Pitch Hold",           17,   DEFAULT_HOLD            ;
             ParameterType::OSC1(OSCParameterType::PitchEnv(EnvelopeParam::Decay)),          osc_1_pitch_env_decay,          "OSC 1 Pitch Decay",          18,   DEFAULT_DECAY           ;
             ParameterType::OSC1(OSCParameterType::PitchEnv(EnvelopeParam::Sustain)),        osc_1_pitch_env_sustain,        "OSC 1 Pitch Sustain",        19,   DEFAULT_SUSTAIN         ;
             ParameterType::OSC1(OSCParameterType::PitchEnv(EnvelopeParam::Release)),        osc_1_pitch_env_release,        "OSC 1 Pitch Release",        20,   DEFAULT_RELEASE         ;
             ParameterType::OSC1(OSCParameterType::PitchEnv(EnvelopeParam::Multiply)),       osc_1_pitch_env_multiply,       "OSC 1 Pitch Multiply",       21,   DEFAULT_MULTIPLY        ;
-            ParameterType::OSC1(OSCParameterType::PitchLFOAmplitude),                       osc_1_pitchLFOAmplitude,        "OSC 1 PitchLFOAmplitude",    22,   0.0                     ;
-            ParameterType::OSC1(OSCParameterType::PitchLFOPeriod),                          osc_1_pitchLFOPeriod,           "OSC 1 PitchLFOPeriod",       23,   0.5                     ;
+            ParameterType::OSC1(OSCParameterType::PitchLFOAmplitude),                       osc_1_pitch_lfo_amplitude,        "OSC 1 PitchLFOAmplitude",    22,   0.0                     ;
+            ParameterType::OSC1(OSCParameterType::PitchLFOPeriod),                          osc_1_pitch_lfo_period,           "OSC 1 PitchLFOPeriod",       23,   0.5                     ;
             ParameterType::OSC1(OSCParameterType::FilterType),                              osc_1_filter_type,              "OSC 1 FilterType",           24,   0.0                     ;
             ParameterType::OSC1(OSCParameterType::FilterFreq),                              osc_1_filter_freq,              "OSC 1 FilterFreq",           25,   1.0                     ;
             ParameterType::OSC1(OSCParameterType::FilterQ),                                 osc_1_filter_q,                 "OSC 1 FilterQ",              26,   0.1                     ;
             ParameterType::OSC1(OSCParameterType::FilterGain),                              osc_1_filter_gain,              "OSC 1 FilterGain",           27,   0.5                     ;
             ParameterType::OSC2Mod,                                                         osc_2_mod,                      "OSC 2 Mod",                  28,   0.0                     ;
-            ParameterType::OSC2(OSCParameterType::Volume),                                  osc_2_vol,                      "OSC 2 Volume",               29,   0.5                     ;
+            ParameterType::OSC2(OSCParameterType::Volume),                                  osc_2_volume,                   "OSC 2 Volume",               29,   0.5                     ;
             ParameterType::OSC2(OSCParameterType::Phase),                                   osc_2_phase,                    "OSC 2 Phase",                30,   0.0                     ;
             ParameterType::OSC2(OSCParameterType::Pan),                                     osc_2_pan,                      "OSC 2 Pan",                  31,   0.5                     ;
             ParameterType::OSC2(OSCParameterType::Shape),                                   osc_2_shape,                    "OSC 2 Shape",                32,   0.0                     ;
@@ -905,16 +734,16 @@ macro_rules! table {
             ParameterType::OSC2(OSCParameterType::VolumeEnv(EnvelopeParam::Sustain)),       osc_2_vol_env_sustain,          "OSC 2 Volume Sustain",       39,   DEFAULT_VOL_SUSTAIN     ;
             ParameterType::OSC2(OSCParameterType::VolumeEnv(EnvelopeParam::Release)),       osc_2_vol_env_release,          "OSC 2 Volume Release",       40,   DEFAULT_VOL_RELEASE     ;
             ParameterType::OSC2(OSCParameterType::VolumeEnv(EnvelopeParam::Multiply)),      osc_2_vol_env_multiply,         "OSC 2 Volume Multiply",      41,   DEFAULT_VOL_MULTIPLY    ;
-            ParameterType::OSC2(OSCParameterType::VolLFOAmplitude),                         osc_2_vol_LFO_amplitude,        "OSC 2 VolLFOAmplitude",      42,   0.0                     ;
-            ParameterType::OSC2(OSCParameterType::VolLFOPeriod),                            osc_2_vol_LFO_period,           "OSC 2 VolLFOPeriod",         43,   0.5                     ;
+            ParameterType::OSC2(OSCParameterType::VolLFOAmplitude),                         osc_2_vol_lfo_amplitude,        "OSC 2 VolLFOAmplitude",      42,   0.0                     ;
+            ParameterType::OSC2(OSCParameterType::VolLFOPeriod),                            osc_2_vol_lfo_period,           "OSC 2 VolLFOPeriod",         43,   0.5                     ;
             ParameterType::OSC2(OSCParameterType::PitchEnv(EnvelopeParam::Attack)),         osc_2_pitch_env_attack,         "OSC 2 Pitch Attack",         44,   DEFAULT_ATTACK          ;
             ParameterType::OSC2(OSCParameterType::PitchEnv(EnvelopeParam::Hold)),           osc_2_pitch_env_hold,           "OSC 2 Pitch Hold",           45,   DEFAULT_HOLD            ;
             ParameterType::OSC2(OSCParameterType::PitchEnv(EnvelopeParam::Decay)),          osc_2_pitch_env_decay,          "OSC 2 Pitch Decay",          46,   DEFAULT_DECAY           ;
             ParameterType::OSC2(OSCParameterType::PitchEnv(EnvelopeParam::Sustain)),        osc_2_pitch_env_sustain,        "OSC 2 Pitch Sustain",        47,   DEFAULT_SUSTAIN         ;
             ParameterType::OSC2(OSCParameterType::PitchEnv(EnvelopeParam::Release)),        osc_2_pitch_env_release,        "OSC 2 Pitch Release",        48,   DEFAULT_RELEASE         ;
             ParameterType::OSC2(OSCParameterType::PitchEnv(EnvelopeParam::Multiply)),       osc_2_pitch_env_multiply,       "OSC 2 Pitch Multiply",       49,   DEFAULT_MULTIPLY        ;
-            ParameterType::OSC2(OSCParameterType::PitchLFOAmplitude),                       osc_2_pitchLFOAmplitude,        "OSC 2 PitchLFOAmplitude",    50,   0.0                     ;
-            ParameterType::OSC2(OSCParameterType::PitchLFOPeriod),                          osc_2_pitchLFOPeriod,           "OSC 2 PitchLFOPeriod",       51,   0.5                     ;
+            ParameterType::OSC2(OSCParameterType::PitchLFOAmplitude),                       osc_2_pitch_lfo_amplitude,      "OSC 2 PitchLFOAmplitude",    50,   0.0                     ;
+            ParameterType::OSC2(OSCParameterType::PitchLFOPeriod),                          osc_2_pitch_lfo_period,         "OSC 2 PitchLFOPeriod",       51,   0.5                     ;
             ParameterType::OSC2(OSCParameterType::FilterType),                              osc_2_filter_type,              "OSC 2 FilterType",           52,   0.0                     ;
             ParameterType::OSC2(OSCParameterType::FilterFreq),                              osc_2_filter_freq,              "OSC 2 FilterFreq",           53,   1.0                     ;
             ParameterType::OSC2(OSCParameterType::FilterQ),                                 osc_2_filter_q,                 "OSC 2 FilterQ",              54,   0.1                     ;
@@ -939,6 +768,113 @@ macro_rules! table {
 
 impl ParameterType {
     pub const COUNT: usize = 70;
+}
+
+impl RawParameters {
+    pub fn get_osc_1(&self) -> RawOSC {
+        RawOSC {
+            volume: self.osc_1_volume.get(),
+            phase: self.osc_1_phase.get(),
+            pan: self.osc_1_pan.get(),
+            shape: self.osc_1_shape.get(),
+            warp: self.osc_1_warp.get(),
+            fine_tune: self.osc_1_fine_tune.get(),
+            coarse_tune: self.osc_1_coarse_tune.get(),
+            vol_adsr: RawEnvelope {
+                attack: self.osc_1_vol_env_attack.get(),
+                hold: self.osc_1_vol_env_hold.get(),
+                decay: self.osc_1_vol_env_decay.get(),
+                sustain: self.osc_1_vol_env_sustain.get(),
+                release: self.osc_1_vol_env_release.get(),
+                multiply: self.osc_1_vol_env_multiply.get(),
+            },
+            vol_lfo: RawLFO {
+                amount: self.osc_1_vol_lfo_amplitude.get(),
+                period: self.osc_1_vol_lfo_period.get(),
+            },
+            pitch_adsr: RawEnvelope {
+                attack: self.osc_1_pitch_env_attack.get(),
+                hold: self.osc_1_pitch_env_hold.get(),
+                decay: self.osc_1_pitch_env_decay.get(),
+                sustain: self.osc_1_pitch_env_sustain.get(),
+                release: self.osc_1_pitch_env_release.get(),
+                multiply: self.osc_1_pitch_env_multiply.get(),
+            },
+            pitch_lfo: RawLFO {
+                amount: self.osc_1_pitch_lfo_amplitude.get(),
+                period: self.osc_1_pitch_lfo_period.get(),
+            },
+            filter_type: self.osc_1_filter_type.get(),
+            filter_freq: self.osc_1_filter_freq.get(),
+            filter_q: self.osc_1_filter_q.get(),
+            filter_gain: self.osc_1_filter_gain.get(),
+        }
+    }
+
+    pub fn get_osc_2(&self) -> RawOSC {
+        RawOSC {
+            volume: self.osc_2_volume.get(),
+            phase: self.osc_2_phase.get(),
+            pan: self.osc_2_pan.get(),
+            shape: self.osc_2_shape.get(),
+            warp: self.osc_2_warp.get(),
+            fine_tune: self.osc_2_fine_tune.get(),
+            coarse_tune: self.osc_2_coarse_tune.get(),
+            vol_adsr: RawEnvelope {
+                attack: self.osc_2_vol_env_attack.get(),
+                hold: self.osc_2_vol_env_hold.get(),
+                decay: self.osc_2_vol_env_decay.get(),
+                sustain: self.osc_2_vol_env_sustain.get(),
+                release: self.osc_2_vol_env_release.get(),
+                multiply: self.osc_2_vol_env_multiply.get(),
+            },
+            vol_lfo: RawLFO {
+                amount: self.osc_2_vol_lfo_amplitude.get(),
+                period: self.osc_2_vol_lfo_period.get(),
+            },
+            pitch_adsr: RawEnvelope {
+                attack: self.osc_2_pitch_env_attack.get(),
+                hold: self.osc_2_pitch_env_hold.get(),
+                decay: self.osc_2_pitch_env_decay.get(),
+                sustain: self.osc_2_pitch_env_sustain.get(),
+                release: self.osc_2_pitch_env_release.get(),
+                multiply: self.osc_2_pitch_env_multiply.get(),
+            },
+            pitch_lfo: RawLFO {
+                amount: self.osc_2_pitch_lfo_amplitude.get(),
+                period: self.osc_2_pitch_lfo_period.get(),
+            },
+            filter_type: self.osc_2_filter_type.get(),
+            filter_freq: self.osc_2_filter_freq.get(),
+            filter_q: self.osc_2_filter_q.get(),
+            filter_gain: self.osc_2_filter_gain.get(),
+        }
+    }
+
+    pub fn get_mod_bank(&self) -> RawModBank {
+        RawModBank {
+            env_1: RawEnvelope {
+                attack: self.mod_bank_1_attack.get(),
+                hold: self.mod_bank_1_hold.get(),
+                decay: self.mod_bank_1_decay.get(),
+                sustain: self.mod_bank_1_sustain.get(),
+                release: self.mod_bank_1_release.get(),
+                multiply: self.mod_bank_1_multiply.get(),
+            },
+            env_1_send: self.mod_bank_1_send.get(),
+            env_1_send_to: 0.0,
+            env_2: RawEnvelope {
+                attack: self.mod_bank_2_attack.get(),
+                hold: self.mod_bank_2_hold.get(),
+                decay: self.mod_bank_2_decay.get(),
+                sustain: self.mod_bank_2_sustain.get(),
+                release: self.mod_bank_2_release.get(),
+                multiply: self.mod_bank_2_multiply.get(),
+            },
+            env_2_send: self.mod_bank_2_send.get(),
+            env_2_send_to: 1.0,
+        }
+    }
 }
 
 table! {generate_raw_params}

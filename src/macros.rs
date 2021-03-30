@@ -36,7 +36,7 @@ macro_rules! impl_get_ref {
     ($raw_parameters: ident, $parameter_type: ident;
      $($variant:pat, $field_name:ident, $name:expr, $idx:expr, $default:expr;)*) => {
         impl $raw_parameters {
-            fn get_ref(&self, x: $parameter_type) -> &vst::util::AtomicFloat {
+            pub fn get_ref(&self, x: $parameter_type) -> &vst::util::AtomicFloat {
                 match x {
                     $($variant => &self.$field_name,)*
                 }

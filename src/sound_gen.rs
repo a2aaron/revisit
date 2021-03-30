@@ -1,6 +1,6 @@
 use crate::{neighbor_pairs::NeighborPairsIter, params::OSCType};
 use crate::{
-    EnvelopeParams, ModBankEnvs, ModulationBank, ModulationSend, ModulationType, OSCParams,
+    params::OSCParams, EnvelopeParams, ModBankEnvs, ModulationBank, ModulationSend, ModulationType,
     Parameters,
 };
 

@@ -117,7 +117,7 @@ impl Application for UIFrontEnd {
             // The GUI has changed the modulation type
             Message::OSC2ModChanged(mod_type) => {
                 // TODO: Consider using an actual parameter instead of RawParameters
-                self.params.osc_2_mod.set(mod_type.into());
+                self.params.set(mod_type.into(), ParameterType::OSC2Mod);
             }
             Message::ModBankSendChanged(mod_bank, mod_send) => {
                 self.params

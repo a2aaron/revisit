@@ -138,7 +138,7 @@ impl MainTab {
             &widget_name(ParameterType::MasterVolume),
         );
 
-        let selected = match ModulationType::from(params.osc_2_mod.get()) {
+        let selected = match ModulationType::from(params.get(ParameterType::OSC2Mod)) {
             ModulationType::Mix => 0,
             ModulationType::AmpMod => 1,
             ModulationType::FreqMod => 2,
@@ -184,8 +184,8 @@ pub struct ModulationTab {
 impl ModulationTab {
     pub fn new(params: &RawParameters) -> ModulationTab {
         ModulationTab {
-            env_1: EnvKnobGroup::new(&params.mod_bank.env_1),
-            env_2: EnvKnobGroup::new(&params.mod_bank.env_2),
+            env_1: EnvKnobGroup::new(&params.get_mod_bank().env_1),
+            env_2: EnvKnobGroup::new(&params.get_mod_bank().env_2),
         }
     }
 
@@ -195,8 +195,12 @@ impl ModulationTab {
         _screen_height: u32,
         params: &RawParameters,
     ) -> iced::Element<'_, Message> {
-        let send_1 = params.mod_bank.env_1_send.get().into();
-        let send_2 = params.mod_bank.env_2_send.get().into();
+        let send_1 = params
+            .get(ParameterType::ModBankSend(ModBankType::Env1))
+            .into();
+        let send_2 = params
+            .get(ParameterType::ModBankSend(ModBankType::Env2))
+            .into();
         column(vec![
             self.env_1.widgets(send_1, ModBankType::Env1, "ENV 1"),
             self.env_2.widgets(send_2, ModBankType::Env2, "ENV 2"),
@@ -644,7 +648,7 @@ impl EnvKnobGroup {
     fn new(envelope: &RawEnvelope) -> EnvKnobGroup {
         fn make_state(envelope: &RawEnvelope, param: EnvelopeParam) -> knob::State {
             knob::State::new(NormalParam {
-                value: envelope.get_ref(param).get().into(),
+                value: envelope.get(param).into(),
                 default: EnvelopeParam::get_default(param).into(),
             })
         }

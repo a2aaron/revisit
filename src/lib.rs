@@ -20,8 +20,8 @@ use vst::{
 use wmidi::MidiMessage;
 
 use params::{
-    EnvelopeParams, ModBankEnvs, ModulationBank, ModulationSend, ModulationType, OSCParams,
-    ParameterType, Parameters, RawParameters,
+    EnvelopeParams, ModBankEnvs, ModulationBank, ModulationSend, ModulationType, ParameterType,
+    Parameters, RawParameters,
 };
 use sound_gen::{
     normalize_U7, normalize_pitch_bend, to_pitch_envelope, NormalizedPitchbend, SampleRate,
