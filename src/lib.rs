@@ -51,11 +51,12 @@ struct Revisit {
 impl Plugin for Revisit {
     fn new(host: HostCallback) -> Self {
         Revisit {
-            params: Arc::new(RawParameters {
-                host,
-                ..Default::default()
-            }),
-            ..Default::default()
+            params: Arc::new(RawParameters::new(host)),
+            notes: Vec::with_capacity(16),
+            sample_rate: 44100.0,
+            pitch_bend: Vec::with_capacity(16),
+            last_pitch_bend: 0.0,
+            gui_initialized: false,
         }
     }
 
@@ -217,19 +218,6 @@ impl Plugin for Revisit {
             self.gui_initialized = true;
             let (editor, _) = UIFrontEnd::new(self.params.clone());
             Some(Box::new(editor))
-        }
-    }
-}
-
-impl Default for Revisit {
-    fn default() -> Self {
-        Revisit {
-            notes: Vec::with_capacity(16),
-            sample_rate: 44100.0,
-            params: Arc::new(RawParameters::default()),
-            pitch_bend: Vec::with_capacity(16),
-            last_pitch_bend: 0.0,
-            gui_initialized: false,
         }
     }
 }

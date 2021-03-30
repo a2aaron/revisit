@@ -219,6 +219,18 @@ pub struct RawParameters {
 }
 
 impl RawParameters {
+    pub fn new(host: HostCallback) -> Self {
+        RawParameters {
+            osc_1: RawOSC::default(OSCType::OSC1),
+            osc_2: RawOSC::default(OSCType::OSC2),
+            master_vol: RawParameters::get_default(ParameterType::MasterVolume).into(),
+            osc_2_mod: RawParameters::get_default(ParameterType::OSC2Mod).into(),
+            mod_bank: RawModBank::default(),
+            host,
+            sender: tokio::sync::broadcast::channel(128).0, // TODO: what size of channel should this be?
+        }
+    }
+
     pub fn get_ref(&self, parameter: ParameterType) -> &AtomicFloat {
         match parameter {
             ParameterType::MasterVolume => &self.master_vol,
@@ -430,20 +442,6 @@ impl PluginParameters for RawParameters {
 
     fn string_to_parameter(&self, _index: i32, _text: String) -> bool {
         false
-    }
-}
-
-impl Default for RawParameters {
-    fn default() -> Self {
-        RawParameters {
-            osc_1: RawOSC::default(OSCType::OSC1),
-            osc_2: RawOSC::default(OSCType::OSC2),
-            master_vol: RawParameters::get_default(ParameterType::MasterVolume).into(),
-            osc_2_mod: RawParameters::get_default(ParameterType::OSC2Mod).into(),
-            mod_bank: RawModBank::default(),
-            host: Default::default(),
-            sender: tokio::sync::broadcast::channel(128).0, // TODO: what size of channel should this be?
-        }
     }
 }
 
