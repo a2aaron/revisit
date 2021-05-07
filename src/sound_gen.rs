@@ -1,7 +1,9 @@
-use crate::{neighbor_pairs::NeighborPairsIter, params::OSCType};
 use crate::{
-    params::OSCParams, EnvelopeParams, ModBankEnvs, ModulationBank, ModulationSend, ModulationType,
-    Parameters,
+    neighbor_pairs::NeighborPairsIter,
+    params::{EnvelopeParams, OSCType},
+};
+use crate::{
+    params::OSCParams, ModBankEnvs, ModulationBank, ModulationSend, ModulationType, Parameters,
 };
 
 use biquad::{Biquad, DirectForm1, ToHertz, Q_BUTTERWORTH_F32};
@@ -297,7 +299,7 @@ impl OSCGroup {
         // just have zero volume). We don't do this for the AmpMod because inverting
         // the signal allows for more interesting audio.
         let total_volume = base_vel
-            * params.volume
+            * params.volume.to_amplitude()
             * vol_env
             * (1.0 + vol_lfo).max(0.0)
             * (1.0 + vol_mod)
@@ -476,12 +478,12 @@ impl Envelope {
 
     /// Get the current envelope value. `time` is how many samples it has been
     /// since the start of the note
-    fn get(&self, params: &EnvelopeParams, context: NoteContext) -> f32 {
-        let attack = params.attack;
-        let hold = params.hold;
-        let decay = params.decay;
-        let sustain = params.sustain;
-        let release = params.release;
+    fn get(&self, params: &impl EnvelopeParams, context: NoteContext) -> f32 {
+        let attack = params.attack();
+        let hold = params.hold();
+        let decay = params.decay();
+        let sustain = params.sustain();
+        let release = params.release();
 
         let time = context.samples_since_note_on;
         let note_state = context.note_state;
@@ -500,7 +502,7 @@ impl Envelope {
                 lerp(self.lerp_from, 0.0, time)
             }
         };
-        value * params.multiply
+        value * params.multiply()
     }
 
     /// Set self.lerp_from to the specified value using the arguments. This needs
@@ -510,7 +512,7 @@ impl Envelope {
     /// be Held and `time` should be the last sample of the Hold state.
     /// And if going from Released to Retrigger, then `note_state` should be
     /// Released and `time` should be the last sample of the Released state.
-    fn remember(&mut self, params: &EnvelopeParams, context: NoteContext) {
+    fn remember(&mut self, params: &impl EnvelopeParams, context: NoteContext) {
         self.lerp_from = self.get(params, context);
     }
 }

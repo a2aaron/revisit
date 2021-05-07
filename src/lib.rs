@@ -20,8 +20,8 @@ use vst::{
 use wmidi::MidiMessage;
 
 use params::{
-    EnvelopeParams, ModBankEnvs, ModulationBank, ModulationSend, ModulationType, ParameterType,
-    Parameters, RawParameters,
+    ModBankEnvs, ModulationBank, ModulationSend, ModulationType, ParameterType, Parameters,
+    RawParameters,
 };
 use sound_gen::{
     normalize_U7, normalize_pitch_bend, to_pitch_envelope, NormalizedPitchbend, SampleRate,
@@ -123,8 +123,8 @@ impl Plugin for Revisit {
 
         // Write sound
         for i in 0..num_samples {
-            output_buffer[0][i] = left_out[i] * params.master_vol;
-            output_buffer[1][i] = right_out[i] * params.master_vol;
+            output_buffer[0][i] = left_out[i] * params.master_vol.to_amplitude();
+            output_buffer[1][i] = right_out[i] * params.master_vol.to_amplitude();
         }
     }
 
