@@ -1,6 +1,8 @@
+use std::ops::{Add, Mul, Sub};
+
 use crate::{
     neighbor_pairs::NeighborPairsIter,
-    params::{EnvelopeParams, OSCType},
+    params::{Decibel, EnvelopeParams, OSCType},
 };
 use crate::{
     params::OSCParams, ModBankEnvs, ModulationBank, ModulationSend, ModulationType, Parameters,
@@ -25,6 +27,37 @@ pub type SampleRate = f32;
 /// A pitchbend value in [-1.0, +1.0] range, where +1.0 means "max upward bend"
 /// and -1.0 means "max downward bend"
 pub type NormalizedPitchbend = f32;
+
+// A type that an Envelope and EnvelopeParameter can work with. This type must
+// support addition and subtraction and scalar multiplication with f32. It can also
+// specify the easing used for the attack, decay, release, and retrigger phases
+// of the envelope (by default, it will use `lerp<T>` and uses whatever the defined
+// Add/Sub/Mul operations do)
+pub trait EnvelopeType:
+    Add<Self, Output = Self>
+    + Sub<Self, Output = Self>
+    + Mul<f32, Output = Self>
+    + Copy
+    + Clone
+    + std::fmt::Debug
+where
+    Self: std::marker::Sized,
+{
+    fn lerp_attack(start: Self, end: Self, t: f32) -> Self {
+        lerp::<Self>(start, end, t)
+    }
+    fn lerp_decay(start: Self, end: Self, t: f32) -> Self {
+        lerp::<Self>(start, end, t)
+    }
+    fn lerp_release(start: Self, end: Self, t: f32) -> Self {
+        lerp::<Self>(start, end, t)
+    }
+    fn lerp_retrigger(start: Self, end: Self, t: f32) -> Self {
+        lerp::<Self>(start, end, t)
+    }
+}
+
+impl EnvelopeType for f32 {}
 
 pub struct SoundGenerator {
     osc_1: OSCGroup,
@@ -204,8 +237,8 @@ impl SoundGenerator {
 
 struct OSCGroup {
     osc: Oscillator,
-    vol_env: Envelope,
-    pitch_env: Envelope,
+    vol_env: Envelope<Decibel>,
+    pitch_env: Envelope<f32>,
     mod_bank_envs: ModBankEnvs,
     volume_lfo: Oscillator,
     pitch_lfo: Oscillator,
@@ -219,8 +252,8 @@ impl OSCGroup {
     fn new(sample_rate: f32, osc_type: OSCType) -> OSCGroup {
         OSCGroup {
             osc: Oscillator::new(),
-            vol_env: Envelope::new(),
-            pitch_env: Envelope::new(),
+            vol_env: Envelope::<Decibel>::new(),
+            pitch_env: Envelope::<f32>::new(),
             mod_bank_envs: ModBankEnvs::new(),
             volume_lfo: Oscillator::new(),
             pitch_lfo: Oscillator::new(),
@@ -299,8 +332,7 @@ impl OSCGroup {
         // just have zero volume). We don't do this for the AmpMod because inverting
         // the signal allows for more interesting audio.
         let total_volume = base_vel
-            * params.volume.to_amplitude()
-            * vol_env
+            * (params.volume + vol_env).get_amp()
             * (1.0 + vol_lfo).max(0.0)
             * (1.0 + vol_mod)
             * (1.0 - mod_bank.amplitude);
@@ -466,54 +498,80 @@ struct NoteContext {
     sample_rate: SampleRate,
 }
 
-pub struct Envelope {
+pub struct Envelope<T> {
     // The value to lerp from when in Retrigger or Release state
-    lerp_from: f32,
+    ease_from: T,
 }
 
-impl Envelope {
-    pub fn new() -> Envelope {
-        Envelope { lerp_from: 0.0 }
+impl Envelope<Decibel> {
+    pub fn new() -> Envelope<Decibel> {
+        Envelope {
+            ease_from: Decibel::neg_inf_db(),
+        }
     }
+}
 
+impl Envelope<f32> {
+    pub fn new() -> Envelope<f32> {
+        Envelope { ease_from: 0.0 }
+    }
+}
+
+impl<T: EnvelopeType> Envelope<T> {
     /// Get the current envelope value. `time` is how many samples it has been
     /// since the start of the note
-    fn get(&self, params: &impl EnvelopeParams, context: NoteContext) -> f32 {
-        let attack = params.attack();
-        let hold = params.hold();
-        let decay = params.decay();
-        let sustain = params.sustain();
-        let release = params.release();
-
+    fn get(&self, params: &impl EnvelopeParams<T>, context: NoteContext) -> T {
         let time = context.samples_since_note_on;
         let note_state = context.note_state;
         let sample_rate = context.sample_rate;
 
         let value = match note_state {
-            NoteState::None => 0.0,
-            NoteState::Held => ahds_env(attack, hold, decay, sustain, time as f32 / sample_rate),
+            NoteState::None => params.zero(),
+            NoteState::Held => {
+                let time = time as f32 / sample_rate;
+                let attack = params.attack();
+                let hold = params.hold();
+                let decay = params.decay();
+                let sustain = params.sustain();
+                let max = params.max();
+                let zero = params.zero();
+                if time < attack {
+                    // Attack
+                    T::lerp_attack(zero, max, time / attack)
+                } else if time < attack + hold {
+                    // Hold
+                    max
+                } else if time < attack + hold + decay {
+                    // Decay
+                    let time = time - attack - hold;
+                    T::lerp_decay(max, sustain, time / decay)
+                } else {
+                    // Sustain
+                    sustain
+                }
+            }
             NoteState::Released(rel_time) => {
                 let time = (time - rel_time) as f32 / sample_rate;
-                lerp(self.lerp_from, 0.0, time / release)
+                T::lerp_release(self.ease_from, params.zero(), time / params.release())
             }
             NoteState::Retrigger(retrig_time) => {
                 // Forcibly decay over RETRIGGER_TIME.
                 let time = (time - retrig_time) as f32 / RETRIGGER_TIME as f32;
-                lerp(self.lerp_from, 0.0, time)
+                T::lerp_retrigger(self.ease_from, params.zero(), time)
             }
         };
         value * params.multiply()
     }
 
-    /// Set self.lerp_from to the specified value using the arguments. This needs
+    /// Set self.ease_from to the specified value using the arguments. This needs
     /// to be called JUST BEFORE transitioning from a Held to Released state or
     /// from Released to Retrigger state.
     /// In particular, if going from Held to Released, then `note_state` should
     /// be Held and `time` should be the last sample of the Hold state.
     /// And if going from Released to Retrigger, then `note_state` should be
     /// Released and `time` should be the last sample of the Released state.
-    fn remember(&mut self, params: &impl EnvelopeParams, context: NoteContext) {
-        self.lerp_from = self.get(params, context);
+    fn remember(&mut self, params: &impl EnvelopeParams<T>, context: NoteContext) {
+        self.ease_from = self.get(params, context);
     }
 }
 
@@ -822,29 +880,60 @@ pub fn to_pitch_multiplier(pitch_bend: NormalizedPitchbend, semitones: i32) -> f
     exponent.powf(pitch_bend)
 }
 
-// Get the envelope value given attack, decay, and sustain values.
-// Attack, decay, and time are all in the same units (seconds usually)
-// Sustain is a value in range [0.0, 1.0]
-// Returned value is also in range [0.0, 1.0]
-fn ahds_env(attack: f32, hold: f32, decay: f32, sustain: f32, time: f32) -> f32 {
+fn ahds_amp_env(params: &impl EnvelopeParams<Decibel>, time: f32) -> Decibel {
+    let attack = params.attack();
+    let hold = params.hold();
+    let decay = params.decay();
+    let sustain = params.sustain();
+    let max = params.max();
+    let zero = params.zero();
     if time < attack {
-        // Attack
-        time / attack
+        // Attack - We lerp in amplitude space since this makes large attack values behave usefully
+        Decibel::lerp_amp(zero, max, time / attack)
     } else if time < attack + hold {
         // Hold
-        1.0
+        max
+    } else if time < attack + hold + decay {
+        // Decay - We lerp in db space since this makes decay sound more natural
+        let time = time - attack - hold;
+        Decibel::lerp_db(max.get_db(), sustain.get_db(), time / decay)
+    } else {
+        // Sustain
+        sustain
+    }
+}
+// Get the envelope value given attack, decay, and sustain values. This function
+// ignores the release phase
+// Attack, decay, and time are all in the same units (seconds usually)
+// In the attack phase, the returned value is lerped from `zero` to `max`
+// In the hold value, the returned value is `max`
+// In the decay phase, the returned value is lerped from `max` to `sustain`.
+// In the sustain phase, the returned value is `sustain`
+fn ahds_env<T: EnvelopeType>(params: &impl EnvelopeParams<T>, time: f32) -> T {
+    let attack = params.attack();
+    let hold = params.hold();
+    let decay = params.decay();
+    let sustain = params.sustain();
+    let max = params.max();
+    let zero = params.zero();
+    if time < attack {
+        // Attack
+        lerp(zero, max, time / attack)
+    } else if time < attack + hold {
+        // Hold
+        max
     } else if time < attack + hold + decay {
         // Decay
         let time = time - attack - hold;
-        lerp(1.0, sustain, time / decay)
+        lerp(max, sustain, time / decay)
     } else {
         // Sustain
         sustain
     }
 }
 
-pub fn lerp(start: f32, end: f32, x: f32) -> f32 {
-    (end - start) * x.clamp(0.0, 1.0) + start
+pub fn lerp<T: EnvelopeType>(start: T, end: T, t: f32) -> T {
+    (end - start) * t.clamp(0.0, 1.0) + start
 }
 
 pub fn ease_in_expo(x: f32) -> f32 {

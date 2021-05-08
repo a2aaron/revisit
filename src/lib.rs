@@ -123,8 +123,8 @@ impl Plugin for Revisit {
 
         // Write sound
         for i in 0..num_samples {
-            output_buffer[0][i] = left_out[i] * params.master_vol.to_amplitude();
-            output_buffer[1][i] = right_out[i] * params.master_vol.to_amplitude();
+            output_buffer[0][i] = left_out[i] * params.master_vol.get_amp();
+            output_buffer[1][i] = right_out[i] * params.master_vol.get_amp();
         }
     }
 

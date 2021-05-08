@@ -40,30 +40,92 @@ pub const DEFAULT_MULTIPLY: f32 = 0.5; // +0%
 #[derive(Debug, Clone, Copy)]
 pub struct Decibel {
     db: f32,
+    amp: f32,
 }
 
-impl From<f32> for Decibel {
-    fn from(db: f32) -> Self {
-        Decibel { db }
+impl std::ops::Mul<f32> for Decibel {
+    type Output = Decibel;
+
+    fn mul(self, rhs: f32) -> Self::Output {
+        Decibel::from_db(self.db * rhs)
+    }
+}
+
+impl std::ops::Add<Decibel> for Decibel {
+    type Output = Decibel;
+
+    fn add(self, rhs: Decibel) -> Self::Output {
+        Decibel::from_db(self.db + rhs.db)
+    }
+}
+
+impl std::ops::Sub<Decibel> for Decibel {
+    type Output = Decibel;
+
+    fn sub(self, rhs: Decibel) -> Self::Output {
+        Decibel::from_db(self.db - rhs.db)
+    }
+}
+
+impl crate::sound_gen::EnvelopeType for Decibel {
+    fn lerp_attack(start: Self, end: Self, t: f32) -> Self {
+        // Lerp in amplitude space during the attack phase. This is useful
+        // long attacks usually need linear amplitude ramp ups.
+        Decibel::lerp_amp(start, end, t)
+    }
+    fn lerp_decay(start: Self, end: Self, t: f32) -> Self {
+        Decibel::lerp_db(start.get_db(), end.get_db(), t)
+    }
+    fn lerp_release(start: Self, end: Self, t: f32) -> Self {
+        Decibel::lerp_db(start.get_db(), end.get_db(), t)
+    }
+    fn lerp_retrigger(start: Self, end: Self, t: f32) -> Self {
+        Decibel::lerp_db(start.get_db(), end.get_db(), t)
     }
 }
 
 impl Decibel {
-    pub fn from_unscaled(min_db: f32, max_db: f32, x: f32) -> Decibel {
-        let db = if x == 0.0 {
-            f32::NEG_INFINITY
-        } else {
-            crate::sound_gen::lerp(min_db, max_db, x)
-        };
-        Decibel { db }
+    pub fn zero_db() -> Decibel {
+        Decibel { db: 0.0, amp: 1.0 }
     }
 
-    pub fn to_amplitude(&self) -> f32 {
-        if self.db == f32::NEG_INFINITY {
-            0.0
-        } else {
-            10.0f32.powf(self.db / 10.0)
+    pub fn neg_inf_db() -> Decibel {
+        Decibel {
+            db: -70.0,
+            amp: 0.0,
         }
+    }
+
+    pub fn from_db(db: f32) -> Decibel {
+        Decibel {
+            db,
+            amp: 10.0f32.powf(db / 10.0),
+        }
+    }
+
+    pub fn from_amp(amp: f32) -> Decibel {
+        Decibel {
+            db: f32::log10(amp) * 10.0,
+            amp,
+        }
+    }
+
+    pub fn lerp_amp(min: Decibel, max: Decibel, t: f32) -> Decibel {
+        let amp = crate::sound_gen::lerp(min.get_amp(), max.get_amp(), t);
+        Decibel::from_amp(amp)
+    }
+
+    pub fn lerp_db(min: f32, max: f32, t: f32) -> Decibel {
+        let db = crate::sound_gen::lerp(min, max, t);
+        Decibel::from_db(db)
+    }
+
+    pub fn get_amp(&self) -> f32 {
+        self.amp
+    }
+
+    pub fn get_db(&self) -> f32 {
+        self.db
     }
 }
 
@@ -80,7 +142,7 @@ impl From<&RawParameters> for Parameters {
         Parameters {
             osc_1: OSCParams::from(&params.get_osc_1()),
             osc_2: OSCParams::from(&params.get_osc_2()),
-            master_vol: Decibel::from_unscaled(-36.0, 12.0, params.master_vol.get()),
+            master_vol: Decibel::lerp_db(-36.0, 12.0, params.master_vol.get()),
             osc_2_mod: params.osc_2_mod.get().into(),
             mod_bank: ModulationBank::from(&params.get_mod_bank()),
         }
@@ -109,7 +171,7 @@ pub struct OSCParams {
 impl From<&RawOSC> for OSCParams {
     fn from(params: &RawOSC) -> Self {
         OSCParams {
-            volume: Decibel::from_unscaled(-36.0, 12.0, params.volume),
+            volume: Decibel::lerp_db(-36.0, 12.0, params.volume),
             shape: NoteShape::from_warp(params.shape, params.warp),
             pan: (params.pan - 0.5) * 2.0,
             phase: params.phase,
@@ -137,15 +199,15 @@ impl From<&RawOSC> for OSCParams {
 }
 
 pub struct ModBankEnvs {
-    pub env_1: Envelope,
-    pub env_2: Envelope,
+    pub env_1: Envelope<f32>,
+    pub env_2: Envelope<f32>,
 }
 
 impl ModBankEnvs {
     pub fn new() -> ModBankEnvs {
         ModBankEnvs {
-            env_1: Envelope::new(),
-            env_2: Envelope::new(),
+            env_1: Envelope::<f32>::new(),
+            env_2: Envelope::<f32>::new(),
         }
     }
 }
@@ -182,19 +244,34 @@ impl From<(f32, f32)> for ModBankSend {
     }
 }
 
-pub trait EnvelopeParams {
-    // In seconds
+// A set of immutable envelope parameters. The envelope is defined as follows:
+// - In the attack phase, the envelope value goes from the `zero` value to the
+//   `max` value.
+// - In the decay phase, the envelope value goes from the `max` value to the
+//   `sustain` value.
+// - In the sustain phase, the envelope value is constant at the `sustain` value.
+// - In the release phase, the envelope value goes from the `sustain` value to
+//   `zero` value.
+// The envelope value is then scaled by the `multiply` value
+pub trait EnvelopeParams<T> {
+    // In seconds, how long attack phase is
     fn attack(&self) -> f32;
-    // In seconds
+    // In seconds, how long hold phase is
     fn hold(&self) -> f32;
-    // In seconds
+    // In seconds, how long decay phase is
     fn decay(&self) -> f32;
-    // In 0.0-1.0 range, as raw multiplier
-    fn sustain(&self) -> f32;
-    // In seconds
+    // The value to go to during sustain phase
+    fn sustain(&self) -> T;
+    // In seconds, how long release phase is
     fn release(&self) -> f32;
-    // In 0.0-1.0 range, as raw multiplier
-    fn multiply(&self) -> f32;
+    // In -1.0 to 1.0 range usually. Multiplied by the value given by the ADSR
+    fn multiply(&self) -> f32 {
+        1.0
+    }
+    // The "maximum" value to go to at the peak of the envelope
+    fn max(&self) -> T;
+    // The "zero" value to go to during the release phase
+    fn zero(&self) -> T;
 }
 
 /// An ADSR envelope.
@@ -207,7 +284,7 @@ pub struct VolEnvParams {
     pub release: f32,
 }
 
-impl EnvelopeParams for VolEnvParams {
+impl EnvelopeParams<Decibel> for VolEnvParams {
     fn attack(&self) -> f32 {
         self.attack
     }
@@ -217,14 +294,17 @@ impl EnvelopeParams for VolEnvParams {
     fn decay(&self) -> f32 {
         self.decay
     }
-    fn sustain(&self) -> f32 {
-        self.sustain.to_amplitude()
+    fn sustain(&self) -> Decibel {
+        self.sustain
     }
     fn release(&self) -> f32 {
         self.release
     }
-    fn multiply(&self) -> f32 {
-        1.0
+    fn max(&self) -> Decibel {
+        Decibel::zero_db()
+    }
+    fn zero(&self) -> Decibel {
+        Decibel::neg_inf_db()
     }
 }
 
@@ -244,7 +324,7 @@ impl VolEnvParams {
             attack: (attack * 2.0).max(1.0 / 1000.0),
             hold: hold * 5.0,
             decay: (decay * 5.0).max(1.0 / 1000.0),
-            sustain: Decibel::from_unscaled(-36.0, 0.0, sustain),
+            sustain: Decibel::lerp_db(-36.0, 0.0, sustain),
             release: (release * 5.0).max(1.0 / 1000.0),
         }
     }
@@ -267,7 +347,7 @@ pub struct GeneralEnvParams {
     pub multiply: f32,
 }
 
-impl EnvelopeParams for GeneralEnvParams {
+impl EnvelopeParams<f32> for GeneralEnvParams {
     fn attack(&self) -> f32 {
         self.attack
     }
@@ -285,6 +365,12 @@ impl EnvelopeParams for GeneralEnvParams {
     }
     fn multiply(&self) -> f32 {
         self.multiply
+    }
+    fn max(&self) -> f32 {
+        1.0
+    }
+    fn zero(&self) -> f32 {
+        0.0
     }
 }
 
