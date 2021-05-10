@@ -15,6 +15,10 @@ use vst::{host::Host, plugin::PluginParameters, util::AtomicFloat};
 // Low Shelf, High Shelf, Peaking EQ
 pub const FILTER_TYPE_VARIANT_COUNT: usize = 8;
 
+// The threshold for which Decibel values below it will be treated as negative
+// infinity dB.
+pub const NEG_INF_DB_THRESHOLD: f32 = -70.0;
+
 // Default values for master volume
 pub const DEFAULT_MASTER_VOL: f32 = 0.6875; // -3 dB
 
@@ -47,7 +51,6 @@ pub const DEFAULT_MULTIPLY: f32 = 0.5; // +0%
 #[derive(Debug, Clone, Copy)]
 pub struct Decibel {
     db: f32,
-    amp: f32,
 }
 
 impl std::ops::Mul<f32> for Decibel {
@@ -90,51 +93,57 @@ impl crate::sound_gen::EnvelopeType for Decibel {
         Decibel::lerp_amp(start, end, t)
     }
     fn one() -> Self {
-        Decibel { db: 0.0, amp: 1.0 }
+        Decibel { db: 0.0 }
     }
     fn zero() -> Self {
         Decibel {
-            db: -70.0,
-            amp: 0.0,
+            db: NEG_INF_DB_THRESHOLD,
         }
     }
 }
 
 impl Decibel {
     pub fn from_db(db: f32) -> Decibel {
-        Decibel {
-            db,
-            amp: 10.0f32.powf(db / 10.0),
-        }
+        Decibel { db }
     }
 
     pub fn from_amp(amp: f32) -> Decibel {
         Decibel {
             db: f32::log10(amp) * 10.0,
-            amp,
         }
     }
 
+    // Linearly interpolate in amplitude space.
     pub fn lerp_amp(start: Decibel, end: Decibel, t: f32) -> Decibel {
         let amp = crate::sound_gen::lerp(start.get_amp(), end.get_amp(), t);
         Decibel::from_amp(amp)
     }
 
+    // Linearly interpolate in Decibel space.
     pub fn lerp_db(start: f32, end: f32, t: f32) -> Decibel {
         let db = crate::sound_gen::lerp(start, end, t);
         Decibel::from_db(db)
     }
 
+    // Linearly interpolate in Decibel space, but values of t below 0.125 will
+    // lerp from `start` to `Decibel::zero()`. This function is meant for use
+    // with user-facing parameter knobs.
     pub fn lerp_db_knob(start: f32, end: f32, t: f32) -> Decibel {
         if t == 0.0 {
             <Decibel as crate::sound_gen::EnvelopeType>::zero()
+        } else if t <= 0.125 {
+            Decibel::lerp_db(NEG_INF_DB_THRESHOLD, start, t * 8.0)
         } else {
-            let db = crate::sound_gen::lerp(start, end, t);
-            Decibel::from_db(db)
+            Decibel::lerp_db(start, end, t)
         }
     }
+
     pub fn get_amp(&self) -> f32 {
-        self.amp
+        if self.db <= NEG_INF_DB_THRESHOLD {
+            0.0
+        } else {
+            10.0f32.powf(self.db / 10.0)
+        }
     }
 
     pub fn get_db(&self) -> f32 {
@@ -492,8 +501,10 @@ impl RawParameters {
         }
 
         fn volume_string(decibel: Decibel) -> (String, String) {
-            if decibel.db < 0.0 {
-                (format!("-{:.2}", decibel.db), "dB".to_string())
+            if decibel.db <= NEG_INF_DB_THRESHOLD {
+                ("-inf".to_string(), "dB".to_string())
+            } else if decibel.db < 0.0 {
+                (format!("{:.2}", decibel.db), "dB".to_string())
             } else {
                 (format!("+{:.2}", decibel.db), "dB".to_string())
             }
