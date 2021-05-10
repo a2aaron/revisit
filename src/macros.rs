@@ -80,6 +80,10 @@ macro_rules! impl_from_i32 {
         impl std::convert::TryFrom<i32> for $parameter_type {
             type Error = ();
             fn try_from(x: i32) -> Result<Self, Self::Error> {
+                // Dummy values for parameter indicies
+                if x <= -1 {
+                    return Err(())
+                }
                 match x {
                     $($idx => Ok($variant),)*
                     _ => Err(()),
