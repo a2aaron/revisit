@@ -41,6 +41,10 @@ where
     fn lerp_decay(start: Self, end: Self, t: f32) -> Self;
     fn lerp_release(start: Self, end: Self, t: f32) -> Self;
     fn lerp_retrigger(start: Self, end: Self, t: f32) -> Self;
+    // The value to ease from during attack phase and to ease to during release phase
+    fn zero() -> Self;
+    // THe value to ease to during decay phase and to ease from during decay phase
+    fn one() -> Self;
 }
 
 impl EnvelopeType for f32 {
@@ -55,6 +59,13 @@ impl EnvelopeType for f32 {
     }
     fn lerp_retrigger(start: Self, end: Self, t: f32) -> Self {
         lerp::<Self>(start, end, t)
+    }
+
+    fn zero() -> Self {
+        0.0
+    }
+    fn one() -> Self {
+        1.0
     }
 }
 
@@ -145,9 +156,15 @@ impl SoundGenerator {
         // Also, we set the note velocity to the appropriate new note velocity.
         match self.next_note_on {
             Some((note_on, note_on_vel)) if note_on == i => {
-                self.osc_1.note_state_changed(context);
-                self.osc_2.note_state_changed(context);
+                let edge = match self.note_state {
+                    NoteState::None => NoteStateEdge::InitialTrigger,
+                    _ => NoteStateEdge::NoteRetriggered,
+                };
 
+                self.osc_1.note_state_changed(edge);
+                self.osc_2.note_state_changed(edge);
+
+                // Update the note state
                 self.note_state = match self.note_state {
                     NoteState::None => NoteState::Held,
                     _ => NoteState::Retrigger(self.samples_since_note_on),
@@ -161,8 +178,8 @@ impl SoundGenerator {
         // Trigger note off events
         match self.next_note_off {
             Some(note_off) if note_off == i => {
-                self.osc_1.note_state_changed(context);
-                self.osc_2.note_state_changed(context);
+                self.osc_1.note_state_changed(NoteStateEdge::NoteReleased);
+                self.osc_2.note_state_changed(NoteStateEdge::NoteReleased);
 
                 self.note_state = NoteState::Released(self.samples_since_note_on);
                 self.next_note_off = None;
@@ -423,11 +440,15 @@ impl OSCGroup {
     }
 
     /// Handle hold-to-release and release-to-retrigger state transitions
-    fn note_state_changed(&mut self, context: NoteContext) {
-        self.vol_env.remember();
-        let remembered = self.pitch_env.remember();
-        self.mod_bank_envs.env_1.remember();
-        self.mod_bank_envs.env_2.remember();
+    fn note_state_changed(&mut self, edge: NoteStateEdge) {
+        match edge {
+            NoteStateEdge::NoteReleased | NoteStateEdge::NoteRetriggered => {
+                self.vol_env.remember();
+                self.mod_bank_envs.env_1.remember();
+                self.mod_bank_envs.env_2.remember();
+            }
+            _ => {}
+        }
     }
 }
 
@@ -494,25 +515,14 @@ pub struct Envelope<T> {
     last_env_value: T,
 }
 
-impl Envelope<Decibel> {
-    pub fn new() -> Envelope<Decibel> {
-        Envelope {
-            ease_from: Decibel::neg_inf_db(),
-            last_env_value: Decibel::neg_inf_db(),
-        }
-    }
-}
-
-impl Envelope<f32> {
-    pub fn new() -> Envelope<f32> {
-        Envelope {
-            ease_from: 0.0,
-            last_env_value: 0.0,
-        }
-    }
-}
-
 impl<T: EnvelopeType> Envelope<T> {
+    pub fn new() -> Envelope<T> {
+        Envelope {
+            ease_from: T::zero(),
+            last_env_value: T::zero(),
+        }
+    }
+
     /// Get the current envelope value. `time` is how many samples it has been
     /// since the start of the note
     fn get(&mut self, params: &impl EnvelopeParams<T>, context: NoteContext) -> T {
@@ -521,25 +531,23 @@ impl<T: EnvelopeType> Envelope<T> {
         let sample_rate = context.sample_rate;
 
         let value = match note_state {
-            NoteState::None => params.zero(),
+            NoteState::None => T::zero(),
             NoteState::Held => {
                 let time = time as f32 / sample_rate;
                 let attack = params.attack();
                 let hold = params.hold();
                 let decay = params.decay();
                 let sustain = params.sustain();
-                let max = params.max();
-                let zero = params.zero();
                 if time < attack {
                     // Attack
-                    T::lerp_attack(zero, max, time / attack)
+                    T::lerp_attack(T::zero(), T::one(), time / attack)
                 } else if time < attack + hold {
                     // Hold
-                    max
+                    T::one()
                 } else if time < attack + hold + decay {
                     // Decay
                     let time = time - attack - hold;
-                    T::lerp_decay(max, sustain, time / decay)
+                    T::lerp_decay(T::one(), sustain, time / decay)
                 } else {
                     // Sustain
                     sustain
@@ -547,12 +555,12 @@ impl<T: EnvelopeType> Envelope<T> {
             }
             NoteState::Released(rel_time) => {
                 let time = (time - rel_time) as f32 / sample_rate;
-                T::lerp_release(self.ease_from, params.zero(), time / params.release())
+                T::lerp_release(self.ease_from, T::zero(), time / params.release())
             }
             NoteState::Retrigger(retrig_time) => {
                 // Forcibly decay over RETRIGGER_TIME.
                 let time = (time - retrig_time) as f32 / RETRIGGER_TIME as f32;
-                T::lerp_retrigger(self.ease_from, params.zero(), time)
+                T::lerp_retrigger(self.ease_from, T::zero(), time)
             }
         };
         // Store the premultiplied value. This is because using the post-multiplied
@@ -683,6 +691,14 @@ enum NoteState {
     /// The note has just be retriggered during a release. Time is in samples
     /// since the oscillator has retriggered.
     Retrigger(SampleTime),
+}
+
+/// A state transition for a note.
+#[derive(Debug, Copy, Clone)]
+enum NoteStateEdge {
+    InitialTrigger,  // The note is being pressed for the first time
+    NoteReleased,    // The note has just been released
+    NoteRetriggered, // The note is being pressed, but not the first time
 }
 
 /// The shape of a note. The associated f32 indicates the "warp" of the note.

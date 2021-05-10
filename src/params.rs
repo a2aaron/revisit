@@ -19,7 +19,14 @@ pub const FILTER_TYPE_VARIANT_COUNT: usize = 8;
 pub const DEFAULT_MASTER_VOL: f32 = 0.6875; // -3 dB
 
 // Default values for individual oscillator volume
-pub const DEFAULT_OSC_VOL: f32 = 0.68750; // -3 dB
+pub const DEFAULT_OSC_VOL: f32 = 0.5833; // -3 dB
+
+// Min and maximum ranges for volume knobs.
+pub const MASTER_VOL_MIN_DB: f32 = -36.0;
+pub const MASTER_VOL_MAX_DB: f32 = 12.0;
+pub const OSC_VOL_MIN_DB: f32 = -24.0;
+pub const OSC_VOL_MAX_DB: f32 = 12.0;
+pub const SUSTAIN_MIN_DB: f32 = -24.0;
 
 // Default values for volume envelope
 pub const DEFAULT_VOL_ATTACK: f32 = 0.1;
@@ -80,22 +87,20 @@ impl crate::sound_gen::EnvelopeType for Decibel {
         Decibel::lerp_db(start.get_db(), end.get_db(), t)
     }
     fn lerp_retrigger(start: Self, end: Self, t: f32) -> Self {
-        Decibel::lerp_db(start.get_db(), end.get_db(), t)
+        Decibel::lerp_amp(start, end, t)
     }
-}
-
-impl Decibel {
-    pub fn zero_db() -> Decibel {
+    fn one() -> Self {
         Decibel { db: 0.0, amp: 1.0 }
     }
-
-    pub fn neg_inf_db() -> Decibel {
+    fn zero() -> Self {
         Decibel {
             db: -70.0,
             amp: 0.0,
         }
     }
+}
 
+impl Decibel {
     pub fn from_db(db: f32) -> Decibel {
         Decibel {
             db,
@@ -110,16 +115,24 @@ impl Decibel {
         }
     }
 
-    pub fn lerp_amp(min: Decibel, max: Decibel, t: f32) -> Decibel {
-        let amp = crate::sound_gen::lerp(min.get_amp(), max.get_amp(), t);
+    pub fn lerp_amp(start: Decibel, end: Decibel, t: f32) -> Decibel {
+        let amp = crate::sound_gen::lerp(start.get_amp(), end.get_amp(), t);
         Decibel::from_amp(amp)
     }
 
-    pub fn lerp_db(min: f32, max: f32, t: f32) -> Decibel {
-        let db = crate::sound_gen::lerp(min, max, t);
+    pub fn lerp_db(start: f32, end: f32, t: f32) -> Decibel {
+        let db = crate::sound_gen::lerp(start, end, t);
         Decibel::from_db(db)
     }
 
+    pub fn lerp_db_knob(start: f32, end: f32, t: f32) -> Decibel {
+        if t == 0.0 {
+            <Decibel as crate::sound_gen::EnvelopeType>::zero()
+        } else {
+            let db = crate::sound_gen::lerp(start, end, t);
+            Decibel::from_db(db)
+        }
+    }
     pub fn get_amp(&self) -> f32 {
         self.amp
     }
@@ -142,7 +155,11 @@ impl From<&RawParameters> for Parameters {
         Parameters {
             osc_1: OSCParams::from(&params.get_osc_1()),
             osc_2: OSCParams::from(&params.get_osc_2()),
-            master_vol: Decibel::lerp_db(-36.0, 12.0, params.master_vol.get()),
+            master_vol: Decibel::lerp_db_knob(
+                MASTER_VOL_MIN_DB,
+                MASTER_VOL_MAX_DB,
+                params.master_vol.get(),
+            ),
             osc_2_mod: params.osc_2_mod.get().into(),
             mod_bank: ModulationBank::from(&params.get_mod_bank()),
         }
@@ -171,7 +188,7 @@ pub struct OSCParams {
 impl From<&RawOSC> for OSCParams {
     fn from(params: &RawOSC) -> Self {
         OSCParams {
-            volume: Decibel::lerp_db(-36.0, 12.0, params.volume),
+            volume: Decibel::lerp_db_knob(OSC_VOL_MIN_DB, OSC_VOL_MAX_DB, params.volume),
             shape: NoteShape::from_warp(params.shape, params.warp),
             pan: (params.pan - 0.5) * 2.0,
             phase: params.phase,
@@ -268,10 +285,6 @@ pub trait EnvelopeParams<T> {
     fn multiply(&self) -> f32 {
         1.0
     }
-    // The "maximum" value to go to at the peak of the envelope
-    fn max(&self) -> T;
-    // The "zero" value to go to during the release phase
-    fn zero(&self) -> T;
 }
 
 /// An ADSR envelope.
@@ -300,12 +313,6 @@ impl EnvelopeParams<Decibel> for VolEnvParams {
     fn release(&self) -> f32 {
         self.release
     }
-    fn max(&self) -> Decibel {
-        Decibel::zero_db()
-    }
-    fn zero(&self) -> Decibel {
-        Decibel::neg_inf_db()
-    }
 }
 
 impl VolEnvParams {
@@ -324,7 +331,7 @@ impl VolEnvParams {
             attack: (attack * 2.0).max(1.0 / 1000.0),
             hold: hold * 5.0,
             decay: (decay * 5.0).max(1.0 / 1000.0),
-            sustain: Decibel::lerp_db(-36.0, 0.0, sustain),
+            sustain: Decibel::lerp_db_knob(SUSTAIN_MIN_DB, 0.0, sustain),
             release: (release * 5.0).max(1.0 / 1000.0),
         }
     }
@@ -365,12 +372,6 @@ impl EnvelopeParams<f32> for GeneralEnvParams {
     }
     fn multiply(&self) -> f32 {
         self.multiply
-    }
-    fn max(&self) -> f32 {
-        1.0
-    }
-    fn zero(&self) -> f32 {
-        0.0
     }
 }
 
