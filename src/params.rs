@@ -19,7 +19,7 @@ pub const FILTER_TYPE_VARIANT_COUNT: usize = 8;
 pub const DEFAULT_MASTER_VOL: f32 = 0.6875; // -3 dB
 
 // Default values for individual oscillator volume
-pub const DEFAULT_OSC_VOL: f32 = 0.625; // -6 dB
+pub const DEFAULT_OSC_VOL: f32 = 0.68750; // -3 dB
 
 // Default values for volume envelope
 pub const DEFAULT_VOL_ATTACK: f32 = 0.1;
