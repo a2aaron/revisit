@@ -5,6 +5,7 @@ use iced::{button, futures, Column, Command, Subscription};
 
 use iced_baseview::{Application, WindowSubs};
 
+use log::info;
 use raw_window_handle::{HasRawWindowHandle, RawWindowHandle};
 use vst::{editor::Editor, host::Host};
 
@@ -13,6 +14,7 @@ use crate::{
         ModBankParameter, ModBankType, ModulationSend, ModulationType, OSCType, ParameterType,
         RawParameters,
     },
+    presets::PresetData,
     ui_tabs::{MainTab, ModulationTab, PresetTab, Tabs},
 };
 
@@ -35,6 +37,8 @@ pub enum Message {
     /// work.
     ForceRedraw(ParameterType, f32),
     ChangeTab(Tabs),
+    /// Indicates that a new preset has been loaded.
+    LoadPreset(PresetData),
 }
 
 /// The struct which manages the GUI. This struct handles both the messages
@@ -141,6 +145,9 @@ impl Application for UIFrontEnd {
                 },
             },
             Message::ChangeTab(tab) => self.selected_tab = tab,
+            Message::LoadPreset(preset) => {
+                self.params.set_by_preset(&preset);
+            }
         }
 
         // Make the VST host update its own parameter display. This is needed
@@ -168,20 +175,20 @@ impl Application for UIFrontEnd {
                 .view(screen_width, screen_height, params),
         };
 
-        fn make_button<'a>(
-            state: &'a mut button::State,
-            label: &str,
-            tab: Tabs,
-        ) -> iced::Button<'a, Message> {
-            iced::Button::new(state, iced::Text::new(label)).on_press(Message::ChangeTab(tab))
-        }
-
-        let main_tab = make_button(&mut self.main_button_state, "Main", Tabs::Main);
-        let preset_tab = make_button(&mut self.preset_button_state, "Preset", Tabs::Preset);
+        let main_tab = make_button(
+            &mut self.main_button_state,
+            "Main",
+            Message::ChangeTab(Tabs::Main),
+        );
+        let preset_tab = make_button(
+            &mut self.preset_button_state,
+            "Preset",
+            Message::ChangeTab(Tabs::Preset),
+        );
         let modulation_tab = make_button(
             &mut self.modulation_button_state,
             "Modulation",
-            Tabs::Modulation,
+            Message::ChangeTab(Tabs::Modulation),
         );
         let tab_buttons = iced::Row::with_children(vec![
             main_tab.into(),
@@ -201,6 +208,14 @@ impl Application for UIFrontEnd {
         };
         Subscription::from_recipe(recipe)
     }
+}
+
+pub fn make_button<'a>(
+    state: &'a mut button::State,
+    label: &str,
+    msg: Message,
+) -> iced::Button<'a, Message> {
+    iced::Button::new(state, iced::Text::new(label)).on_press(msg)
 }
 
 impl Editor for UIFrontEnd {

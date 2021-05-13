@@ -33,6 +33,10 @@ keyboard-types = "0.5.0"
 # for use with iced's subscriptions
 tokio = { version = "1.0.0", features = ["sync"] }
 
+# for preset stuff
+serde_json = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+
 [profile.release]
 incremental = true
 # debug = true

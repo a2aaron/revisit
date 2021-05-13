@@ -2,7 +2,7 @@ use std::ops::{Add, Mul, Sub};
 
 use crate::{
     neighbor_pairs::NeighborPairsIter,
-    params::{Decibel, EnvelopeParams, OSCType},
+    params::{EnvelopeParams, OSCType},
 };
 use crate::{
     params::OSCParams, ModBankEnvs, ModulationBank, ModulationSend, ModulationType, Parameters,
@@ -15,7 +15,12 @@ use wmidi::{PitchBend, U14, U7};
 
 const TAU: f32 = std::f32::consts::TAU;
 
+// The time, in samples, for how long retrigger phase is.
 const RETRIGGER_TIME: SampleTime = 88; // 88 samples is about 2 miliseconds.
+
+// The threshold for which Decibel values below it will be treated as negative
+// infinity dB.
+pub const NEG_INF_DB_THRESHOLD: f32 = -70.0;
 
 /// An offset, in samples, from the start of the frame.
 type FrameDelta = usize;
@@ -813,6 +818,109 @@ impl std::fmt::Display for NoteShape {
         };
 
         write!(f, "{}", string)
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct Decibel {
+    db: f32,
+}
+
+impl std::ops::Mul<f32> for Decibel {
+    type Output = Decibel;
+
+    fn mul(self, rhs: f32) -> Self::Output {
+        Decibel::from_db(self.db * rhs)
+    }
+}
+
+impl std::ops::Add<Decibel> for Decibel {
+    type Output = Decibel;
+
+    fn add(self, rhs: Decibel) -> Self::Output {
+        Decibel::from_db(self.db + rhs.db)
+    }
+}
+
+impl std::ops::Sub<Decibel> for Decibel {
+    type Output = Decibel;
+
+    fn sub(self, rhs: Decibel) -> Self::Output {
+        Decibel::from_db(self.db - rhs.db)
+    }
+}
+
+impl crate::sound_gen::EnvelopeType for Decibel {
+    fn lerp_attack(start: Self, end: Self, t: f32) -> Self {
+        // Lerp in amplitude space during the attack phase. This is useful
+        // long attacks usually need linear amplitude ramp ups.
+        Decibel::lerp_amp(start, end, t)
+    }
+    fn lerp_decay(start: Self, end: Self, t: f32) -> Self {
+        Decibel::lerp_db(start.get_db(), end.get_db(), t)
+    }
+    fn lerp_release(start: Self, end: Self, t: f32) -> Self {
+        Decibel::lerp_db(start.get_db(), end.get_db(), t)
+    }
+    fn lerp_retrigger(start: Self, end: Self, t: f32) -> Self {
+        Decibel::lerp_amp(start, end, t)
+    }
+    fn one() -> Self {
+        Decibel { db: 0.0 }
+    }
+    fn zero() -> Self {
+        Decibel {
+            db: NEG_INF_DB_THRESHOLD,
+        }
+    }
+}
+
+impl Decibel {
+    pub fn from_db(db: f32) -> Decibel {
+        Decibel { db }
+    }
+
+    pub fn from_amp(amp: f32) -> Decibel {
+        Decibel {
+            db: f32::log10(amp) * 10.0,
+        }
+    }
+
+    // Linearly interpolate in amplitude space.
+    pub fn lerp_amp(start: Decibel, end: Decibel, t: f32) -> Decibel {
+        let amp = crate::sound_gen::lerp(start.get_amp(), end.get_amp(), t);
+        Decibel::from_amp(amp)
+    }
+
+    // Linearly interpolate in Decibel space.
+    pub fn lerp_db(start: f32, end: f32, t: f32) -> Decibel {
+        let db = crate::sound_gen::lerp(start, end, t);
+        Decibel::from_db(db)
+    }
+
+    // Linearly interpolate in Decibel space, but values of t below 0.125 will
+    // lerp from `start` to `Decibel::zero()`. This function is meant for use
+    // with user-facing parameter knobs.
+    pub fn lerp_db_knob(start: f32, end: f32, t: f32) -> Decibel {
+        if t == 0.0 {
+            <Decibel as crate::sound_gen::EnvelopeType>::zero()
+        } else if t <= 0.125 {
+            Decibel::lerp_db(NEG_INF_DB_THRESHOLD, start, t * 8.0)
+        } else {
+            Decibel::lerp_db(start, end, t)
+        }
+    }
+
+    pub fn get_amp(&self) -> f32 {
+        if self.db <= NEG_INF_DB_THRESHOLD {
+            0.0
+        } else {
+            10.0f32.powf(self.db / 10.0)
+        }
+    }
+
+    pub fn get_db(&self) -> f32 {
+        self.db
     }
 }
 

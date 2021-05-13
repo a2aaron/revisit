@@ -5,7 +5,7 @@ macro_rules! generate_raw_params {
         /// The raw parameter values that a host DAW will set and modify.
         /// These are unscaled and are always in the [0.0, 1.0] range
         pub struct $raw_parameters {
-            $($field_name: AtomicFloat,)*
+            $(pub $field_name: AtomicFloat,)*
             /// The host callback, used for communicating with the VST host
             pub host: vst::plugin::HostCallback,
             /// The sender that notifies the GUI thread to update due to the host

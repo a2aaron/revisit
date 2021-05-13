@@ -3,7 +3,8 @@ use std::convert::TryFrom;
 use crate::{
     generate_raw_params, impl_display, impl_from_i32, impl_get_default, impl_get_ref,
     impl_into_i32, impl_new,
-    sound_gen::{ease_in_expo, Envelope, FilterParams, NoteShape},
+    presets::PresetData,
+    sound_gen::{ease_in_expo, Decibel, Envelope, FilterParams, NoteShape},
 };
 
 use derive_more::Display;
@@ -14,10 +15,6 @@ use vst::{host::Host, plugin::PluginParameters, util::AtomicFloat};
 // All Pass, Notch Filter
 // Low Shelf, High Shelf, Peaking EQ
 pub const FILTER_TYPE_VARIANT_COUNT: usize = 8;
-
-// The threshold for which Decibel values below it will be treated as negative
-// infinity dB.
-pub const NEG_INF_DB_THRESHOLD: f32 = -70.0;
 
 // Default values for master volume
 pub const DEFAULT_MASTER_VOL: f32 = 0.6875; // -3 dB
@@ -46,109 +43,6 @@ pub const DEFAULT_DECAY: f32 = 0.0;
 pub const DEFAULT_SUSTAIN: f32 = 0.0;
 pub const DEFAULT_RELEASE: f32 = 0.00001;
 pub const DEFAULT_MULTIPLY: f32 = 0.5; // +0%
-
-#[derive(Debug, Clone, Copy)]
-pub struct Decibel {
-    db: f32,
-}
-
-impl std::ops::Mul<f32> for Decibel {
-    type Output = Decibel;
-
-    fn mul(self, rhs: f32) -> Self::Output {
-        Decibel::from_db(self.db * rhs)
-    }
-}
-
-impl std::ops::Add<Decibel> for Decibel {
-    type Output = Decibel;
-
-    fn add(self, rhs: Decibel) -> Self::Output {
-        Decibel::from_db(self.db + rhs.db)
-    }
-}
-
-impl std::ops::Sub<Decibel> for Decibel {
-    type Output = Decibel;
-
-    fn sub(self, rhs: Decibel) -> Self::Output {
-        Decibel::from_db(self.db - rhs.db)
-    }
-}
-
-impl crate::sound_gen::EnvelopeType for Decibel {
-    fn lerp_attack(start: Self, end: Self, t: f32) -> Self {
-        // Lerp in amplitude space during the attack phase. This is useful
-        // long attacks usually need linear amplitude ramp ups.
-        Decibel::lerp_amp(start, end, t)
-    }
-    fn lerp_decay(start: Self, end: Self, t: f32) -> Self {
-        Decibel::lerp_db(start.get_db(), end.get_db(), t)
-    }
-    fn lerp_release(start: Self, end: Self, t: f32) -> Self {
-        Decibel::lerp_db(start.get_db(), end.get_db(), t)
-    }
-    fn lerp_retrigger(start: Self, end: Self, t: f32) -> Self {
-        Decibel::lerp_amp(start, end, t)
-    }
-    fn one() -> Self {
-        Decibel { db: 0.0 }
-    }
-    fn zero() -> Self {
-        Decibel {
-            db: NEG_INF_DB_THRESHOLD,
-        }
-    }
-}
-
-impl Decibel {
-    pub fn from_db(db: f32) -> Decibel {
-        Decibel { db }
-    }
-
-    pub fn from_amp(amp: f32) -> Decibel {
-        Decibel {
-            db: f32::log10(amp) * 10.0,
-        }
-    }
-
-    // Linearly interpolate in amplitude space.
-    pub fn lerp_amp(start: Decibel, end: Decibel, t: f32) -> Decibel {
-        let amp = crate::sound_gen::lerp(start.get_amp(), end.get_amp(), t);
-        Decibel::from_amp(amp)
-    }
-
-    // Linearly interpolate in Decibel space.
-    pub fn lerp_db(start: f32, end: f32, t: f32) -> Decibel {
-        let db = crate::sound_gen::lerp(start, end, t);
-        Decibel::from_db(db)
-    }
-
-    // Linearly interpolate in Decibel space, but values of t below 0.125 will
-    // lerp from `start` to `Decibel::zero()`. This function is meant for use
-    // with user-facing parameter knobs.
-    pub fn lerp_db_knob(start: f32, end: f32, t: f32) -> Decibel {
-        if t == 0.0 {
-            <Decibel as crate::sound_gen::EnvelopeType>::zero()
-        } else if t <= 0.125 {
-            Decibel::lerp_db(NEG_INF_DB_THRESHOLD, start, t * 8.0)
-        } else {
-            Decibel::lerp_db(start, end, t)
-        }
-    }
-
-    pub fn get_amp(&self) -> f32 {
-        if self.db <= NEG_INF_DB_THRESHOLD {
-            0.0
-        } else {
-            10.0f32.powf(self.db / 10.0)
-        }
-    }
-
-    pub fn get_db(&self) -> f32 {
-        self.db
-    }
-}
 
 pub struct Parameters {
     pub osc_1: OSCParams,
@@ -415,6 +309,9 @@ pub struct LFO {
 }
 
 impl RawParameters {
+    /// Set a parameter, but do not send any GUI knob update. You usually want to
+    /// call this if you are working in UI code since the knobs will already update
+    /// themselves properly.
     pub fn set(&self, value: f32, parameter: ParameterType) {
         // These are needed so Ableton will notice parameter changes in the
         // "Configure" window.
@@ -450,6 +347,25 @@ impl RawParameters {
         }
 
         self.host.end_edit(parameter.into());
+    }
+
+    /// Set a parameter, updating the GUI with it. This is usually only called
+    /// when setting a parameter from the host side or internally, such as when
+    /// loading a preset. (basically any time that we set a parameter not through
+    /// a GUI Message/knob interaction).
+    pub fn set_and_update_knob(&self, value: f32, parameter: ParameterType) {
+        self.set(value, parameter);
+
+        // Notify the GUI to update its view
+        // TODO: Is it really okay to just ignore errors?
+        let _ = self.sender.send((parameter, value));
+    }
+
+    /// Set all the parameters via a preset. Note that this also updates the GUI
+    pub fn set_by_preset(&self, preset: &PresetData) {
+        self.set_and_update_knob(preset.master_vol, ParameterType::MasterVolume);
+        // Notify the host that all the knobs changed
+        self.host.update_display();
     }
 
     pub fn get(&self, parameter: ParameterType) -> f32 {
@@ -508,12 +424,12 @@ impl RawParameters {
         }
 
         fn volume_string(decibel: Decibel) -> (String, String) {
-            if decibel.db <= NEG_INF_DB_THRESHOLD {
+            if decibel.get_db() <= crate::sound_gen::NEG_INF_DB_THRESHOLD {
                 ("-inf".to_string(), "dB".to_string())
-            } else if decibel.db < 0.0 {
-                (format!("{:.2}", decibel.db), "dB".to_string())
+            } else if decibel.get_db() < 0.0 {
+                (format!("{:.2}", decibel.get_db()), "dB".to_string())
             } else {
-                (format!("+{:.2}", decibel.db), "dB".to_string())
+                (format!("+{:.2}", decibel.get_db()), "dB".to_string())
             }
         }
 
@@ -625,10 +541,8 @@ impl PluginParameters for RawParameters {
                 return;
             }
 
-            self.set(value, parameter);
-            // Notify the GUI to update its view
-            // TODO: Is it really okay to just ignore errors?
-            let _ = self.sender.send((parameter, value));
+            // We need to update the GUI since we set the parameter via the host side.
+            self.set_and_update_knob(value, parameter);
         }
     }
 

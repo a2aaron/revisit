@@ -7,6 +7,7 @@ mod params;
 mod sound_gen;
 mod ui;
 mod ui_tabs;
+mod presets;
 
 use std::{convert::TryFrom, sync::Arc};
 

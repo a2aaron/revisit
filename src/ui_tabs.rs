@@ -1,7 +1,7 @@
 use std::hash::Hash;
 
 use iced::{
-    Align, Background, Column, Element, HorizontalAlignment, Point, Rectangle, Row, Vector,
+    button, Align, Background, Column, Element, HorizontalAlignment, Point, Rectangle, Row, Vector,
     VerticalAlignment,
 };
 use iced_audio::{
@@ -20,6 +20,7 @@ use crate::{
         ModulationSend, ModulationType, OSCParameterType, OSCType, ParameterType, RawEnvelope,
         RawParameters,
     },
+    presets::PresetData,
     sound_gen::NoteShape,
     ui::Message,
 };
@@ -213,12 +214,14 @@ impl ModulationTab {
 
 /// The tab which handles preset loading and saving.
 pub struct PresetTab {
-    // uh...
+    button: button::State,
 }
 
 impl PresetTab {
     pub fn new(_params: &RawParameters) -> PresetTab {
-        PresetTab {}
+        PresetTab {
+            button: button::State::new(),
+        }
     }
 
     pub fn update(&mut self, _message: Message, _params: &RawParameters) {
@@ -231,7 +234,13 @@ impl PresetTab {
         _screen_height: u32,
         _params: &RawParameters,
     ) -> iced::Element<'_, Message> {
-        iced::Text::new("! ! TODO ! !").size(48).into()
+        // iced::Text::new("! ! TODO ! !").size(48).into()
+        let load_preset = crate::ui::make_button(
+            &mut self.button,
+            "Load Preset",
+            Message::LoadPreset(PresetData { master_vol: 0.0 }),
+        );
+        load_preset.into()
     }
 }
 
