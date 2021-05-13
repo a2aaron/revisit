@@ -421,17 +421,25 @@ impl RawParameters {
         // TODO: investigate if I should send this only on mouseup/mousedown
         self.host.begin_edit(parameter.into());
 
+        // Check if warp + shape changes cause the parameter text to change
         let update = match parameter {
-            parameter if parameter == ParameterType::OSC1(OSCParameterType::Warp) => {
-                let shape = self.get(parameter);
-                let old_value = format!("{}", NoteShape::from_warp(shape, self.get(parameter)));
-                let new_value = format!("{}", NoteShape::from_warp(shape, value));
-                old_value != new_value
-            }
-            parameter if parameter == ParameterType::OSC2(OSCParameterType::Warp) => {
-                let shape = self.get(parameter);
-                let old_value = format!("{}", NoteShape::from_warp(shape, self.get(parameter)));
-                let new_value = format!("{}", NoteShape::from_warp(shape, value));
+            ParameterType::OSC1(inner @ (OSCParameterType::Warp | OSCParameterType::Shape))
+            | ParameterType::OSC2(inner @ (OSCParameterType::Warp | OSCParameterType::Shape)) => {
+                let osc = match parameter {
+                    ParameterType::OSC1(_) => ParameterType::OSC1,
+                    ParameterType::OSC2(_) => ParameterType::OSC2,
+                    _ => unreachable!(),
+                };
+                let old_shape = self.get(osc(OSCParameterType::Shape));
+                let old_warp = self.get(osc(OSCParameterType::Warp));
+                let (new_shape, new_warp) = match inner {
+                    OSCParameterType::Shape => (value, old_warp),
+                    OSCParameterType::Warp => (old_shape, value),
+                    _ => unreachable!(),
+                };
+
+                let old_value = format!("{}", NoteShape::from_warp(old_shape, old_warp));
+                let new_value = format!("{}", NoteShape::from_warp(new_shape, new_warp));
                 old_value != new_value
             }
             _ => false,
