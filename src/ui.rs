@@ -38,6 +38,9 @@ pub enum Message {
     ChangeTab(Tabs),
     /// Indicates that a new preset has been loaded.
     LoadPreset(PresetData),
+    /// Save the current parameters as preset at the given folder path. The name of the
+    /// preset is the String.
+    SaveParamsAsPreset(std::path::PathBuf),
 }
 
 /// The struct which manages the GUI. This struct handles both the messages
@@ -152,6 +155,18 @@ impl Application for UIFrontEnd {
             }
             Message::LoadPreset(preset) => {
                 self.params.set_by_preset(&preset);
+            }
+            Message::SaveParamsAsPreset(folder) => {
+                let (path, i) = crate::presets::get_path_or_similar(folder, "preset", "json");
+                let name = format!("Unnamed Preset {}", i);
+                match crate::presets::save_preset_to_file(
+                    PresetData::from_raw(self.params.as_ref(), name),
+                    &path,
+                ) {
+                    Ok(()) => log::info!("Saved preset to {}", path.display()),
+                    Err(err) => log::info!("Couldn't save preset to {}: {:?}", path.display(), err),
+                }
+                self.preset_tab.get_presets_from_folder(".");
             }
         }
 

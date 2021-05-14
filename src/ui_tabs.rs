@@ -1,8 +1,8 @@
-use std::hash::Hash;
+use std::{hash::Hash, path::PathBuf};
 
 use iced::{
-    button, Align, Background, Column, Element, HorizontalAlignment, Point, Rectangle, Row, Vector,
-    VerticalAlignment,
+    button, widget, Align, Background, Column, Element, HorizontalAlignment, Point, Rectangle, Row,
+    Vector, VerticalAlignment,
 };
 use iced_audio::{
     knob::{self, LineCap},
@@ -216,11 +216,15 @@ impl ModulationTab {
 pub struct PresetTab {
     // The list of presets available
     presets: Vec<(PresetData, button::State)>,
+    save_preset: button::State,
 }
 
 impl PresetTab {
     pub fn new(_params: &RawParameters) -> PresetTab {
-        PresetTab { presets: vec![] }
+        PresetTab {
+            presets: vec![],
+            save_preset: button::State::new(),
+        }
     }
 
     // pub fn update(&mut self, _message: Message, _params: &RawParameters) {
@@ -251,7 +255,7 @@ impl PresetTab {
         _params: &RawParameters,
     ) -> iced::Element<'_, Message> {
         // iced::Text::new("! ! TODO ! !").size(48).into()
-        let buttons = self
+        let buttons: Vec<Element<_>> = self
             .presets
             .iter_mut()
             .map(|(preset, state)| {
@@ -260,7 +264,20 @@ impl PresetTab {
             })
             .collect();
 
-        Column::with_children(buttons).into()
+        let save_preset = crate::ui::make_button(
+            &mut self.save_preset,
+            "Save Preset",
+            Message::SaveParamsAsPreset(PathBuf::from(".")),
+        )
+        .into();
+
+        let preset_col = Column::with_children(buttons);
+        Column::with_children(vec![
+            preset_col.into(),
+            widget::Space::new(iced::Length::Shrink, iced::Length::Fill).into(),
+            save_preset,
+        ])
+        .into()
     }
 }
 

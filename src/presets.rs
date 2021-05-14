@@ -1,4 +1,9 @@
-use std::{io::Read, path::Path};
+use std::{
+    ffi::OsStr,
+    fs::File,
+    io::Read,
+    path::{Path, PathBuf},
+};
 
 use serde::{Deserialize, Serialize};
 
@@ -14,6 +19,15 @@ use crate::{
 pub struct PresetData {
     pub name: String,
     pub master_vol: f32,
+}
+
+impl PresetData {
+    pub fn from_raw(params: &RawParameters, name: String) -> Self {
+        PresetData {
+            name,
+            master_vol: params.master_vol.get(),
+        }
+    }
 }
 
 impl From<PresetData> for Parameters {
@@ -96,15 +110,6 @@ impl From<Parameters> for PresetData {
     }
 }
 
-impl From<&RawParameters> for PresetData {
-    fn from(params: &RawParameters) -> Self {
-        PresetData {
-            name: "Unnamed Preset".to_string(),
-            master_vol: params.master_vol.get(),
-        }
-    }
-}
-
 pub fn try_parse_file(file: impl AsRef<Path>) -> Result<PresetData, Box<dyn std::error::Error>> {
     let mut file = std::fs::File::open(file)?;
     let mut contents = String::new();
@@ -126,4 +131,29 @@ pub fn get_presets_from_folder(folder: impl AsRef<Path>) -> std::io::Result<Vec<
         }
     }
     Ok(presets)
+}
+
+pub fn save_preset_to_file(
+    preset: PresetData,
+    path: impl AsRef<Path>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let file = File::create(&path)?;
+    Ok(serde_json::to_writer(file, &preset)?)
+}
+
+pub fn get_path_or_similar(
+    folder: impl AsRef<Path>,
+    file_name: impl AsRef<OsStr>,
+    extention: impl AsRef<OsStr>,
+) -> (PathBuf, usize) {
+    let mut i = 0;
+    loop {
+        let mut path = folder.as_ref().to_path_buf();
+        path.set_file_name(format!("{} {}", file_name.as_ref().to_str().unwrap(), i));
+        path.set_extension(&extention);
+        if !path.exists() {
+            return (path, i);
+        }
+        i += 1;
+    }
 }
