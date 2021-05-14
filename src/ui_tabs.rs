@@ -214,18 +214,34 @@ impl ModulationTab {
 
 /// The tab which handles preset loading and saving.
 pub struct PresetTab {
-    button: button::State,
+    // The list of presets available
+    presets: Vec<(PresetData, button::State)>,
 }
 
 impl PresetTab {
     pub fn new(_params: &RawParameters) -> PresetTab {
-        PresetTab {
-            button: button::State::new(),
-        }
+        PresetTab { presets: vec![] }
     }
 
-    pub fn update(&mut self, _message: Message, _params: &RawParameters) {
-        // TODO!
+    // pub fn update(&mut self, _message: Message, _params: &RawParameters) {
+    // TODO!
+    // }
+
+    pub fn get_presets_from_folder(&mut self, path: impl AsRef<std::path::Path>) {
+        self.presets.clear();
+        match crate::presets::get_presets_from_folder(&path) {
+            Ok(presets) => {
+                for preset in presets {
+                    self.presets.push((preset, button::State::new()));
+                }
+            }
+            Err(err) => log::info!(
+                "Couldn't load presets from path {}: {:?}",
+                path.as_ref().display(),
+                err
+            ),
+        }
+        log::info!("Got {} presets!", self.presets.len());
     }
 
     pub fn view(
@@ -235,12 +251,16 @@ impl PresetTab {
         _params: &RawParameters,
     ) -> iced::Element<'_, Message> {
         // iced::Text::new("! ! TODO ! !").size(48).into()
-        let load_preset = crate::ui::make_button(
-            &mut self.button,
-            "Load Preset",
-            Message::LoadPreset(PresetData { master_vol: 0.0 }),
-        );
-        load_preset.into()
+        let buttons = self
+            .presets
+            .iter_mut()
+            .map(|(preset, state)| {
+                crate::ui::make_button(state, &preset.name, Message::LoadPreset(preset.clone()))
+                    .into()
+            })
+            .collect();
+
+        Column::with_children(buttons).into()
     }
 }
 
@@ -631,7 +651,7 @@ impl<B: Backend> Widget<Message, Renderer<B>> for ModTypeSelector {
                 for (i, square) in squares.iter().enumerate() {
                     if square.contains(cursor_position) {
                         self.selected = i;
-                        messages.push(self.messages[i]);
+                        messages.push(self.messages[i].clone());
                         break;
                     }
                 }

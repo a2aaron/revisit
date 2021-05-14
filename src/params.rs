@@ -364,8 +364,6 @@ impl RawParameters {
     /// Set all the parameters via a preset. Note that this also updates the GUI
     pub fn set_by_preset(&self, preset: &PresetData) {
         self.set_and_update_knob(preset.master_vol, ParameterType::MasterVolume);
-        // Notify the host that all the knobs changed
-        self.host.update_display();
     }
 
     pub fn get(&self, parameter: ParameterType) -> f32 {

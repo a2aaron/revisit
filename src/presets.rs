@@ -1,3 +1,5 @@
+use std::{io::Read, path::Path};
+
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -8,9 +10,9 @@ use crate::{
     sound_gen::{Decibel, FilterParams},
 };
 
-// TODO: should this really be copy? probably not
-#[derive(Serialize, Deserialize, Clone, Copy, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct PresetData {
+    pub name: String,
     pub master_vol: f32,
 }
 
@@ -88,6 +90,7 @@ impl From<PresetData> for Parameters {
 impl From<Parameters> for PresetData {
     fn from(params: Parameters) -> Self {
         PresetData {
+            name: "Unnamed Preset".to_string(),
             master_vol: params.master_vol.get_db(),
         }
     }
@@ -96,7 +99,31 @@ impl From<Parameters> for PresetData {
 impl From<&RawParameters> for PresetData {
     fn from(params: &RawParameters) -> Self {
         PresetData {
+            name: "Unnamed Preset".to_string(),
             master_vol: params.master_vol.get(),
         }
     }
+}
+
+pub fn try_parse_file(file: impl AsRef<Path>) -> Result<PresetData, Box<dyn std::error::Error>> {
+    let mut file = std::fs::File::open(file)?;
+    let mut contents = String::new();
+    file.read_to_string(&mut contents)?;
+    Ok(serde_json::from_str(&contents)?)
+}
+
+pub fn get_presets_from_folder(folder: impl AsRef<Path>) -> std::io::Result<Vec<PresetData>> {
+    let mut presets = vec![];
+    for entry in (std::fs::read_dir(folder)?).flatten() {
+        if Some(std::ffi::OsStr::new("json")) == entry.path().extension() {
+            match try_parse_file(&entry.path()) {
+                Ok(preset) => {
+                    presets.push(preset);
+                    log::info!("Parsed {}!", entry.path().display());
+                }
+                Err(err) => log::info!("Couldn't parse {}: {:?}", entry.path().display(), err),
+            }
+        }
+    }
+    Ok(presets)
 }

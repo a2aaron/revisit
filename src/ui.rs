@@ -5,7 +5,6 @@ use iced::{button, futures, Column, Command, Subscription};
 
 use iced_baseview::{Application, WindowSubs};
 
-use log::info;
 use raw_window_handle::{HasRawWindowHandle, RawWindowHandle};
 use vst::{editor::Editor, host::Host};
 
@@ -22,7 +21,7 @@ const WINDOW_WIDTH: usize = 800;
 const WINDOW_HEIGHT: usize = 650;
 
 /// A GUI message.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub enum Message {
     /// This indicates that a modulation bank has had its send parameter changed.
     ModBankSendChanged(ModBankType, ModulationSend),
@@ -88,8 +87,7 @@ impl Application for UIFrontEnd {
         // TODO: look into moving message handling code out of the update functions
         // for the tabs. It seems like it's bizarrely messy to do it there.
         // Tabs don't really need to know about what messages have happened anyways.
-        self.preset_tab.update(message, self.params.as_ref());
-        match message {
+        match message.clone() {
             // The GUI has changed a parameter via knob
             Message::ParameterChanged(param, value) => {
                 // We set the parameter according to the changed value.
@@ -144,7 +142,14 @@ impl Application for UIFrontEnd {
                     }
                 },
             },
-            Message::ChangeTab(tab) => self.selected_tab = tab,
+            Message::ChangeTab(tab) => {
+                self.selected_tab = tab;
+                if tab == Tabs::Preset {
+                    let path = ".";
+                    log::info!("Loading presets from {}", path);
+                    self.preset_tab.get_presets_from_folder(path);
+                }
+            }
             Message::LoadPreset(preset) => {
                 self.params.set_by_preset(&preset);
             }
@@ -155,7 +160,8 @@ impl Application for UIFrontEnd {
         match message {
             Message::OSC2ModChanged(_)
             | Message::ParameterChanged(_, _)
-            | Message::ModBankSendChanged(_, _) => self.params.host.update_display(),
+            | Message::ModBankSendChanged(_, _)
+            | Message::LoadPreset(_) => self.params.host.update_display(),
             _ => (),
         }
         Command::none()
