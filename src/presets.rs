@@ -110,6 +110,7 @@ impl From<Parameters> for PresetData {
     }
 }
 
+/// Try to parse a given file into a `PresetData`
 pub fn try_parse_file(file: impl AsRef<Path>) -> Result<PresetData, Box<dyn std::error::Error>> {
     let mut file = std::fs::File::open(file)?;
     let mut contents = String::new();
@@ -117,6 +118,7 @@ pub fn try_parse_file(file: impl AsRef<Path>) -> Result<PresetData, Box<dyn std:
     Ok(serde_json::from_str(&contents)?)
 }
 
+/// Read a folder and try to parse any `json` files in it into a PresetData.
 pub fn get_presets_from_folder(folder: impl AsRef<Path>) -> std::io::Result<Vec<PresetData>> {
     let mut presets = vec![];
     for entry in (std::fs::read_dir(folder)?).flatten() {
@@ -133,6 +135,8 @@ pub fn get_presets_from_folder(folder: impl AsRef<Path>) -> std::io::Result<Vec<
     Ok(presets)
 }
 
+/// Save a PresetData to the given path. This returns an error if the file could
+/// not be saved or if serialization fails for any reason.
 pub fn save_preset_to_file(
     preset: PresetData,
     path: impl AsRef<Path>,
@@ -141,7 +145,9 @@ pub fn save_preset_to_file(
     Ok(serde_json::to_writer(file, &preset)?)
 }
 
-pub fn get_path_or_similar(
+/// Get a file name which is not currently used by any file in the given folder
+/// The file will have the file name and extention provided.
+pub fn get_free_file_name(
     folder: impl AsRef<Path>,
     file_name: impl AsRef<OsStr>,
     extention: impl AsRef<OsStr>,

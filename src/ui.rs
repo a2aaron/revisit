@@ -157,7 +157,7 @@ impl Application for UIFrontEnd {
                 self.params.set_by_preset(&preset);
             }
             Message::SaveParamsAsPreset(folder) => {
-                let (path, i) = crate::presets::get_path_or_similar(folder, "preset", "json");
+                let (path, i) = crate::presets::get_free_file_name(folder, "preset", "json");
                 let name = format!("Unnamed Preset {}", i);
                 match crate::presets::save_preset_to_file(
                     PresetData::from_raw(self.params.as_ref(), name),
