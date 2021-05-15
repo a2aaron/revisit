@@ -20,14 +20,15 @@ derive_more = "0.99.11"
 biquad = "0.4.0" # { git = "https://github.com/a2aaron/biquad-rs", branch = "master" }
 
 # for GUI
-iced = { version = "0.2" }
-iced_audio = "0.6.1" # { git = "https://github.com/a2aaron/iced_audio", branch = "main" }
+iced = { version = "0.3" }
+iced_audio = "0.7" # { git = "https://github.com/a2aaron/iced_audio", branch = "main" }
 iced_baseview = { git = "https://github.com/BillyDM/iced_baseview", branch = "main" }
-iced_native = "0.3.0"
-iced_futures = { version = "0.2.0", features = ["async-std"] }
-iced_graphics = "0.1.0"
+iced_native = "0.4.0"
+iced_futures = { version = "0.3.0", features = ["async-std"] }
+iced_graphics = { version = "0.2.0", features = ["canvas"] }
 raw-window-handle = "0.3.3"
-baseview = { git = "https://github.com/RustAudio/baseview", branch = "master" }
+# rev matches iced_baseview revision
+baseview = { git = "https://github.com/RustAudio/baseview", rev = "d399c1275522ae75f5a82caadd904df2685c8660" }
 # because baseview doesn't reexport this
 keyboard-types = "0.5.0"
 # for use with iced's subscriptions

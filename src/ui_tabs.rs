@@ -12,7 +12,7 @@ use iced_graphics::{
     canvas::{Frame, LineJoin, Stroke},
     Backend, Primitive, Renderer,
 };
-use iced_native::{layout, mouse, Widget};
+use iced_native::{layout, mouse, Clipboard, Widget};
 
 use crate::{
     params::{
@@ -657,9 +657,9 @@ impl<B: Backend> Widget<Message, Renderer<B>> for ModTypeSelector {
         event: iced_native::Event,
         layout: iced_native::Layout<'_>,
         cursor_position: iced::Point,
-        messages: &mut Vec<Message>,
         _renderer: &Renderer<B>,
-        _clipboard: Option<&dyn iced_native::Clipboard>,
+        _clipboard: &mut dyn Clipboard,
+        messages: &mut Vec<Message>,
     ) -> iced_native::event::Status {
         if let iced_native::Event::Mouse(mouse_event) = event {
             if mouse_event == mouse::Event::ButtonPressed(mouse::Button::Left) {
