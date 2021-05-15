@@ -1,13 +1,16 @@
+#![feature(trait_alias)]
+
 #[macro_use]
 extern crate vst;
 
+mod ease;
 mod macros;
 mod neighbor_pairs;
 mod params;
+mod presets;
 mod sound_gen;
 mod ui;
 mod ui_tabs;
-mod presets;
 
 use std::{convert::TryFrom, sync::Arc};
 

@@ -1,6 +1,5 @@
-use std::ops::{Add, Mul, Sub};
-
 use crate::{
+    ease::{ease_in_poly, lerp},
     neighbor_pairs::NeighborPairsIter,
     params::{EnvelopeParams, OSCType},
 };
@@ -10,6 +9,7 @@ use crate::{
 
 use biquad::{Biquad, DirectForm1, ToHertz, Q_BUTTERWORTH_F32};
 use derive_more::Add;
+use serde::{Deserialize, Serialize};
 use variant_count::VariantCount;
 use wmidi::{PitchBend, U14, U7};
 
@@ -38,7 +38,7 @@ pub type NormalizedPitchbend = f32;
 // specify the easing used for the attack, decay, release, and retrigger phases
 // of the envelope (by default, it will use `lerp<T>` and uses whatever the defined
 // Add/Sub/Mul operations do)
-pub trait EnvelopeType: Mul<f32, Output = Self> + Copy + Clone + std::fmt::Debug
+pub trait EnvelopeType: std::ops::Mul<f32, Output = Self> + Copy + Clone + std::fmt::Debug
 where
     Self: std::marker::Sized,
 {
@@ -48,7 +48,7 @@ where
     fn lerp_retrigger(start: Self, end: Self, t: f32) -> Self;
     // The value to ease from during attack phase and to ease to during release phase
     fn zero() -> Self;
-    // THe value to ease to during decay phase and to ease from during decay phase
+    // The value to ease to during decay phase and to ease from during decay phase
     fn one() -> Self;
 }
 
@@ -821,7 +821,7 @@ impl std::fmt::Display for NoteShape {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
 pub struct Decibel {
     db: f32,
 }
@@ -831,6 +831,13 @@ impl std::ops::Mul<f32> for Decibel {
 
     fn mul(self, rhs: f32) -> Self::Output {
         Decibel::from_db(self.db * rhs)
+    }
+}
+
+impl std::ops::Div<Decibel> for Decibel {
+    type Output = f32;
+    fn div(self, rhs: Decibel) -> Self::Output {
+        self.get_db() / rhs.get_db()
     }
 }
 
@@ -866,18 +873,24 @@ impl crate::sound_gen::EnvelopeType for Decibel {
         Decibel::lerp_amp(start, end, t)
     }
     fn one() -> Self {
-        Decibel { db: 0.0 }
+        Decibel::zero_db()
     }
     fn zero() -> Self {
-        Decibel {
-            db: NEG_INF_DB_THRESHOLD,
-        }
+        Decibel::neg_inf_db()
     }
 }
 
 impl Decibel {
-    pub fn from_db(db: f32) -> Decibel {
+    pub const fn from_db(db: f32) -> Decibel {
         Decibel { db }
+    }
+
+    pub const fn neg_inf_db() -> Decibel {
+        Decibel::from_db(NEG_INF_DB_THRESHOLD)
+    }
+
+    pub const fn zero_db() -> Decibel {
+        Decibel::from_db(0.0)
     }
 
     pub fn from_amp(amp: f32) -> Decibel {
@@ -1002,24 +1015,4 @@ pub fn to_pitch_multiplier(pitch_bend: NormalizedPitchbend, semitones: i32) -> f
     // We take an exponential here because frequency is exponential with respect
     // to note value
     exponent.powf(pitch_bend)
-}
-
-pub fn lerp<T: Add<T, Output = T> + Sub<T, Output = T> + Mul<f32, Output = T> + Copy + Clone>(
-    start: T,
-    end: T,
-    t: f32,
-) -> T {
-    (end - start) * t.clamp(0.0, 1.0) + start
-}
-
-pub fn ease_in_expo(x: f32) -> f32 {
-    if x <= 0.0 {
-        0.0
-    } else {
-        (2.0f32.powf(10.0 * x) - 1.0) / (2.0f32.powf(10.0) - 1.0)
-    }
-}
-
-pub fn ease_in_poly(x: f32, i: i32) -> f32 {
-    x.powi(i)
 }

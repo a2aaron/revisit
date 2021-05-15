@@ -1,10 +1,11 @@
 use std::convert::TryFrom;
 
 use crate::{
+    ease::{ease_in_expo, Easing},
     generate_raw_params, impl_display, impl_from_i32, impl_get_default, impl_get_ref,
     impl_into_i32, impl_new,
     presets::PresetData,
-    sound_gen::{ease_in_expo, Decibel, Envelope, FilterParams, NoteShape},
+    sound_gen::{Decibel, Envelope, FilterParams, NoteShape},
 };
 
 use derive_more::Display;
@@ -44,6 +45,19 @@ pub const DEFAULT_SUSTAIN: f32 = 0.0;
 pub const DEFAULT_RELEASE: f32 = 0.00001;
 pub const DEFAULT_MULTIPLY: f32 = 0.5; // +0%
 
+pub const EASER: ParamEaser = ParamEaser {
+    master_vol: Easing::SplitLinear {
+        start: Decibel::neg_inf_db(),
+        mid: Decibel::from_db(MASTER_VOL_MIN_DB),
+        end: Decibel::from_db(MASTER_VOL_MAX_DB),
+        split_at: 0.125,
+    },
+};
+
+pub struct ParamEaser {
+    master_vol: Easing<Decibel>,
+}
+
 pub struct Parameters {
     pub osc_1: OSCParams,
     pub osc_2: OSCParams,
@@ -57,11 +71,7 @@ impl From<&RawParameters> for Parameters {
         Parameters {
             osc_1: OSCParams::from(&params.get_osc_1()),
             osc_2: OSCParams::from(&params.get_osc_2()),
-            master_vol: Decibel::lerp_db_knob(
-                MASTER_VOL_MIN_DB,
-                MASTER_VOL_MAX_DB,
-                params.master_vol.get(),
-            ),
+            master_vol: EASER.master_vol.ease(params.master_vol.get()),
             osc_2_mod: params.osc_2_mod.get().into(),
             mod_bank: ModulationBank::from(&params.get_mod_bank()),
         }
@@ -363,7 +373,10 @@ impl RawParameters {
 
     /// Set all the parameters via a preset. Note that this also updates the GUI
     pub fn set_by_preset(&self, preset: &PresetData) {
-        self.set_and_update_knob(preset.master_vol, ParameterType::MasterVolume);
+        self.set_and_update_knob(
+            EASER.master_vol.inv_ease(preset.master_vol),
+            ParameterType::MasterVolume,
+        );
     }
 
     pub fn get(&self, parameter: ParameterType) -> f32 {
@@ -928,7 +941,7 @@ macro_rules! table {
 }
 
 impl ParameterType {
-    pub const COUNT: usize = 78;
+    pub const COUNT: usize = 68;
 }
 
 impl RawParameters {

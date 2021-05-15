@@ -11,7 +11,7 @@ use vst::{editor::Editor, host::Host};
 use crate::{
     params::{
         ModBankParameter, ModBankType, ModulationSend, ModulationType, OSCType, ParameterType,
-        RawParameters,
+        Parameters, RawParameters,
     },
     presets::PresetData,
     ui_tabs::{MainTab, ModulationTab, PresetTab, Tabs},
@@ -160,7 +160,7 @@ impl Application for UIFrontEnd {
                 let (path, i) = crate::presets::get_free_file_name(folder, "preset", "json");
                 let name = format!("Unnamed Preset {}", i);
                 match crate::presets::save_preset_to_file(
-                    PresetData::from_raw(self.params.as_ref(), name),
+                    PresetData::from_params(&Parameters::from(self.params.as_ref()), name),
                     &path,
                 ) {
                     Ok(()) => log::info!("Saved preset to {}", path.display()),

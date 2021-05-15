@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     params::{
         GeneralEnvParams, ModBankSend, ModulationBank, ModulationSend, ModulationType, OSCParams,
-        OSCType, Parameters, RawParameters, VolEnvParams, LFO,
+        OSCType, Parameters, VolEnvParams, LFO,
     },
     sound_gen::{Decibel, FilterParams},
 };
@@ -18,14 +18,14 @@ use crate::{
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct PresetData {
     pub name: String,
-    pub master_vol: f32,
+    pub master_vol: Decibel,
 }
 
 impl PresetData {
-    pub fn from_raw(params: &RawParameters, name: String) -> Self {
+    pub fn from_params(params: &Parameters, name: String) -> Self {
         PresetData {
             name,
-            master_vol: params.master_vol.get(),
+            master_vol: params.master_vol,
         }
     }
 }
@@ -83,7 +83,7 @@ impl From<PresetData> for Parameters {
         Parameters {
             osc_1: default_osc(),
             osc_2: default_osc(),
-            master_vol: Decibel::from_db(preset.master_vol),
+            master_vol: preset.master_vol,
             osc_2_mod: ModulationType::AmpMod,
             mod_bank: ModulationBank {
                 env_1: default_env(),
@@ -97,15 +97,6 @@ impl From<PresetData> for Parameters {
                     osc: OSCType::OSC2,
                 },
             },
-        }
-    }
-}
-
-impl From<Parameters> for PresetData {
-    fn from(params: Parameters) -> Self {
-        PresetData {
-            name: "Unnamed Preset".to_string(),
-            master_vol: params.master_vol.get_db(),
         }
     }
 }
