@@ -282,16 +282,11 @@ impl PresetTab {
                         .as_str(),
                     Message::LoadPreset((*preset).clone()),
                 );
-                // TODO: why cant i set the style of a button?
-                // let style = iced::button::Style {
-                //     background: if name.is_none() {
-                //         Some(Background::Color(RED))
-                //     } else {
-                //         None
-                //     },
-                //     ..Default::default()
-                // };
-                // let button = button.style(style);
+                let button = if name.is_none() {
+                    button.style(ButtonColor { color: RED })
+                } else {
+                    button
+                };
                 button.into()
             })
             .collect();
@@ -840,6 +835,19 @@ impl EnvKnobGroup {
             EnvelopeParam::Sustain => self.sustain.set_normal(value),
             EnvelopeParam::Release => self.release.set_normal(value),
             EnvelopeParam::Multiply => self.multiply.set_normal(value),
+        }
+    }
+}
+
+struct ButtonColor {
+    color: iced::Color,
+}
+
+impl button::StyleSheet for ButtonColor {
+    fn active(&self) -> button::Style {
+        button::Style {
+            background: Some(iced::Background::Color(self.color)),
+            ..Default::default()
         }
     }
 }
