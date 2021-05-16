@@ -1,5 +1,5 @@
 use crate::{
-    ease::{ease_in_poly, lerp},
+    ease::{ease_in_poly, lerp, Easing},
     neighbor_pairs::NeighborPairsIter,
     params::{EnvelopeParams, OSCType},
 };
@@ -914,13 +914,12 @@ impl Decibel {
     // Linearly interpolate in Decibel space, but values of t below 0.125 will
     // lerp from `start` to `Decibel::zero()`. This function is meant for use
     // with user-facing parameter knobs.
-    pub fn lerp_db_knob(start: f32, end: f32, t: f32) -> Decibel {
-        if t == 0.0 {
-            <Decibel as crate::sound_gen::EnvelopeType>::zero()
-        } else if t <= 0.125 {
-            Decibel::lerp_db(NEG_INF_DB_THRESHOLD, start, t * 8.0)
-        } else {
-            Decibel::lerp_db(start, end, t)
+    pub const fn ease_db(start: f32, end: f32) -> Easing<Decibel> {
+        Easing::SplitLinear {
+            start: Decibel::neg_inf_db(),
+            mid: Decibel::from_db(start),
+            end: Decibel::from_db(end),
+            split_at: 0.125,
         }
     }
 

@@ -8,17 +8,16 @@ use std::{
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    params::{
-        GeneralEnvParams, ModBankSend, ModulationBank, ModulationSend, ModulationType, OSCParams,
-        OSCType, Parameters, VolEnvParams, LFO,
-    },
-    sound_gen::{Decibel, FilterParams},
+    params::{OSCParams, Parameters},
+    sound_gen::Decibel,
 };
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct PresetData {
     pub name: String,
     pub master_vol: Decibel,
+    pub osc_1: PresetDataOSC,
+    pub osc_2: PresetDataOSC,
 }
 
 impl PresetData {
@@ -26,77 +25,23 @@ impl PresetData {
         PresetData {
             name,
             master_vol: params.master_vol,
+            osc_1: PresetDataOSC::from(&params.osc_1),
+            osc_2: PresetDataOSC::from(&params.osc_2),
         }
     }
 }
 
-impl From<PresetData> for Parameters {
-    fn from(preset: PresetData) -> Parameters {
-        fn default_osc() -> OSCParams {
-            OSCParams {
-                volume: Decibel::from_db(crate::params::DEFAULT_OSC_VOL),
-                shape: crate::sound_gen::NoteShape::Sine,
-                pan: 0.5,
-                phase: 0.0,
-                coarse_tune: 0,
-                fine_tune: 0.0,
-                vol_adsr: default_vol_env(),
-                vol_lfo: default_lfo(),
-                pitch_adsr: default_env(),
-                pitch_lfo: default_lfo(),
-                filter_params: FilterParams {
-                    filter: biquad::Type::LowPass,
-                    freq: 22100.0,
-                    q_value: 1.00,
-                },
-            }
-        }
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct PresetDataOSC {
+    pub volume: Decibel,
+    pub vol_sustain: Decibel,
+}
 
-        fn default_env() -> GeneralEnvParams {
-            GeneralEnvParams {
-                attack: 0.001,
-                hold: 0.015,
-                decay: 0.001,
-                sustain: 0.0,
-                release: 0.001,
-                multiply: 0.0,
-            }
-        }
-
-        fn default_vol_env() -> VolEnvParams {
-            VolEnvParams {
-                attack: 0.002,
-                hold: 0.0,
-                decay: 15.0,
-                sustain: Decibel::from_db(crate::params::DEFAULT_VOL_SUSTAIN),
-                release: 35.0,
-            }
-        }
-
-        fn default_lfo() -> LFO {
-            LFO {
-                amplitude: 0.0,
-                period: 300.0,
-            }
-        }
-
-        Parameters {
-            osc_1: default_osc(),
-            osc_2: default_osc(),
-            master_vol: preset.master_vol,
-            osc_2_mod: ModulationType::AmpMod,
-            mod_bank: ModulationBank {
-                env_1: default_env(),
-                env_1_send: ModBankSend {
-                    mod_type: ModulationSend::Amplitude,
-                    osc: OSCType::OSC1,
-                },
-                env_2: default_env(),
-                env_2_send: ModBankSend {
-                    mod_type: ModulationSend::Amplitude,
-                    osc: OSCType::OSC2,
-                },
-            },
+impl From<&OSCParams> for PresetDataOSC {
+    fn from(params: &OSCParams) -> Self {
+        PresetDataOSC {
+            volume: params.volume,
+            vol_sustain: params.vol_adsr.sustain,
         }
     }
 }
@@ -127,7 +72,7 @@ pub fn save_preset_to_file(
     path: impl AsRef<Path>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let file = File::create(&path)?;
-    Ok(serde_json::to_writer(file, &preset)?)
+    Ok(serde_json::to_writer_pretty(file, &preset)?)
 }
 
 /// Get a file name which is not currently used by any file in the given folder
