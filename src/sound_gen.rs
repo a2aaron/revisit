@@ -367,7 +367,7 @@ impl OSCGroup {
             1.0,
         ) * params.pitch_lfo.amplitude;
         let pitch_coarse = to_pitch_multiplier(1.0, params.coarse_tune);
-        let pitch_fine = to_pitch_multiplier(params.fine_tune, 1);
+        let pitch_fine = to_pitch_multiplier(params.fine_tune / 100.0, 1);
         let pitch_bend = to_pitch_multiplier(pitch_bend, 12);
         let pitch_mods = to_pitch_multiplier(pitch_env + pitch_lfo, 24);
         let mod_bank_pitch = to_pitch_multiplier(mod_bank.pitch, 24);
@@ -822,15 +822,13 @@ impl std::fmt::Display for NoteShape {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy)]
-pub struct Decibel {
-    db: f32,
-}
+pub struct Decibel(f32);
 
 impl std::ops::Mul<f32> for Decibel {
     type Output = Decibel;
 
     fn mul(self, rhs: f32) -> Self::Output {
-        Decibel::from_db(self.db * rhs)
+        Decibel::from_db(self.0 * rhs)
     }
 }
 
@@ -845,7 +843,7 @@ impl std::ops::Add<Decibel> for Decibel {
     type Output = Decibel;
 
     fn add(self, rhs: Decibel) -> Self::Output {
-        Decibel::from_db(self.db + rhs.db)
+        Decibel::from_db(self.get_db() + rhs.get_db())
     }
 }
 
@@ -853,7 +851,7 @@ impl std::ops::Sub<Decibel> for Decibel {
     type Output = Decibel;
 
     fn sub(self, rhs: Decibel) -> Self::Output {
-        Decibel::from_db(self.db - rhs.db)
+        Decibel::from_db(self.get_db() - rhs.get_db())
     }
 }
 
@@ -882,7 +880,7 @@ impl crate::sound_gen::EnvelopeType for Decibel {
 
 impl Decibel {
     pub const fn from_db(db: f32) -> Decibel {
-        Decibel { db }
+        Decibel(db)
     }
 
     pub const fn neg_inf_db() -> Decibel {
@@ -894,9 +892,7 @@ impl Decibel {
     }
 
     pub fn from_amp(amp: f32) -> Decibel {
-        Decibel {
-            db: f32::log10(amp) * 10.0,
-        }
+        Decibel::from_db(f32::log10(amp) * 10.0)
     }
 
     // Linearly interpolate in amplitude space.
@@ -924,15 +920,15 @@ impl Decibel {
     }
 
     pub fn get_amp(&self) -> f32 {
-        if self.db <= NEG_INF_DB_THRESHOLD {
+        if self.get_db() <= NEG_INF_DB_THRESHOLD {
             0.0
         } else {
-            10.0f32.powf(self.db / 10.0)
+            10.0f32.powf(self.get_db() / 10.0)
         }
     }
 
     pub fn get_db(&self) -> f32 {
-        self.db
+        self.0
     }
 }
 
