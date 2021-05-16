@@ -49,12 +49,27 @@ pub const EASER: ParamEaser = ParamEaser {
     master_vol: Decibel::ease_db(MASTER_VOL_MIN_DB, MASTER_VOL_MAX_DB),
     osc_vol: Decibel::ease_db(OSC_VOL_MIN_DB, OSC_VOL_MAX_DB),
     vol_sustain: Decibel::ease_db(SUSTAIN_MIN_DB, 0.0),
+    identity: Easing::Linear {
+        start: 0.0,
+        end: 1.0,
+    },
+    remap_bipolar: Easing::Linear {
+        start: -1.0,
+        end: 1.0,
+    },
+    fine_tune: Easing::Linear {
+        start: -100.0,
+        end: 100.0,
+    },
 };
 
 pub struct ParamEaser {
     master_vol: Easing<Decibel>,
     osc_vol: Easing<Decibel>,
     vol_sustain: Easing<Decibel>,
+    fine_tune: Easing<f32>,
+    identity: Easing<f32>,
+    remap_bipolar: Easing<f32>,
 }
 
 pub struct Parameters {
@@ -87,7 +102,7 @@ pub struct OSCParams {
     pub phase: f32,
     // In semi-tones
     pub coarse_tune: i32,
-    // In [-1.0, 1.0] range
+    // In cents
     pub fine_tune: f32,
     pub vol_adsr: VolEnvParams,
     pub vol_lfo: LFO,
@@ -101,12 +116,12 @@ impl From<&RawOSC> for OSCParams {
         OSCParams {
             volume: EASER.osc_vol.ease(params.volume),
             shape: NoteShape::from_warp(params.shape, params.warp),
-            pan: (params.pan - 0.5) * 2.0,
-            phase: params.phase,
+            pan: EASER.remap_bipolar.ease(params.pan),
+            phase: EASER.identity.ease(params.phase),
             // In semi-tones
             coarse_tune: ((params.coarse_tune - 0.5) * 2.0 * 24.0) as i32,
             // In [-1.0, 1.0] range
-            fine_tune: (params.fine_tune - 0.5) * 2.0,
+            fine_tune: EASER.fine_tune.ease(params.fine_tune),
             vol_adsr: VolEnvParams::from(&params.vol_adsr),
             vol_lfo: LFO {
                 amplitude: ease_in_expo(params.vol_lfo.amount),
@@ -454,7 +469,7 @@ impl RawParameters {
                         NoteShape::Sine | NoteShape::Noise => ("N/A".to_string(), "".to_string()),
                     },
                     CoarseTune => (format!("{}", osc.coarse_tune), " semis".to_string()),
-                    FineTune => make_strings(osc.fine_tune * 100.0, " cents"),
+                    FineTune => make_strings(osc.fine_tune, " cents"),
                     VolumeEnv(param) => vol_env_strings(osc.vol_adsr, param),
                     VolLFOAmplitude => make_strings(osc.vol_lfo.amplitude * 100.0, "%"),
                     VolLFOPeriod => duration_strings(osc.vol_lfo.period),
@@ -860,11 +875,11 @@ macro_rules! table {
             //  variant                                                                     field_name                      name                          idx   default                 easer_field         preset_field
             ParameterType::MasterVolume,                                                    master_vol,                     "Master Volume",              0,    DEFAULT_MASTER_VOL,     master_vol,         master_vol;
             ParameterType::OSC1(OSCParameterType::Volume),                                  osc_1_volume,                   "OSC 1 Volume",               1,    DEFAULT_OSC_VOL,        osc_vol,            osc_1.volume;
-            ParameterType::OSC1(OSCParameterType::Phase),                                   osc_1_phase,                    "OSC 1 Phase",                2,    0.0,                    NONE,               NONE;
-            ParameterType::OSC1(OSCParameterType::Pan),                                     osc_1_pan,                      "OSC 1 Pan",                  3,    0.5,                    NONE,               NONE;
+            ParameterType::OSC1(OSCParameterType::Phase),                                   osc_1_phase,                    "OSC 1 Phase",                2,    0.0,                    identity,           osc_1.phase;
+            ParameterType::OSC1(OSCParameterType::Pan),                                     osc_1_pan,                      "OSC 1 Pan",                  3,    0.5,                    remap_bipolar,      osc_1.pan;
             ParameterType::OSC1(OSCParameterType::Shape),                                   osc_1_shape,                    "OSC 1 Shape",                4,    0.0,                    NONE,               NONE;
             ParameterType::OSC1(OSCParameterType::Warp),                                    osc_1_warp,                     "OSC 1 Warp",                 5,    0.5,                    NONE,               NONE;
-            ParameterType::OSC1(OSCParameterType::FineTune),                                osc_1_fine_tune,                "OSC 1 Fine Tune",            6,    0.5,                    NONE,               NONE;
+            ParameterType::OSC1(OSCParameterType::FineTune),                                osc_1_fine_tune,                "OSC 1 Fine Tune",            6,    0.5,                    fine_tune,          osc_1.fine_tune;
             ParameterType::OSC1(OSCParameterType::CoarseTune),                              osc_1_coarse_tune,              "OSC 1 Coarse Tune",          7,    0.5,                    NONE,               NONE;
             ParameterType::OSC1(OSCParameterType::VolumeEnv(EnvelopeParam::Attack)),        osc_1_vol_env_attack,           "OSC 1 Volume Attack",        8,    DEFAULT_VOL_ATTACK,     NONE,               NONE;
             ParameterType::OSC1(OSCParameterType::VolumeEnv(EnvelopeParam::Hold)),          osc_1_vol_env_hold,             "OSC 1 Volume Hold",          9,    DEFAULT_VOL_HOLD,       NONE,               NONE;
@@ -887,11 +902,11 @@ macro_rules! table {
             ParameterType::OSC1(OSCParameterType::FilterGain),                              osc_1_filter_gain,              "OSC 1 Filter Gain",          26,   0.5,                    NONE,               NONE;
             ParameterType::OSC2Mod,                                                         osc_2_mod,                      "OSC 2 Mod",                  27,   0.0,                    NONE,               NONE;
             ParameterType::OSC2(OSCParameterType::Volume),                                  osc_2_volume,                   "OSC 2 Volume",               28,   DEFAULT_OSC_VOL,        osc_vol,            osc_2.volume;
-            ParameterType::OSC2(OSCParameterType::Phase),                                   osc_2_phase,                    "OSC 2 Phase",                29,   0.0,                    NONE,               NONE;
-            ParameterType::OSC2(OSCParameterType::Pan),                                     osc_2_pan,                      "OSC 2 Pan",                  30,   0.5,                    NONE,               NONE;
+            ParameterType::OSC2(OSCParameterType::Phase),                                   osc_2_phase,                    "OSC 2 Phase",                29,   0.0,                    NONE,               osc_2.phase;
+            ParameterType::OSC2(OSCParameterType::Pan),                                     osc_2_pan,                      "OSC 2 Pan",                  30,   0.5,                    NONE,               osc_2.pan;
             ParameterType::OSC2(OSCParameterType::Shape),                                   osc_2_shape,                    "OSC 2 Shape",                31,   0.0,                    NONE,               NONE;
             ParameterType::OSC2(OSCParameterType::Warp),                                    osc_2_warp,                     "OSC 2 Warp",                 32,   0.5,                    NONE,               NONE;
-            ParameterType::OSC2(OSCParameterType::FineTune),                                osc_2_fine_tune,                "OSC 2 Fine Tune",            33,   0.5,                    NONE,               NONE;
+            ParameterType::OSC2(OSCParameterType::FineTune),                                osc_2_fine_tune,                "OSC 2 Fine Tune",            33,   0.5,                    fine_tune,          osc_2.fine_tune;
             ParameterType::OSC2(OSCParameterType::CoarseTune),                              osc_2_coarse_tune,              "OSC 2 Coarse Tune",          34,   0.5,                    NONE,               NONE;
             ParameterType::OSC2(OSCParameterType::VolumeEnv(EnvelopeParam::Attack)),        osc_2_vol_env_attack,           "OSC 2 Volume Attack",        35,   DEFAULT_VOL_ATTACK,     NONE,               NONE;
             ParameterType::OSC2(OSCParameterType::VolumeEnv(EnvelopeParam::Hold)),          osc_2_vol_env_hold,             "OSC 2 Volume Hold",          36,   DEFAULT_VOL_HOLD,       NONE,               NONE;

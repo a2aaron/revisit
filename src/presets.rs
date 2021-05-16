@@ -34,6 +34,9 @@ impl PresetData {
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct PresetDataOSC {
     pub volume: Decibel,
+    pub phase: f32,
+    pub pan: f32,
+    pub fine_tune: f32,
     pub vol_sustain: Decibel,
 }
 
@@ -42,6 +45,9 @@ impl From<&OSCParams> for PresetDataOSC {
         PresetDataOSC {
             volume: params.volume,
             vol_sustain: params.vol_adsr.sustain,
+            phase: params.phase,
+            pan: params.pan,
+            fine_tune: params.fine_tune,
         }
     }
 }
