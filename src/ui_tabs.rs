@@ -20,7 +20,7 @@ use crate::{
         ModulationSend, ModulationType, OSCParameterType, OSCType, ParameterType, RawEnvelope,
         RawParameters,
     },
-    presets::PresetData,
+    presets::try_parse_file,
     sound_gen::NoteShape,
     ui::Message,
 };
@@ -33,6 +33,13 @@ const PANE_PADDING: u16 = 15;
 const INTERPANE_SPACING: u16 = 15;
 const MOD_TYPE_SELECTOR_WIDTH: u16 = 200;
 const MASTER_VOL_HEIGHT: u16 = 300;
+
+const RED: iced::Color = iced::Color {
+    r: 1.0,
+    g: 0.0,
+    b: 0.0,
+    a: 1.0,
+};
 
 const GREEN: iced::Color = iced::Color {
     r: 0.0,
@@ -214,8 +221,9 @@ impl ModulationTab {
 
 /// The tab which handles preset loading and saving.
 pub struct PresetTab {
-    // The list of presets available
-    presets: Vec<(PresetData, button::State)>,
+    // The list of presets available. The Option<String> is the name. If it is
+    // none, then the preset failed to parse.
+    presets: Vec<(PathBuf, button::State, Option<String>)>,
     save_preset: button::State,
 }
 
@@ -235,8 +243,17 @@ impl PresetTab {
         self.presets.clear();
         match crate::presets::get_presets_from_folder(&path) {
             Ok(presets) => {
-                for preset in presets {
-                    self.presets.push((preset, button::State::new()));
+                for path in presets {
+                    match try_parse_file(&path) {
+                        Ok(preset) => {
+                            self.presets
+                                .push((path, button::State::new(), Some(preset.name)));
+                        }
+                        Err(err) => {
+                            log::info!("Couldn't parse {}: {:?}", path.display(), err);
+                            self.presets.push((path, button::State::new(), None));
+                        }
+                    }
                 }
             }
             Err(err) => log::info!(
@@ -254,13 +271,28 @@ impl PresetTab {
         _screen_height: u32,
         _params: &RawParameters,
     ) -> iced::Element<'_, Message> {
-        // iced::Text::new("! ! TODO ! !").size(48).into()
         let buttons: Vec<Element<_>> = self
             .presets
             .iter_mut()
-            .map(|(preset, state)| {
-                crate::ui::make_button(state, &preset.name, Message::LoadPreset(preset.clone()))
-                    .into()
+            .map(|(preset, state, name)| {
+                let button: iced::Button<_> = crate::ui::make_button(
+                    state,
+                    name.as_ref()
+                        .unwrap_or(&"Invalid Preset".to_string())
+                        .as_str(),
+                    Message::LoadPreset((*preset).clone()),
+                );
+                // TODO: why cant i set the style of a button?
+                // let style = iced::button::Style {
+                //     background: if name.is_none() {
+                //         Some(Background::Color(RED))
+                //     } else {
+                //         None
+                //     },
+                //     ..Default::default()
+                // };
+                // let button = button.style(style);
+                button.into()
             })
             .collect();
 

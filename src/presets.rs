@@ -110,17 +110,11 @@ pub fn try_parse_file(file: impl AsRef<Path>) -> Result<PresetData, Box<dyn std:
 }
 
 /// Read a folder and try to parse any `json` files in it into a PresetData.
-pub fn get_presets_from_folder(folder: impl AsRef<Path>) -> std::io::Result<Vec<PresetData>> {
+pub fn get_presets_from_folder(folder: impl AsRef<Path>) -> std::io::Result<Vec<PathBuf>> {
     let mut presets = vec![];
     for entry in (std::fs::read_dir(folder)?).flatten() {
         if Some(std::ffi::OsStr::new("json")) == entry.path().extension() {
-            match try_parse_file(&entry.path()) {
-                Ok(preset) => {
-                    presets.push(preset);
-                    log::info!("Parsed {}!", entry.path().display());
-                }
-                Err(err) => log::info!("Couldn't parse {}: {:?}", entry.path().display(), err),
-            }
+            presets.push(entry.path());
         }
     }
     Ok(presets)

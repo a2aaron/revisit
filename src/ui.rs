@@ -13,7 +13,7 @@ use crate::{
         ModBankParameter, ModBankType, ModulationSend, ModulationType, OSCType, ParameterType,
         Parameters, RawParameters,
     },
-    presets::PresetData,
+    presets::{try_parse_file, PresetData},
     ui_tabs::{MainTab, ModulationTab, PresetTab, Tabs},
 };
 
@@ -37,7 +37,7 @@ pub enum Message {
     ForceRedraw(ParameterType, f32),
     ChangeTab(Tabs),
     /// Indicates that a new preset has been loaded.
-    LoadPreset(PresetData),
+    LoadPreset(std::path::PathBuf),
     /// Save the current parameters as preset at the given folder path. The name of the
     /// preset is the String.
     SaveParamsAsPreset(std::path::PathBuf),
@@ -153,9 +153,13 @@ impl Application for UIFrontEnd {
                     self.preset_tab.get_presets_from_folder(path);
                 }
             }
-            Message::LoadPreset(preset) => {
-                self.params.set_by_preset(&preset);
-            }
+            Message::LoadPreset(path) => match try_parse_file(&path) {
+                Ok(preset) => {
+                    self.params.set_by_preset(&preset);
+                    log::info!("Loaded {}!", path.display());
+                }
+                Err(err) => log::info!("Couldn't parse {}: {:?}", path.display(), err),
+            },
             Message::SaveParamsAsPreset(folder) => {
                 let (path, i) = crate::presets::get_free_file_name(folder, "preset", "json");
                 let name = format!("Unnamed Preset {}", i);
