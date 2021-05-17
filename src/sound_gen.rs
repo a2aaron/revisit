@@ -483,10 +483,11 @@ impl Oscillator {
         pitch: f32,
         phase_mod: f32,
     ) -> f32 {
-        // Get the raw signal (we use fract here to constrain the angle
+        // Get the raw signal (we use rem_euclid here to constrain the angle
         // between 0.0-1.0 (the normal % operator would allow for negative angles
         // which we do not want!))
-        let value = shape.get((self.angle + phase_mod).fract());
+        // NOTE: fract also does not do what we want, since that also allows for negative angles.
+        let value = shape.get((self.angle + phase_mod).rem_euclid(1.0));
 
         // Update the angle. Each sample is 1.0 / sample_rate apart for a
         // complete waveform. We also multiply by pitch to advance the right amount
@@ -725,6 +726,7 @@ pub enum NoteShape {
 
 impl NoteShape {
     pub fn new(shape: NoteShapeDiscrim, warp: f32) -> NoteShape {
+        let warp = warp.clamp(0.0, 1.0);
         match shape {
             NoteShapeDiscrim::Sine => NoteShape::Sine,
             NoteShapeDiscrim::Square => NoteShape::Square(warp),
