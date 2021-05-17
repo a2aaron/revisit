@@ -425,7 +425,7 @@ impl OSCKnobs {
         let fine_tune = make_knob(&mut self.fine_tune);
         let coarse_tune = make_knob(&mut self.coarse_tune);
 
-        let shape_title = NoteShape::from_warp(
+        let shape_title = NoteShape::from_f32s(
             self.note_shape.0.normal().into(),
             self.note_warp.0.normal().into(),
         )

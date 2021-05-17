@@ -777,16 +777,11 @@ impl NoteShape {
 
     /// Create a NoteShape using the given shape and warp. This is used for
     /// RawParameters mainly.
-    pub fn from_warp(shape: f32, warp: f32) -> Self {
-        if shape < 0.25 {
-            NoteShape::Sine
-        } else if shape < 0.5 {
-            NoteShape::Skewtooth(warp)
-        } else if shape < 0.75 {
-            NoteShape::Square(warp)
-        } else {
-            NoteShape::Noise
-        }
+    pub fn from_f32s(shape: f32, warp: f32) -> Self {
+        NoteShape::new(
+            crate::params::EASER.shape.ease(shape),
+            crate::params::EASER.warp.ease(warp),
+        )
     }
 
     /// Add the warp of the given NoteShape with the modulation parameter. This

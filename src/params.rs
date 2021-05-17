@@ -9,6 +9,7 @@ use crate::{
 };
 
 use derive_more::Display;
+use serde::{Deserialize, Serialize};
 use variant_count::VariantCount;
 use vst::{host::Host, plugin::PluginParameters, util::AtomicFloat};
 
@@ -79,6 +80,15 @@ pub const EASER: ParamEaser = ParamEaser {
         end: I32Divable::new(24),
         steps: 24 * 2 + 1,
     },
+    osc_2_mod: DiscreteLinear {
+        values: [
+            ModulationType::Mix,
+            ModulationType::AmpMod,
+            ModulationType::FreqMod,
+            ModulationType::PhaseMod,
+            ModulationType::WarpMod,
+        ],
+    },
 };
 
 pub struct ParamEaser {
@@ -86,11 +96,12 @@ pub struct ParamEaser {
     osc_vol: Easing<Decibel>,
     pan: Easing<f32>,
     phase: Easing<f32>,
-    shape: DiscreteLinear<NoteShapeDiscrim, { NoteShapeDiscrim::VARIANT_COUNT }>,
-    warp: Easing<f32>,
+    pub shape: DiscreteLinear<NoteShapeDiscrim, { NoteShapeDiscrim::VARIANT_COUNT }>,
+    pub warp: Easing<f32>,
     fine_tune: Easing<f32>,
     coarse_tune: Easing<I32Divable>,
     vol_sustain: Easing<Decibel>,
+    osc_2_mod: DiscreteLinear<ModulationType, { ModulationType::VARIANT_COUNT }>,
 }
 
 pub struct Parameters {
@@ -107,7 +118,7 @@ impl From<&RawParameters> for Parameters {
             osc_1: OSCParams::from(&params.get_osc_1()),
             osc_2: OSCParams::from(&params.get_osc_2()),
             master_vol: EASER.master_vol.ease(params.master_vol.get()),
-            osc_2_mod: params.osc_2_mod.get().into(),
+            osc_2_mod: EASER.osc_2_mod.ease(params.osc_2_mod.get()),
             mod_bank: ModulationBank::from(&params.get_mod_bank()),
         }
     }
@@ -379,8 +390,8 @@ impl RawParameters {
                     _ => unreachable!(),
                 };
 
-                let old_value = format!("{}", NoteShape::from_warp(old_shape, old_warp));
-                let new_value = format!("{}", NoteShape::from_warp(new_shape, new_warp));
+                let old_value = format!("{}", NoteShape::from_f32s(old_shape, old_warp));
+                let new_value = format!("{}", NoteShape::from_f32s(new_shape, new_warp));
                 old_value != new_value
             }
             _ => false,
@@ -793,7 +804,7 @@ impl From<f32> for OSCType {
     }
 }
 
-#[derive(Debug, Display, Clone, Copy, PartialEq, Eq, VariantCount)]
+#[derive(Debug, Display, Clone, Copy, PartialEq, Eq, VariantCount, Serialize, Deserialize)]
 pub enum ModulationType {
     Mix,
     #[display(fmt = "Amp. Mod")]
@@ -808,30 +819,13 @@ pub enum ModulationType {
 
 impl From<ModulationType> for f32 {
     fn from(x: ModulationType) -> Self {
-        match x {
-            ModulationType::Mix => 0.0 / 4.0,
-            ModulationType::AmpMod => 1.0 / 4.0,
-            ModulationType::FreqMod => 2.0 / 4.0,
-            ModulationType::PhaseMod => 3.0 / 4.0,
-            ModulationType::WarpMod => 1.0,
-        }
+        EASER.osc_2_mod.inv_ease(x)
     }
 }
 
 impl From<f32> for ModulationType {
     fn from(x: f32) -> Self {
-        use ModulationType::*;
-        if x < 1.0 / 5.0 {
-            Mix
-        } else if x < 2.0 / 5.0 {
-            AmpMod
-        } else if x < 3.0 / 5.0 {
-            FreqMod
-        } else if x < 4.0 / 5.0 {
-            PhaseMod
-        } else {
-            WarpMod
-        }
+        EASER.osc_2_mod.ease(x)
     }
 }
 
@@ -921,7 +915,7 @@ macro_rules! table {
             ParameterType::OSC1(OSCParameterType::FilterFreq),                              osc_1_filter_freq,              "OSC 1 Filter Freq",          24,   1.0,                    NONE,               NONE;
             ParameterType::OSC1(OSCParameterType::FilterQ),                                 osc_1_filter_q,                 "OSC 1 Filter Q",             25,   0.1,                    NONE,               NONE;
             ParameterType::OSC1(OSCParameterType::FilterGain),                              osc_1_filter_gain,              "OSC 1 Filter Gain",          26,   0.5,                    NONE,               NONE;
-            ParameterType::OSC2Mod,                                                         osc_2_mod,                      "OSC 2 Mod",                  27,   0.0,                    NONE,               NONE;
+            ParameterType::OSC2Mod,                                                         osc_2_mod,                      "OSC 2 Mod",                  27,   0.0,                    osc_2_mod,          osc_2_mod;
             ParameterType::OSC2(OSCParameterType::Volume),                                  osc_2_volume,                   "OSC 2 Volume",               28,   DEFAULT_OSC_VOL,        osc_vol,            osc_2.volume;
             ParameterType::OSC2(OSCParameterType::Phase),                                   osc_2_phase,                    "OSC 2 Phase",                29,   0.0,                    phase,              osc_2.phase;
             ParameterType::OSC2(OSCParameterType::Pan),                                     osc_2_pan,                      "OSC 2 Pan",                  30,   0.5,                    pan,                osc_2.pan;

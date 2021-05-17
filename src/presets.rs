@@ -9,7 +9,7 @@ use derive_more::{Add, From, Sub};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    params::{OSCParams, Parameters},
+    params::{ModulationType, OSCParams, Parameters},
     sound_gen::{Decibel, NoteShapeDiscrim},
 };
 
@@ -19,6 +19,7 @@ pub struct PresetData {
     pub master_vol: Decibel,
     pub osc_1: PresetDataOSC,
     pub osc_2: PresetDataOSC,
+    pub osc_2_mod: ModulationType,
 }
 
 impl PresetData {
@@ -28,6 +29,7 @@ impl PresetData {
             master_vol: params.master_vol,
             osc_1: PresetDataOSC::from(&params.osc_1),
             osc_2: PresetDataOSC::from(&params.osc_2),
+            osc_2_mod: params.osc_2_mod,
         }
     }
 }
