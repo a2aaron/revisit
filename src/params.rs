@@ -4,7 +4,7 @@ use crate::{
     ease::{DiscreteLinear, Easing},
     generate_raw_params, impl_display, impl_from_i32, impl_get_default, impl_get_ref,
     impl_into_i32, impl_new, impl_set_by_preset,
-    presets::{I32Divable, PresetData},
+    presets::{FilterTypeDiscrim, I32Divable, PresetData},
     sound_gen::{Decibel, Envelope, FilterParams, NoteShape, NoteShapeDiscrim},
 };
 
@@ -60,7 +60,6 @@ pub const EASER: ParamEaser = ParamEaser {
     master_vol: Decibel::ease_db(MASTER_VOL_MIN_DB, MASTER_VOL_MAX_DB),
     osc_vol: Decibel::ease_db(OSC_VOL_MIN_DB, OSC_VOL_MAX_DB),
     vol_sustain: Decibel::ease_db(SUSTAIN_MIN_DB, 0.0),
-
     phase: IDENTITY,
     pan: BIPOLAR,
     warp: IDENTITY,
@@ -120,6 +119,27 @@ pub const EASER: ParamEaser = ParamEaser {
         start: 0.001,
         end: 10.0,
     },
+    filter_type: DiscreteLinear {
+        values: [
+            FilterTypeDiscrim::LowPass,
+            FilterTypeDiscrim::HighPass,
+            FilterTypeDiscrim::PeakingEQ,
+            FilterTypeDiscrim::LowShelf,
+            FilterTypeDiscrim::HighShelf,
+            FilterTypeDiscrim::BandPass,
+            FilterTypeDiscrim::Notch,
+            FilterTypeDiscrim::AllPass,
+        ],
+    },
+    filter_db: Easing::Linear {
+        start: -36.0,
+        end: 36.0,
+    },
+    filter_freq: IDENTITY,
+    filter_q: Easing::Linear {
+        start: 0.01,
+        end: 10.0,
+    },
 };
 
 pub struct ParamEaser {
@@ -142,10 +162,10 @@ pub struct ParamEaser {
     vol_lfo_amp: Easing<f32>,
     pitch_lfo_amp: Easing<f32>,
     lfo_period: Easing<f32>,
-    // filter_freq: Easing<f32>,
-    // filter_q: Easing<f32>,
-    // filter_type: DiscreteLinear<FilterTypeDiscrim>,
-    // filter_db: Easing<f32>,
+    filter_type: DiscreteLinear<FilterTypeDiscrim, 8>,
+    filter_freq: Easing<f32>,
+    filter_q: Easing<f32>,
+    filter_db: Easing<f32>,
 }
 
 pub struct Parameters {
@@ -937,10 +957,10 @@ macro_rules! table {
             ParameterType::OSC1(OSCParameterType::PitchEnv(EnvelopeParam::Multiply)),       osc_1_pitch_env_multiply,       "OSC 1 Pitch Multiply",       19,   DEFAULT_MULTIPLY,       env_multiply,       osc_1.pitch_multiply;
             ParameterType::OSC1(OSCParameterType::PitchLFOAmplitude),                       osc_1_pitch_lfo_amplitude,      "OSC 1 Pitch LFO Amplitude",  20,   0.0,                    pitch_lfo_amp,      osc_1.pitch_lfo.amplitude;
             ParameterType::OSC1(OSCParameterType::PitchLFOPeriod),                          osc_1_pitch_lfo_period,         "OSC 1 Pitch LFO Period",     21,   0.5,                    lfo_period,         osc_1.pitch_lfo.period;
-            ParameterType::OSC1(OSCParameterType::FilterType),                              osc_1_filter_type,              "OSC 1 Filter Type",          22,   0.0,                    NONE,               NONE;
-            ParameterType::OSC1(OSCParameterType::FilterFreq),                              osc_1_filter_freq,              "OSC 1 Filter Freq",          23,   1.0,                    NONE,               NONE;
-            ParameterType::OSC1(OSCParameterType::FilterQ),                                 osc_1_filter_q,                 "OSC 1 Filter Q",             24,   0.1,                    NONE,               NONE;
-            ParameterType::OSC1(OSCParameterType::FilterGain),                              osc_1_filter_gain,              "OSC 1 Filter Gain",          25,   0.5,                    NONE,               NONE;
+            ParameterType::OSC1(OSCParameterType::FilterType),                              osc_1_filter_type,              "OSC 1 Filter Type",          22,   0.0,                    filter_type,        osc_1.filter.filter_type;
+            ParameterType::OSC1(OSCParameterType::FilterFreq),                              osc_1_filter_freq,              "OSC 1 Filter Freq",          23,   1.0,                    filter_freq,        osc_1.filter.freq;
+            ParameterType::OSC1(OSCParameterType::FilterQ),                                 osc_1_filter_q,                 "OSC 1 Filter Q",             24,   0.1,                    filter_q,           osc_1.filter.q;
+            ParameterType::OSC1(OSCParameterType::FilterGain),                              osc_1_filter_gain,              "OSC 1 Filter Gain",          25,   0.5,                    filter_db,          osc_1.filter.db_gain;
             ParameterType::OSC2Mod,                                                         osc_2_mod,                      "OSC 2 Mod",                  26,   0.0,                    osc_2_mod,          osc_2_mod;
             ParameterType::OSC2(OSCParameterType::Volume),                                  osc_2_volume,                   "OSC 2 Volume",               27,   DEFAULT_OSC_VOL,        osc_vol,            osc_2.volume;
             ParameterType::OSC2(OSCParameterType::Phase),                                   osc_2_phase,                    "OSC 2 Phase",                28,   0.0,                    phase,              osc_2.phase;
@@ -963,10 +983,10 @@ macro_rules! table {
             ParameterType::OSC2(OSCParameterType::PitchEnv(EnvelopeParam::Multiply)),       osc_2_pitch_env_multiply,       "OSC 2 Pitch Multiply",       45,   DEFAULT_MULTIPLY,       env_multiply,       osc_2.pitch_multiply;
             ParameterType::OSC2(OSCParameterType::PitchLFOAmplitude),                       osc_2_pitch_lfo_amplitude,      "OSC 2 Pitch LFO Amplitude",  46,   0.0,                    pitch_lfo_amp,      osc_2.pitch_lfo.amplitude;
             ParameterType::OSC2(OSCParameterType::PitchLFOPeriod),                          osc_2_pitch_lfo_period,         "OSC 2 Pitch LFO Period",     47,   0.5,                    lfo_period,         osc_2.pitch_lfo.period;
-            ParameterType::OSC2(OSCParameterType::FilterType),                              osc_2_filter_type,              "OSC 2 Filter Type",          48,   0.0,                    NONE,               NONE;
-            ParameterType::OSC2(OSCParameterType::FilterFreq),                              osc_2_filter_freq,              "OSC 2 Filter Freq",          49,   1.0,                    NONE,               NONE;
-            ParameterType::OSC2(OSCParameterType::FilterQ),                                 osc_2_filter_q,                 "OSC 2 Filter Q",             50,   0.1,                    NONE,               NONE;
-            ParameterType::OSC2(OSCParameterType::FilterGain),                              osc_2_filter_gain,              "OSC 2 Filter Gain",          51,   0.5,                    NONE,               NONE;
+            ParameterType::OSC2(OSCParameterType::FilterType),                              osc_2_filter_type,              "OSC 2 Filter Type",          48,   0.0,                    filter_type,        osc_2.filter.filter_type;
+            ParameterType::OSC2(OSCParameterType::FilterFreq),                              osc_2_filter_freq,              "OSC 2 Filter Freq",          49,   1.0,                    filter_freq,        osc_2.filter.freq;
+            ParameterType::OSC2(OSCParameterType::FilterQ),                                 osc_2_filter_q,                 "OSC 2 Filter Q",             50,   0.1,                    filter_q,           osc_2.filter.q;
+            ParameterType::OSC2(OSCParameterType::FilterGain),                              osc_2_filter_gain,              "OSC 2 Filter Gain",          51,   0.5,                    filter_db,          osc_2.filter.db_gain;
             ParameterType::ModBank(ModBankParameter::Env1(EnvelopeParam::Attack)),          mod_bank_1_attack,              "Mod Bank Env 1 Attack",      52,   DEFAULT_ATTACK,         env_attack,         mod_bank.env_1.attack;
             ParameterType::ModBank(ModBankParameter::Env1(EnvelopeParam::Hold)),            mod_bank_1_hold,                "Mod Bank Env 1 Hold",        53,   DEFAULT_HOLD,           env_hold,           mod_bank.env_1.hold;
             ParameterType::ModBank(ModBankParameter::Env1(EnvelopeParam::Decay)),           mod_bank_1_decay,               "Mod Bank Env 1 Decay",       54,   DEFAULT_DECAY,          env_decay,          mod_bank.env_1.decay;

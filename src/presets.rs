@@ -7,10 +7,11 @@ use std::{
 
 use derive_more::{Add, From, Into, Sub};
 use serde::{Deserialize, Serialize};
+use variant_count::VariantCount;
 
 use crate::{
     params::{GeneralEnvParams, ModulationBank, ModulationType, OSCParams, Parameters, LFO},
-    sound_gen::{Decibel, NoteShapeDiscrim},
+    sound_gen::{Decibel, FilterParams, NoteShapeDiscrim},
 };
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -57,6 +58,7 @@ pub struct PresetDataOSC {
     pub pitch_release: f32,
     pub vol_lfo: LFO,
     pub pitch_lfo: LFO,
+    pub filter: PresetDataFilter,
 }
 
 impl From<&OSCParams> for PresetDataOSC {
@@ -81,6 +83,7 @@ impl From<&OSCParams> for PresetDataOSC {
             pitch_release: params.pitch_adsr.release,
             vol_lfo: params.vol_lfo,
             pitch_lfo: params.pitch_lfo,
+            filter: PresetDataFilter::from(&params.filter_params),
         }
     }
 }
@@ -96,6 +99,63 @@ impl From<&ModulationBank> for PresetDataModBank {
         PresetDataModBank {
             env_1: params.env_1,
             env_2: params.env_2,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct PresetDataFilter {
+    pub filter_type: FilterTypeDiscrim,
+    pub freq: f32,
+    pub q: f32,
+    pub db_gain: f32,
+}
+
+impl From<&FilterParams> for PresetDataFilter {
+    fn from(params: &FilterParams) -> Self {
+        PresetDataFilter {
+            filter_type: FilterTypeDiscrim::from(&params.filter),
+            freq: params.freq,
+            q: params.q_value,
+            db_gain: get_db_gain(params.filter),
+        }
+    }
+}
+
+fn get_db_gain(filter: biquad::Type<f32>) -> f32 {
+    match filter {
+        biquad::Type::LowShelf(db_gain)
+        | biquad::Type::HighShelf(db_gain)
+        | biquad::Type::PeakingEQ(db_gain) => db_gain,
+        _ => 0.0,
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, VariantCount, Serialize, Deserialize)]
+pub enum FilterTypeDiscrim {
+    SinglePoleLowPass,
+    LowPass,
+    HighPass,
+    BandPass,
+    Notch,
+    AllPass,
+    LowShelf,
+    HighShelf,
+    PeakingEQ,
+}
+
+impl<T> From<&biquad::Type<T>> for FilterTypeDiscrim {
+    fn from(filter_type: &biquad::Type<T>) -> Self {
+        match filter_type {
+            biquad::Type::SinglePoleLowPass => FilterTypeDiscrim::SinglePoleLowPass,
+            biquad::Type::LowPass => FilterTypeDiscrim::LowPass,
+            biquad::Type::HighPass => FilterTypeDiscrim::HighPass,
+            biquad::Type::BandPass => FilterTypeDiscrim::BandPass,
+            biquad::Type::Notch => FilterTypeDiscrim::Notch,
+            biquad::Type::AllPass => FilterTypeDiscrim::AllPass,
+            biquad::Type::LowShelf(_) => FilterTypeDiscrim::LowShelf,
+            biquad::Type::HighShelf(_) => FilterTypeDiscrim::HighShelf,
+            biquad::Type::PeakingEQ(_) => FilterTypeDiscrim::PeakingEQ,
         }
     }
 }
