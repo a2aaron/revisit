@@ -10,7 +10,10 @@ use serde::{Deserialize, Serialize};
 use variant_count::VariantCount;
 
 use crate::{
-    params::{GeneralEnvParams, ModulationBank, ModulationType, OSCParams, Parameters, LFO},
+    params::{
+        GeneralEnvParams, ModulationBank, ModulationSend, ModulationType, OSCParams, Parameters,
+        LFO,
+    },
     sound_gen::{Decibel, FilterParams, NoteShapeDiscrim},
 };
 
@@ -90,7 +93,9 @@ impl From<&OSCParams> for PresetDataOSC {
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct PresetDataModBank {
+    pub env_1_send: ModulationSend,
     pub env_1: GeneralEnvParams,
+    pub env_2_send: ModulationSend,
     pub env_2: GeneralEnvParams,
 }
 
@@ -98,7 +103,9 @@ impl From<&ModulationBank> for PresetDataModBank {
     fn from(params: &ModulationBank) -> Self {
         PresetDataModBank {
             env_1: params.env_1,
+            env_1_send: params.env_1_send.mod_type,
             env_2: params.env_2,
+            env_2_send: params.env_2_send.mod_type,
         }
     }
 }

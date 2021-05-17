@@ -140,6 +140,15 @@ pub const EASER: ParamEaser = ParamEaser {
         start: 0.01,
         end: 10.0,
     },
+    mod_bank_send: DiscreteLinear {
+        values: [
+            ModulationSend::Amplitude,
+            ModulationSend::Phase,
+            ModulationSend::Pitch,
+            ModulationSend::Warp,
+            ModulationSend::FilterFreq,
+        ],
+    },
 };
 
 pub struct ParamEaser {
@@ -166,6 +175,7 @@ pub struct ParamEaser {
     filter_freq: Easing<f32>,
     filter_q: Easing<f32>,
     filter_db: Easing<f32>,
+    mod_bank_send: DiscreteLinear<ModulationSend, { ModulationSend::VARIANT_COUNT }>,
 }
 
 pub struct Parameters {
@@ -698,7 +708,7 @@ pub enum ModBankType {
 }
 
 /// The location to send a modulation value in the ModulationBank
-#[derive(Debug, Display, Clone, Copy, PartialEq, Eq, VariantCount)]
+#[derive(Debug, Display, Clone, Copy, PartialEq, Eq, VariantCount, Serialize, Deserialize)]
 pub enum ModulationSend {
     Amplitude,
     Phase,
@@ -999,8 +1009,8 @@ macro_rules! table {
             ParameterType::ModBank(ModBankParameter::Env2(EnvelopeParam::Sustain)),         mod_bank_2_sustain,             "Mod Bank Env 2 Sustain",     61,   DEFAULT_SUSTAIN,        env_sustain,        mod_bank.env_2.sustain;
             ParameterType::ModBank(ModBankParameter::Env2(EnvelopeParam::Release)),         mod_bank_2_release,             "Mod Bank Env 2 Release",     62,   DEFAULT_RELEASE,        env_release,        mod_bank.env_2.release;
             ParameterType::ModBank(ModBankParameter::Env2(EnvelopeParam::Multiply)),        mod_bank_2_multiply,            "Mod Bank Env 2 Multiply",    63,   DEFAULT_MULTIPLY,       env_multiply,       mod_bank.env_2.multiply;
-            ParameterType::ModBankSend(ModBankType::Env1),                                  mod_bank_1_send,                "Mod Bank Env 1 Send",        64,   0.0,                    NONE,               NONE;
-            ParameterType::ModBankSend(ModBankType::Env2),                                  mod_bank_2_send,                "Mod Bank Env 2 Send",        65,   0.0,                    NONE,               NONE;
+            ParameterType::ModBankSend(ModBankType::Env1),                                  mod_bank_1_send,                "Mod Bank Env 1 Send",        64,   0.0,                    mod_bank_send,      mod_bank.env_1_send;
+            ParameterType::ModBankSend(ModBankType::Env2),                                  mod_bank_2_send,                "Mod Bank Env 2 Send",        65,   0.0,                    mod_bank_send,      mod_bank.env_2_send;
         }
     };
 }
