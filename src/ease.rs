@@ -9,7 +9,9 @@ pub trait Lerpable = Add<Self, Output = Self>
 
 pub trait InvLerpable = Sub<Self, Output = Self> + Div<Self, Output = f32> + Sized + Copy + Clone;
 
+/// An enum representing an ease.
 pub enum Easing<T> {
+    /// Linearly ease from start to end.
     Linear {
         start: T,
         end: T,
@@ -20,10 +22,16 @@ pub enum Easing<T> {
         end: T,
         split_at: f32,
     },
+    SteppedLinear {
+        start: T,
+        end: T,
+        steps: usize,
+    },
 }
 
 impl<T: Lerpable + InvLerpable> Easing<T> {
-    // `t` must be in 0.0 to 1.0 range
+    /// Ease using the given interpolation value `t`. `t` is expected to be in
+    /// [0.0, 1.0] range.
     pub fn ease(&self, t: f32) -> T {
         match *self {
             Easing::Linear { start, end } => lerp(start, end, t),
@@ -41,13 +49,20 @@ impl<T: Lerpable + InvLerpable> Easing<T> {
                     remap(split_at, 1.0, t, mid, end)
                 }
             }
+            Easing::SteppedLinear { start, end, steps } => {
+                let stepped_t = snap_float(t, steps);
+                lerp(start, end, stepped_t)
+            }
         }
     }
 
-    // inv_ease is not guarenteed to return within 0.0-1.0 range.
+    /// Given a value, return the `t` interpolation value such that `ease(t) == val`.
+    /// inv_ease is not guarenteed to return within 0.0-1.0 range. Also note that
+    /// inv_ease assumes easing functions are invertible, which might not be true
+    /// for all functions (ex: SplitLinear that does not ease all the way to 1.0)
     pub fn inv_ease(&self, val: T) -> f32 {
         match *self {
-            Easing::Linear { start, end } => inv_lerp::<T>(start, end, val),
+            Easing::Linear { start, end } => inv_lerp(start, end, val),
             Easing::SplitLinear {
                 start,
                 mid,
@@ -65,6 +80,28 @@ impl<T: Lerpable + InvLerpable> Easing<T> {
                     remap(mid, end, val, split_at, 1.0)
                 }
             }
+            Easing::SteppedLinear { start, end, steps } => {
+                let t = inv_lerp(start, end, val);
+                snap_float(t, steps)
+            }
+        }
+    }
+}
+
+pub struct DiscreteLinear<T, const N: usize> {
+    pub values: [T; N],
+}
+
+impl<T: Eq + Copy + Clone, const N: usize> DiscreteLinear<T, N> {
+    pub fn ease(&self, t: f32) -> T {
+        let index = (t * self.values.len() as f32).floor() as usize;
+        self.values[index.clamp(0, self.values.len() - 1)]
+    }
+
+    pub fn inv_ease(&self, val: T) -> f32 {
+        match self.values.iter().position(|&x| x == val) {
+            Some(index) => (index as f32) / (self.values.len() as f32),
+            None => 0.0,
         }
     }
 }
@@ -104,4 +141,14 @@ pub fn ease_in_expo(x: f32) -> f32 {
 
 pub fn ease_in_poly(x: f32, i: i32) -> f32 {
     x.powi(i)
+}
+
+/// Snap a float value in range 0.0-1.0 to the nearest f32 region
+/// For example, snap_float(_, 4) will snap a float to either:
+/// 0.0, 0.333, 0.666, or 1.0
+pub fn snap_float(value: f32, num_regions: usize) -> f32 {
+    // We subtract one from this denominator because we want there to only be
+    // four jumps. See also https://www.desmos.com/calculator/esnnnbfzml
+    let num_regions = num_regions as f32;
+    (num_regions * value).floor() / (num_regions - 1.0)
 }

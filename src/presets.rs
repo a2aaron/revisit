@@ -5,11 +5,12 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use derive_more::{Add, From, Sub};
 use serde::{Deserialize, Serialize};
 
 use crate::{
     params::{OSCParams, Parameters},
-    sound_gen::Decibel,
+    sound_gen::{Decibel, NoteShapeDiscrim},
 };
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -36,7 +37,10 @@ pub struct PresetDataOSC {
     pub volume: Decibel,
     pub phase: f32,
     pub pan: f32,
+    pub shape: NoteShapeDiscrim,
+    pub warp: f32,
     pub fine_tune: f32,
+    pub coarse_tune: I32Divable,
     pub vol_sustain: Decibel,
 }
 
@@ -47,8 +51,36 @@ impl From<&OSCParams> for PresetDataOSC {
             vol_sustain: params.vol_adsr.sustain,
             phase: params.phase,
             pan: params.pan,
+            shape: params.shape.get_shape(),
+            warp: params.shape.get_warp(),
+            coarse_tune: I32Divable::from(params.coarse_tune),
             fine_tune: params.fine_tune,
         }
+    }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Add, Sub, Serialize, Deserialize, From)]
+pub struct I32Divable(i32);
+
+impl std::ops::Div<Self> for I32Divable {
+    type Output = f32;
+
+    fn div(self, rhs: Self) -> Self::Output {
+        (self.0 as f32) / (rhs.0 as f32)
+    }
+}
+
+impl std::ops::Mul<f32> for I32Divable {
+    type Output = Self;
+
+    fn mul(self, rhs: f32) -> Self::Output {
+        I32Divable(((self.0 as f32) * rhs) as i32)
+    }
+}
+
+impl I32Divable {
+    pub const fn new(x: i32) -> I32Divable {
+        I32Divable(x)
     }
 }
 

@@ -15,6 +15,7 @@ use iced_graphics::{
 use iced_native::{layout, mouse, Clipboard, Widget};
 
 use crate::{
+    ease::snap_float,
     params::{
         biquad_to_string, to_filter_type, EnvelopeParam, ModBankParameter, ModBankType,
         ModulationSend, ModulationType, OSCParameterType, OSCType, ParameterType, RawEnvelope,
@@ -982,16 +983,6 @@ impl TruncatingIntRange {
     fn snap_knob(&self, knob: &mut knob::State) {
         knob.normal_param.value = self.snap(knob.normal().into()).into();
     }
-}
-
-/// Snap a float value in range 0.0-1.0 to the nearest f32 region
-/// For example, snap_float(_, 4) will snap a float to either:
-/// 0.0, 0.333, 0.666, or 1.0
-fn snap_float(value: f32, num_regions: usize) -> f32 {
-    // We subtract one from this denominator because we want there to only be
-    // four jumps. See also https://www.desmos.com/calculator/esnnnbfzml
-    let num_regions = num_regions as f32;
-    (num_regions * value).floor() / (num_regions - 1.0)
 }
 
 /// Split a rectangle horizontally

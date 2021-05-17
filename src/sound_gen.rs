@@ -8,7 +8,7 @@ use crate::{
 };
 
 use biquad::{Biquad, DirectForm1, ToHertz, Q_BUTTERWORTH_F32};
-use derive_more::Add;
+use derive_more::{Add, Sub};
 use serde::{Deserialize, Serialize};
 use variant_count::VariantCount;
 use wmidi::{PitchBend, U14, U7};
@@ -724,6 +724,15 @@ pub enum NoteShape {
 }
 
 impl NoteShape {
+    pub fn new(shape: NoteShapeDiscrim, warp: f32) -> NoteShape {
+        match shape {
+            NoteShapeDiscrim::Sine => NoteShape::Sine,
+            NoteShapeDiscrim::Square => NoteShape::Square(warp),
+            NoteShapeDiscrim::Skewtooth => NoteShape::Skewtooth(warp),
+            NoteShapeDiscrim::Noise => NoteShape::Noise,
+        }
+    }
+
     /// Return the raw waveform using the given angle
     fn get(&self, angle: Angle) -> f32 {
         match self {
@@ -763,9 +772,7 @@ impl NoteShape {
             NoteShape::Noise => rand::Rng::gen_range(&mut rand::thread_rng(), -1.0, 1.0),
         }
     }
-}
 
-impl NoteShape {
     /// Create a NoteShape using the given shape and warp. This is used for
     /// RawParameters mainly.
     pub fn from_warp(shape: f32, warp: f32) -> Self {
@@ -789,6 +796,23 @@ impl NoteShape {
             Square(warp) => Square((warp + modulate).clamp(0.0, 1.0)),
             Skewtooth(warp) => Skewtooth((warp + modulate).clamp(0.0, 1.0)),
             Noise => Noise,
+        }
+    }
+
+    pub fn get_warp(&self) -> f32 {
+        match self {
+            NoteShape::Square(warp) | NoteShape::Skewtooth(warp) => *warp,
+            // TODO: is it really okay to return 0.0 here?
+            NoteShape::Sine | NoteShape::Noise => 0.0,
+        }
+    }
+
+    pub fn get_shape(&self) -> NoteShapeDiscrim {
+        match self {
+            NoteShape::Sine => NoteShapeDiscrim::Sine,
+            NoteShape::Square(_) => NoteShapeDiscrim::Square,
+            NoteShape::Skewtooth(_) => NoteShapeDiscrim::Skewtooth,
+            NoteShape::Noise => NoteShapeDiscrim::Noise,
         }
     }
 }
@@ -821,7 +845,15 @@ impl std::fmt::Display for NoteShape {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, VariantCount, Serialize, Deserialize, PartialEq, Eq)]
+pub enum NoteShapeDiscrim {
+    Sine,
+    Square,
+    Skewtooth,
+    Noise,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Add, Sub)]
 pub struct Decibel(f32);
 
 impl std::ops::Mul<f32> for Decibel {
@@ -836,22 +868,6 @@ impl std::ops::Div<Decibel> for Decibel {
     type Output = f32;
     fn div(self, rhs: Decibel) -> Self::Output {
         self.get_db() / rhs.get_db()
-    }
-}
-
-impl std::ops::Add<Decibel> for Decibel {
-    type Output = Decibel;
-
-    fn add(self, rhs: Decibel) -> Self::Output {
-        Decibel::from_db(self.get_db() + rhs.get_db())
-    }
-}
-
-impl std::ops::Sub<Decibel> for Decibel {
-    type Output = Decibel;
-
-    fn sub(self, rhs: Decibel) -> Self::Output {
-        Decibel::from_db(self.get_db() - rhs.get_db())
     }
 }
 
