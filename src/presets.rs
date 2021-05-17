@@ -5,11 +5,11 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use derive_more::{Add, From, Sub};
+use derive_more::{Add, From, Into, Sub};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    params::{GeneralEnvParams, ModulationBank, ModulationType, OSCParams, Parameters},
+    params::{GeneralEnvParams, ModulationBank, ModulationType, OSCParams, Parameters, LFO},
     sound_gen::{Decibel, NoteShapeDiscrim},
 };
 
@@ -55,6 +55,8 @@ pub struct PresetDataOSC {
     pub pitch_decay: f32,
     pub pitch_multiply: f32,
     pub pitch_release: f32,
+    pub vol_lfo: LFO,
+    pub pitch_lfo: LFO,
 }
 
 impl From<&OSCParams> for PresetDataOSC {
@@ -77,6 +79,8 @@ impl From<&OSCParams> for PresetDataOSC {
             pitch_decay: params.pitch_adsr.decay,
             pitch_multiply: params.pitch_adsr.multiply,
             pitch_release: params.pitch_adsr.release,
+            vol_lfo: params.vol_lfo,
+            pitch_lfo: params.pitch_lfo,
         }
     }
 }
@@ -96,7 +100,7 @@ impl From<&ModulationBank> for PresetDataModBank {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Add, Sub, Serialize, Deserialize, From)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Add, Sub, Serialize, Deserialize, From, Into)]
 pub struct I32Divable(i32);
 
 impl std::ops::Div<Self> for I32Divable {
