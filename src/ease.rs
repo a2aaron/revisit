@@ -113,15 +113,15 @@ impl<T: Eq + Copy + Clone, const N: usize> DiscreteLinear<T, N> {
     }
 }
 
-/// Lerp between two values. This function is not clamped
+/// Lerp between two values. This function is clamped.
 pub fn lerp<T: Lerpable>(start: T, end: T, t: f32) -> T {
-    (end - start) * t + start
+    (end - start) * t.clamp(0.0, 1.0) + start
 }
 
 /// Returns the "inverse lerp" of a value. The returned value is zero if val == start
-/// and is 1.0 if val == end. This function can return outside the 0.0-1.0 range.
+/// and is 1.0 if val == end. This function is clamped to the [0.0, 1.0] range.
 pub fn inv_lerp<T: InvLerpable>(start: T, end: T, val: T) -> f32 {
-    (val - start) / (end - start)
+    ((val - start) / (end - start)).clamp(0.0, 1.0)
 }
 
 /// Map the range [old_start, old_end] to [new_start, new_end]. Note that
