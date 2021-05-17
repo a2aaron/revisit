@@ -9,7 +9,7 @@ use derive_more::{Add, From, Sub};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    params::{ModulationType, OSCParams, Parameters},
+    params::{GeneralEnvParams, ModulationBank, ModulationType, OSCParams, Parameters},
     sound_gen::{Decibel, NoteShapeDiscrim},
 };
 
@@ -20,6 +20,7 @@ pub struct PresetData {
     pub osc_1: PresetDataOSC,
     pub osc_2: PresetDataOSC,
     pub osc_2_mod: ModulationType,
+    pub mod_bank: PresetDataModBank,
 }
 
 impl PresetData {
@@ -30,6 +31,7 @@ impl PresetData {
             osc_1: PresetDataOSC::from(&params.osc_1),
             osc_2: PresetDataOSC::from(&params.osc_2),
             osc_2_mod: params.osc_2_mod,
+            mod_bank: PresetDataModBank::from(&params.mod_bank),
         }
     }
 }
@@ -37,26 +39,59 @@ impl PresetData {
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct PresetDataOSC {
     pub volume: Decibel,
-    pub phase: f32,
     pub pan: f32,
+    pub phase: f32,
+    pub coarse_tune: I32Divable,
+    pub fine_tune: f32,
     pub shape: NoteShapeDiscrim,
     pub warp: f32,
-    pub fine_tune: f32,
-    pub coarse_tune: I32Divable,
+    pub vol_attack: f32,
+    pub vol_hold: f32,
+    pub vol_decay: f32,
     pub vol_sustain: Decibel,
+    pub vol_release: f32,
+    pub pitch_attack: f32,
+    pub pitch_hold: f32,
+    pub pitch_decay: f32,
+    pub pitch_multiply: f32,
+    pub pitch_release: f32,
 }
 
 impl From<&OSCParams> for PresetDataOSC {
     fn from(params: &OSCParams) -> Self {
         PresetDataOSC {
             volume: params.volume,
-            vol_sustain: params.vol_adsr.sustain,
             phase: params.phase,
             pan: params.pan,
             shape: params.shape.get_shape(),
             warp: params.shape.get_warp(),
             coarse_tune: I32Divable::from(params.coarse_tune),
             fine_tune: params.fine_tune,
+            vol_attack: params.vol_adsr.attack,
+            vol_hold: params.vol_adsr.hold,
+            vol_decay: params.vol_adsr.decay,
+            vol_sustain: params.vol_adsr.sustain,
+            vol_release: params.vol_adsr.release,
+            pitch_attack: params.pitch_adsr.attack,
+            pitch_hold: params.pitch_adsr.hold,
+            pitch_decay: params.pitch_adsr.decay,
+            pitch_multiply: params.pitch_adsr.multiply,
+            pitch_release: params.pitch_adsr.release,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct PresetDataModBank {
+    pub env_1: GeneralEnvParams,
+    pub env_2: GeneralEnvParams,
+}
+
+impl From<&ModulationBank> for PresetDataModBank {
+    fn from(params: &ModulationBank) -> Self {
+        PresetDataModBank {
+            env_1: params.env_1,
+            env_2: params.env_2,
         }
     }
 }

@@ -514,6 +514,7 @@ struct NoteContext {
     sample_rate: SampleRate,
 }
 
+#[derive(Debug)]
 pub struct Envelope<T> {
     // The value to lerp from when in Retrigger or Release state
     ease_from: T,
@@ -799,8 +800,8 @@ impl NoteShape {
     pub fn get_warp(&self) -> f32 {
         match self {
             NoteShape::Square(warp) | NoteShape::Skewtooth(warp) => *warp,
-            // TODO: is it really okay to return 0.0 here?
-            NoteShape::Sine | NoteShape::Noise => 0.0,
+            // TODO: is it really okay to return 0.5 here?
+            NoteShape::Sine | NoteShape::Noise => 0.5,
         }
     }
 

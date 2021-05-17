@@ -70,6 +70,10 @@ impl Plugin for Revisit {
             println!("Couldn't start logging! {}", err);
         }
         log::info!("Begin VST log");
+
+        std::panic::set_hook(Box::new(|panic_info| {
+            log::info!("PANICKED!! Reason: {:?}", panic_info);
+        }));
     }
 
     fn get_info(&self) -> Info {

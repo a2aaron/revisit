@@ -12,21 +12,21 @@ pub trait InvLerpable = Sub<Self, Output = Self> + Div<Self, Output = f32> + Siz
 /// An enum representing an ease.
 pub enum Easing<T> {
     /// Linearly ease from start to end.
-    Linear {
-        start: T,
-        end: T,
-    },
+    Linear { start: T, end: T },
+    /// Linearly ease from start to mid when `t` is between `0.0` and `split_at`,
+    /// then linearly ease from mid to end when `t` is between `split_at` and `1.0`
     SplitLinear {
         start: T,
         mid: T,
         end: T,
         split_at: f32,
     },
-    SteppedLinear {
-        start: T,
-        end: T,
-        steps: usize,
-    },
+    /// Linearly ease from start to end, but snap to the given number of steps.
+    /// For example, if start = 1.0, end = 2.0, steps = 3, then the valid values
+    /// are 1.0, 1.5, and 2.0
+    SteppedLinear { start: T, end: T, steps: usize },
+    /// Exponentially ease from start to end.
+    Exponential { start: T, end: T },
 }
 
 impl<T: Lerpable + InvLerpable> Easing<T> {
@@ -53,11 +53,14 @@ impl<T: Lerpable + InvLerpable> Easing<T> {
                 let stepped_t = snap_float(t, steps);
                 lerp(start, end, stepped_t)
             }
+            Easing::Exponential { start, end } => {
+                let expo_t = ease_in_expo(t);
+                lerp(start, end, expo_t)
+            }
         }
     }
 
     /// Given a value, return the `t` interpolation value such that `ease(t) == val`.
-    /// inv_ease is not guarenteed to return within 0.0-1.0 range. Also note that
     /// inv_ease assumes easing functions are invertible, which might not be true
     /// for all functions (ex: SplitLinear that does not ease all the way to 1.0)
     pub fn inv_ease(&self, val: T) -> f32 {
@@ -83,6 +86,10 @@ impl<T: Lerpable + InvLerpable> Easing<T> {
             Easing::SteppedLinear { start, end, steps } => {
                 let t = inv_lerp(start, end, val);
                 snap_float(t, steps)
+            }
+            Easing::Exponential { start, end } => {
+                let t = inv_lerp(start, end, val);
+                inv_ease_in_expo(t)
             }
         }
     }
@@ -136,6 +143,14 @@ pub fn ease_in_expo(x: f32) -> f32 {
         0.0
     } else {
         (2.0f32.powf(10.0 * x) - 1.0) / (2.0f32.powf(10.0) - 1.0)
+    }
+}
+
+pub fn inv_ease_in_expo(x: f32) -> f32 {
+    if x <= 0.0 {
+        0.0
+    } else {
+        ((2.0f32.powf(10.0) - 1.0) * x + 1.0).log2() / 10.0
     }
 }
 
