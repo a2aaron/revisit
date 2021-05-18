@@ -65,11 +65,13 @@ impl Plugin for Revisit {
     }
 
     fn init(&mut self) {
-        let result = simple_logging::log_to_file("revisit.log", log::LevelFilter::Info);
+        let result = simple_logging::log_to_file(
+            "D:\\dev\\Rust\\revist\\revisit.log",
+            log::LevelFilter::Info,
+        );
         if let Err(err) = result {
             println!("Couldn't start logging! {}", err);
         }
-        log::info!("Begin VST log");
 
         std::panic::set_hook(Box::new(|panic_info| {
             log::info!("PANICKED!! Reason: {:?}", panic_info);
@@ -205,9 +207,12 @@ impl Plugin for Revisit {
         for note in &mut self.notes {
             note.note_off(0);
         }
+        log::info!("Suspending VST...");
     }
 
-    fn stop_process(&mut self) {}
+    fn stop_process(&mut self) {
+        log::info!("Stopping VST...");
+    }
 
     fn set_sample_rate(&mut self, rate: f32) {
         self.sample_rate = rate;

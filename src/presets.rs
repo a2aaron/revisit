@@ -231,7 +231,7 @@ pub fn get_free_file_name(
     let mut i = 0;
     loop {
         let mut path = folder.as_ref().to_path_buf();
-        path.set_file_name(format!("{} {}", file_name.as_ref().to_str().unwrap(), i));
+        path.push(format!("{} {}", file_name.as_ref().to_str().unwrap(), i));
         path.set_extension(&extention);
         if !path.exists() {
             return (path, i);

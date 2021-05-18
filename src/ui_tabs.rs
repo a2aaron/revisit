@@ -295,7 +295,7 @@ impl PresetTab {
         let save_preset = crate::ui::make_button(
             &mut self.save_preset,
             "Save Preset",
-            Message::SaveParamsAsPreset(PathBuf::from(".")),
+            Message::SaveParamsAsPreset(PathBuf::from(crate::ui::PRESET_PATH)),
         )
         .into();
 
