@@ -272,6 +272,11 @@ impl Editor for UIFrontEnd {
             flags: self.params.clone(),
         };
 
+        // TODO: For some reason, this function will panic when running the VST
+        // on Ableton. I have no idea why this is the case, but it has something
+        // to do with wgpu being unable to create a graphics pipeline. In order
+        // to prevent Ableton from choking, I instead catch the panic here and
+        // say that opening the window failed.
         let sender = std::panic::catch_unwind(|| {
             iced_baseview::IcedWindow::<UIFrontEnd>::open_parented(&parent, settings)
         });

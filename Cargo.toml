@@ -22,7 +22,7 @@ biquad = "0.4.0" # { git = "https://github.com/a2aaron/biquad-rs", branch = "mas
 # for GUI
 iced = { version = "0.3" }
 iced_audio = "0.7" # { git = "https://github.com/a2aaron/iced_audio", branch = "main" }
-iced_baseview = { git = "https://github.com/BillyDM/iced_baseview", branch = "main" }
+iced_baseview = { git = "https://github.com/BillyDM/iced_baseview", rev = "331fe2dc14316f645e8bd43ff0295ee1957732ae" }
 iced_native = "0.4.0"
 iced_futures = { version = "0.3.0", features = ["async-std"] }
 iced_graphics = { version = "0.2.0", features = ["canvas"] }
