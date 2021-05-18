@@ -271,9 +271,22 @@ impl Editor for UIFrontEnd {
             },
             flags: self.params.clone(),
         };
-        let sender = iced_baseview::IcedWindow::<UIFrontEnd>::open_parented(&parent, settings);
-        self.sender = Some(sender);
-        true
+
+        let sender = std::panic::catch_unwind(|| {
+            iced_baseview::IcedWindow::<UIFrontEnd>::open_parented(&parent, settings)
+        });
+
+        match sender {
+            Ok(sender) => {
+                self.sender = Some(sender);
+                true
+            }
+            Err(err) => {
+                log::info!("Couldn't open window! {:#?}", err);
+                self.sender = None;
+                false
+            }
+        }
     }
 
     fn idle(&mut self) {}

@@ -11,8 +11,9 @@ macro_rules! generate_raw_params {
             /// The host callback, used for communicating with the VST host
             pub host: vst::plugin::HostCallback,
             /// The sender that notifies the GUI thread to update due to the host
-            /// modifying a value. If this is None, then the GUI is closed/does not exist
-            pub sender: tokio::sync::broadcast::Sender<(ParameterType, f32)>,
+            /// modifying a value. This is unwind safe because if opening a window
+            /// panics for some reason, we aren't going to use the sender anyways
+            pub sender: std::panic::AssertUnwindSafe<tokio::sync::broadcast::Sender<(ParameterType, f32)>>,
         }
     };
 }
@@ -26,7 +27,7 @@ macro_rules! impl_new {
                 $raw_parameters {
                     $($field_name: vst::util::AtomicFloat::new($default),)*
                     host,
-                    sender: tokio::sync::broadcast::channel(128).0, // TODO: what size of channel should this be?
+                    sender: std::panic::AssertUnwindSafe(tokio::sync::broadcast::channel(128).0), // TODO: what size of channel should this be?
                 }
             }
         }

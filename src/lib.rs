@@ -14,6 +14,7 @@ mod ui_tabs;
 
 use std::{convert::TryFrom, sync::Arc};
 
+use backtrace::Backtrace;
 use iced_baseview::Application;
 use vst::{
     api::{Events, Supported},
@@ -74,8 +75,12 @@ impl Plugin for Revisit {
         }
 
         std::panic::set_hook(Box::new(|panic_info| {
-            log::info!("PANICKED!! Reason: {:?}", panic_info);
+            log::info!("PANICKED!! Reason: {:#?}", panic_info);
+            let bt = Backtrace::new();
+            log::info!("Backtrace: {:#?}", bt);
         }));
+
+        log::info!("Begin VST log (hooked panic)");
     }
 
     fn get_info(&self) -> Info {
