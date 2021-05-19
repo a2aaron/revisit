@@ -281,7 +281,7 @@ impl PresetTab {
                     name.as_ref()
                         .unwrap_or(&"Invalid Preset".to_string())
                         .as_str(),
-                    Message::LoadPreset((*preset).clone()),
+                    Message::LoadPreset(preset.clone()),
                 );
                 let button = if name.is_none() {
                     button.style(ButtonColor { color: RED })
@@ -295,7 +295,7 @@ impl PresetTab {
         let save_preset = crate::ui::make_button(
             &mut self.save_preset,
             "Save Preset",
-            Message::SaveParamsAsPreset(PathBuf::from(crate::ui::PRESET_PATH)),
+            Message::SaveParamsAsPreset(crate::DATA_DIR.to_path_buf()),
         )
         .into();
 

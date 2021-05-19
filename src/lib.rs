@@ -12,10 +12,15 @@ mod sound_gen;
 mod ui;
 mod ui_tabs;
 
-use std::{convert::TryFrom, sync::Arc};
+use std::{
+    convert::TryFrom,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 use backtrace::Backtrace;
 use iced_baseview::Application;
+use once_cell::sync::Lazy;
 use vst::{
     api::{Events, Supported},
     buffer::AudioBuffer,
@@ -33,6 +38,68 @@ use sound_gen::{
     SoundGenerator,
 };
 use ui::UIFrontEnd;
+
+// lazy_static::lazy_static! {
+//     pub static ref PROJECT_DIRS: Option<directories::ProjectDirs> =
+//         directories::ProjectDirs::from("", "", "Revisit VST");
+
+//     pub static ref DATA_DIR: std::path::PathBuf = {
+//         let data_dir = match PROJECT_DIRS.as_ref() {
+//             Some(project_dirs) => project_dirs.data_dir(),
+//             None => FALLBACK_DATA_DIR,
+//         };
+//         if !data_dir.exists() {
+//             if let Err(err) = std::fs::create_dir_all(&data_dir) {
+//                 log::info!("Couldn't create data dir {}: Reason: {:?}", data_dir.display(), err);
+//             }
+//         }
+//         data_dir
+//     };
+//     static ref FALLBACK_DATA_DIR: &'static std::path::Path = &std::path::Path::from("./revisit_VST/data/");
+//     static ref FALLBACK_LOG_DIR: &'static std::path::Path = &std::path::Path::from("./revisit_VST/revisit.log");
+// }
+
+static PROJECT_DIRS: Lazy<Option<directories::ProjectDirs>> =
+    Lazy::new(|| directories::ProjectDirs::from("", "", "Revisit VST"));
+
+pub static LOG_DIR: Lazy<PathBuf> = Lazy::new(|| {
+    let mut log_dir = match PROJECT_DIRS.as_ref() {
+        Some(project_dirs) => project_dirs.cache_dir().to_path_buf(),
+        None => FALLBACK_LOG_DIR.to_path_buf(),
+    };
+    if !log_dir.exists() {
+        if let Err(err) = std::fs::create_dir_all(&log_dir) {
+            log::info!(
+                "Couldn't create log dir {}: Reason: {:?}",
+                log_dir.display(),
+                err
+            );
+        }
+    }
+    log_dir.push("revisit.log");
+    log_dir
+});
+
+pub static DATA_DIR: Lazy<PathBuf> = Lazy::new(|| {
+    let data_dir = match PROJECT_DIRS.as_ref() {
+        Some(project_dirs) => project_dirs.data_dir().to_path_buf(),
+        None => FALLBACK_DATA_DIR.to_path_buf(),
+    };
+    if !data_dir.exists() {
+        if let Err(err) = std::fs::create_dir_all(&data_dir) {
+            log::info!(
+                "Couldn't create data dir {}: Reason: {:?}",
+                data_dir.display(),
+                err
+            );
+        }
+    }
+    data_dir
+});
+
+static FALLBACK_DATA_DIR: Lazy<&'static Path> = Lazy::new(|| Path::new("./revisit_VST/data/"));
+
+static FALLBACK_LOG_DIR: Lazy<&'static Path> = Lazy::new(|| Path::new("./revisit_VST/log"));
 
 /// The main plugin struct.
 struct Revisit {
@@ -66,12 +133,19 @@ impl Plugin for Revisit {
     }
 
     fn init(&mut self) {
-        let result = simple_logging::log_to_file(
-            "D:\\dev\\Rust\\revist\\revisit.log",
-            log::LevelFilter::Info,
-        );
+        let result = simple_logging::log_to_file(&*LOG_DIR, log::LevelFilter::Info);
+        // let result = simple_logging::log_to_file(
+        //     "D:\\dev\\Rust\\revist\\revisit.log",
+        //     log::LevelFilter::Info,
+        // );
+
         if let Err(err) = result {
             println!("Couldn't start logging! {}", err);
+        } else {
+            if PROJECT_DIRS.is_none() {
+                log::info!("Couldn't obtain project dirs folder!");
+            }
+            log::info!("Logging to {}", LOG_DIR.display());
         }
 
         std::panic::set_hook(Box::new(|panic_info| {
@@ -80,7 +154,7 @@ impl Plugin for Revisit {
             log::info!("Backtrace: {:#?}", bt);
         }));
 
-        log::info!("Begin VST log (hooked panic)");
+        log::info!("Begin VST log...");
     }
 
     fn get_info(&self) -> Info {

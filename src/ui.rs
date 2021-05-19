@@ -20,8 +20,6 @@ use crate::{
 const WINDOW_WIDTH: usize = 800;
 const WINDOW_HEIGHT: usize = 650;
 
-pub const PRESET_PATH: &str = "D:\\dev\\Rust\\revist\\";
-
 /// A GUI message.
 #[derive(Debug, Clone)]
 pub enum Message {
@@ -150,8 +148,8 @@ impl Application for UIFrontEnd {
             Message::ChangeTab(tab) => {
                 self.selected_tab = tab;
                 if tab == Tabs::Preset {
-                    log::info!("Loading presets from {}", PRESET_PATH);
-                    self.preset_tab.get_presets_from_folder(PRESET_PATH);
+                    log::info!("Loading presets from {}", crate::DATA_DIR.display());
+                    self.preset_tab.get_presets_from_folder(&*crate::DATA_DIR);
                 }
             }
             Message::LoadPreset(path) => match try_parse_file(&path) {
@@ -171,7 +169,7 @@ impl Application for UIFrontEnd {
                     Ok(()) => log::info!("Saved preset to {}", path.display()),
                     Err(err) => log::info!("Couldn't save preset to {}: {:?}", path.display(), err),
                 }
-                self.preset_tab.get_presets_from_folder(PRESET_PATH);
+                self.preset_tab.get_presets_from_folder(&*crate::DATA_DIR);
             }
         }
 

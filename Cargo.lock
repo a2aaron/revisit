@@ -703,6 +703,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "directories"
+version = "3.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e69600ff1703123957937708eb27f7a564e48885c537782722ed0ba3189ce1d7"
+dependencies = [
+ "dirs-sys",
+]
+
+[[package]]
 name = "dirs"
 version = "2.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2378,6 +2387,7 @@ dependencies = [
  "baseview",
  "biquad",
  "derive_more",
+ "directories",
  "iced",
  "iced_audio",
  "iced_baseview",
@@ -2386,6 +2396,7 @@ dependencies = [
  "iced_native",
  "keyboard-types",
  "log",
+ "once_cell",
  "rand",
  "raw-window-handle",
  "serde",
