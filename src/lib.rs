@@ -39,26 +39,6 @@ use sound_gen::{
 };
 use ui::UIFrontEnd;
 
-// lazy_static::lazy_static! {
-//     pub static ref PROJECT_DIRS: Option<directories::ProjectDirs> =
-//         directories::ProjectDirs::from("", "", "Revisit VST");
-
-//     pub static ref DATA_DIR: std::path::PathBuf = {
-//         let data_dir = match PROJECT_DIRS.as_ref() {
-//             Some(project_dirs) => project_dirs.data_dir(),
-//             None => FALLBACK_DATA_DIR,
-//         };
-//         if !data_dir.exists() {
-//             if let Err(err) = std::fs::create_dir_all(&data_dir) {
-//                 log::info!("Couldn't create data dir {}: Reason: {:?}", data_dir.display(), err);
-//             }
-//         }
-//         data_dir
-//     };
-//     static ref FALLBACK_DATA_DIR: &'static std::path::Path = &std::path::Path::from("./revisit_VST/data/");
-//     static ref FALLBACK_LOG_DIR: &'static std::path::Path = &std::path::Path::from("./revisit_VST/revisit.log");
-// }
-
 static PROJECT_DIRS: Lazy<Option<directories::ProjectDirs>> =
     Lazy::new(|| directories::ProjectDirs::from("", "", "Revisit VST"));
 

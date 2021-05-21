@@ -232,6 +232,17 @@ impl Application for UIFrontEnd {
         };
         Subscription::from_recipe(recipe)
     }
+
+    fn renderer_settings() -> iced_baseview::renderer::Settings {
+        // We get the settings from the environment so that we can set the
+        // renderer backend manually. This fixes a crash on Ableton when the
+        // backend is DX12 instead of DX11 or Vulkan.
+        log::info!(
+            "Getting renderer settings via env vars! WGPU_BACKEND={:?}",
+            std::env::var("WGPU_BACKEND"),
+        );
+        iced_baseview::renderer::Settings::from_env()
+    }
 }
 
 pub fn make_button<'a>(
@@ -269,6 +280,18 @@ impl Editor for UIFrontEnd {
             },
             flags: self.params.clone(),
         };
+
+        // For some reason, Ableton will crash upon loading the GUI for our VST
+        // if the WGPU backend is DX12 but not Vulkan or DX11. Even weirder, this
+        // crash does not occur in any other host I tested (VSTHost, LMMS) reguardless
+        // of backend. The crash also didn't occur when running Ableton thru
+        // RenderDoc.
+        // As a workaround, we will always force Vulkan as the backend, as that
+        // seems to not crash.
+        // TODO: Try cycling thru backends on crashes?
+        // Check here for backends: https://docs.rs/iced_wgpu/0.4.0/iced_wgpu/settings/struct.Settings.html
+        #[cfg(target_os = "windows")]
+        std::env::set_var("WGPU_BACKEND", "vulkan");
 
         // TODO: For some reason, this function will panic when running the VST
         // on Ableton. I have no idea why this is the case, but it has something
