@@ -423,39 +423,14 @@ impl RawParameters {
     /// call this if you are working in UI code since the knobs will already update
     /// themselves properly.
     pub fn set(&self, value: f32, parameter: ParameterType) {
-        // These are needed so Ableton will notice parameter changes in the
-        // "Configure" window.
+        // These begin_edit/end_edit calls are needed so Ableton will notice
+        // parameter changes in the "Configure" window.
         // TODO: investigate if I should send this only on mouseup/mousedown
+        // TODO2: Ableton acts glitchy if I send self.host.update_display(), but
+        // not doing it means I can't update the text on a parameter if a different
+        // parameter would change its name...
         self.host.begin_edit(parameter.into());
-
-        // Check if warp + shape changes cause the parameter text to change
-        let update = match parameter {
-            ParameterType::OSC1(inner @ (OSCParameterType::Warp | OSCParameterType::Shape))
-            | ParameterType::OSC2(inner @ (OSCParameterType::Warp | OSCParameterType::Shape)) => {
-                let osc = match parameter {
-                    ParameterType::OSC1(_) => ParameterType::OSC1,
-                    ParameterType::OSC2(_) => ParameterType::OSC2,
-                    _ => unreachable!(),
-                };
-                let old_shape = self.get(osc(OSCParameterType::Shape));
-                let old_warp = self.get(osc(OSCParameterType::Warp));
-                let (new_shape, new_warp) = match inner {
-                    OSCParameterType::Shape => (value, old_warp),
-                    OSCParameterType::Warp => (old_shape, value),
-                    _ => unreachable!(),
-                };
-
-                let old_value = format!("{}", NoteShape::from_f32s(old_shape, old_warp));
-                let new_value = format!("{}", NoteShape::from_f32s(new_shape, new_warp));
-                old_value != new_value
-            }
-            _ => false,
-        };
         self.get_ref(parameter).set(value);
-        if update {
-            self.host.update_display();
-        }
-
         self.host.end_edit(parameter.into());
     }
 
