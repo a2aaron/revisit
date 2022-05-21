@@ -82,7 +82,7 @@ macro_rules! widget {
                 Message::ParameterChanged($parameter, normal.as_f32())
             }),
             $title,
-        );
+        )
     };
 
     ($widget:ident, $state:expr, $parameter:expr, $title:expr) => {
@@ -92,11 +92,11 @@ macro_rules! widget {
             })
             .size(KNOB_SIZE),
             $title,
-        );
+        )
     };
 
     ($widget:ident, $state:expr, $parameter:expr) => {
-        widget!($widget, $state, $parameter, &widget_name($parameter));
+        widget!($widget, $state, $parameter, &widget_name($parameter))
     };
 }
 
