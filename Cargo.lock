@@ -2380,7 +2380,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "revist"
+name = "revisit"
 version = "0.1.0"
 dependencies = [
  "backtrace",
