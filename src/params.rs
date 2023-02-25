@@ -895,6 +895,7 @@ pub fn to_filter_type(x: f32, db_gain: f32) -> biquad::Type<f32> {
 
 pub fn biquad_to_string(x: biquad::Type<f32>) -> String {
     match x {
+        biquad::Type::SinglePoleLowPassApprox => "Single Pole Low Pass (Approximate)".to_string(),
         biquad::Type::SinglePoleLowPass => "Single Pole Low Pass".to_string(),
         biquad::Type::LowPass => "Low Pass".to_string(),
         biquad::Type::HighPass => "High Pass".to_string(),

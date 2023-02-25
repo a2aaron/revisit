@@ -772,7 +772,7 @@ impl NoteShape {
                     -(2.0 * (angle - warp)) / (1.0 - warp) + 1.0
                 }
             }
-            NoteShape::Noise => rand::Rng::gen_range(&mut rand::thread_rng(), -1.0, 1.0),
+            NoteShape::Noise => rand::Rng::gen_range(&mut rand::thread_rng(), -1.0..1.0),
         }
     }
 

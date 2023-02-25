@@ -140,6 +140,7 @@ fn get_db_gain(filter: biquad::Type<f32>) -> f32 {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, VariantCount, Serialize, Deserialize)]
 pub enum FilterTypeDiscrim {
+    SinglePoleLowPassApprox,
     SinglePoleLowPass,
     LowPass,
     HighPass,
@@ -154,6 +155,7 @@ pub enum FilterTypeDiscrim {
 impl<T> From<&biquad::Type<T>> for FilterTypeDiscrim {
     fn from(filter_type: &biquad::Type<T>) -> Self {
         match filter_type {
+            biquad::Type::SinglePoleLowPassApprox => FilterTypeDiscrim::SinglePoleLowPassApprox, //
             biquad::Type::SinglePoleLowPass => FilterTypeDiscrim::SinglePoleLowPass,
             biquad::Type::LowPass => FilterTypeDiscrim::LowPass,
             biquad::Type::HighPass => FilterTypeDiscrim::HighPass,
